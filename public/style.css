@@ -535,6 +535,35 @@ h1, h2, h3, .logo-text {
   min-height: 16px;
 }
 
+/* ── BETTORS TODAY ── */
+.bettors-today {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.bettor-chip {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.bettor-chip.bettor-me {
+  background: rgba(200,241,53,0.15);
+  border-color: rgba(200,241,53,0.4);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ── BET PLACED ── */
 .bet-placed {
   background: rgba(200,241,53,0.06);
@@ -969,6 +998,15 @@ h1, h2, h3, .logo-text {
   color: var(--text-muted);
   margin-top: 6px;
   font-style: italic;
+}
+
+.blind-badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 6px;
+  font-family: 'Inter', sans-serif;
 }
 
 hr.dim {

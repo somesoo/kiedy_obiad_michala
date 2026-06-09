@@ -7,7 +7,7 @@ const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'michal123';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 
 // Upewnij się że folder db istnieje
 const dbDir = path.join(__dirname, 'db');
@@ -306,17 +306,30 @@ app.get('/api/today', (req, res) => {
 
   const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
 
+  // Przed rozliczeniem — ślepy tryb: ukryj rozkład zakładów per slot
+  const blind = !result;
+
+  // Lista graczy którzy już obstawili dziś (bez slotów — tryb ślepy)
+  const todayBettors = db.prepare(`
+    SELECT p.nickname FROM bets b
+    JOIN players p ON p.id = b.player_id
+    WHERE b.bet_date = ?
+    ORDER BY b.placed_at
+  `).all(today).map(r => r.nickname);
+
   res.json({
     date: today,
     any_slot_available: hasAvailableSlots(),
+    blind,
     slots: ALL_SLOTS.map(slot => ({
       slot,
-      total: slotMap[slot] ? Number(slotMap[slot].total) : 0,
-      count: slotMap[slot] ? Number(slotMap[slot].count) : 0,
+      total: blind ? 0 : (slotMap[slot] ? Number(slotMap[slot].total) : 0),
+      count: blind ? 0 : (slotMap[slot] ? Number(slotMap[slot].count) : 0),
       available: isSlotAvailable(slot)
     })),
     total_pool: totalPool,
     total_bets: totalBets,
+    today_bettors: todayBettors,
     result: result || null,
     server_time: nowTimeWaw()
   });
@@ -584,6 +597,57 @@ app.get('/api/admin/today', (req, res) => {
   const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
 
   res.json({ bets, total_pool: totalPool, result: result || null, date: today });
+});
+
+// DELETE /api/admin/result — cofnij rozliczenie dnia (odwróć transakcje finansowe)
+app.delete('/api/admin/result', (req, res) => {
+  const { password } = req.body;
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: 'Złe hasło' });
+  }
+
+  const today = todayWaw();
+  const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
+  if (!result) {
+    return res.status(404).json({ error: 'Brak rozliczenia na dziś — nie ma czego cofać' });
+  }
+
+  const allBets = db.prepare('SELECT * FROM bets WHERE bet_date = ?').all(today);
+  const totalPool = allBets.reduce((s, b) => s + Number(b.amount), 0);
+  const winnerBets = allBets.filter(b => b.slot === result.winning_slot);
+  const winnersSum = winnerBets.reduce((s, b) => s + Number(b.amount), 0);
+  const winnersPool = Math.floor(totalPool * 0.9);
+
+  // Przelicz oryginalne wypłaty żeby je cofnąć
+  const payouts = winnerBets.map(b => {
+    const raw = winnersSum > 0 ? Math.floor((Number(b.amount) / winnersSum) * winnersPool) : 0;
+    return { player_id: b.player_id, payout: Math.max(raw, Number(b.amount)) };
+  });
+  const loserBets = allBets.filter(b => b.slot !== result.winning_slot);
+
+  transaction(() => {
+    // Cofnij wypłaty zwycięzcom (odejmij co dostali, ich zakład był już odjęty przy stawianiu)
+    payouts.forEach(p => {
+      db.prepare('UPDATE players SET balance = balance - ?, total_wins = MAX(0, total_wins - 1) WHERE id = ?')
+        .run(p.payout, p.player_id);
+    });
+    // Zwróć przegrane zakłady przegrywającym
+    loserBets.forEach(b => {
+      db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?')
+        .run(Number(b.amount), b.player_id);
+    });
+    // Odejmij z banku to co do niego trafiło
+    const bankCut = totalPool - winnersPool;
+    const actualWinnersPool = payouts.reduce((s, p) => s + p.payout, 0);
+    const roundingRemainder = winnersPool > actualWinnersPool ? winnersPool - actualWinnersPool : 0;
+    const bankTotal = winnerBets.length === 0 ? totalPool : (bankCut + roundingRemainder);
+    db.prepare('UPDATE bank SET balance = MAX(0, balance - ?), updated_at = CURRENT_TIMESTAMP WHERE id = 1')
+      .run(bankTotal);
+    // Usuń wynik
+    db.prepare('DELETE FROM results WHERE result_date = ?').run(today);
+  });
+
+  res.json({ success: true, message: 'Rozliczenie cofnięte — możesz wpisać wynik ponownie' });
 });
 
 // GET /api/day-results — publiczne wyniki dnia z listą wygranych

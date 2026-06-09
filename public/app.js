@@ -171,6 +171,7 @@ function updateTodayHeader(data) {
 function renderSlots(data) {
   const grid = document.getElementById('slots-grid');
   const alreadyBet = !!state.todayBet;
+  document.getElementById('blind-badge').style.display = (data.blind && !data.result) ? 'inline' : 'none';
   const anyAvailable = data.any_slot_available && !data.result;
 
   // Znajdź max dla proporcji barów
@@ -214,14 +215,15 @@ function renderSlots(data) {
     if (data.result && data.result.winning_slot === s.slot) card.classList.add('winning');
     if (state.todayBet && state.todayBet.slot === s.slot) card.classList.add('selected');
 
-    const barH = Math.round((s.total / maxTotal) * 32);
+    const barH = data.blind ? 2 : Math.round((s.total / maxTotal) * 32);
+    const amountLabel = data.blind ? '' : (s.total > 0 ? s.total + ' monet' : '–');
 
     card.innerHTML = `
       <div class="slot-bar-wrap">
         <div class="slot-bar" style="height:${Math.max(barH, 2)}px"></div>
       </div>
       <div class="slot-time">${s.slot.split('-')[0]}</div>
-      <div class="slot-amount">${s.total > 0 ? s.total + ' monet' : '–'}</div>
+      <div class="slot-amount">${amountLabel}</div>
     `;
 
     if (!slotDisabled) {
@@ -245,6 +247,22 @@ function renderSlots(data) {
     if (state.selectedSlot && !selectedStillAvailable) {
       state.selectedSlot = null;
     }
+  }
+
+  // Lista obstawiających dzisiaj
+  const bettorsEl = document.getElementById('bettors-today');
+  const bettors = data.today_bettors || [];
+  if (bettors.length > 0 && !data.result) {
+    bettorsEl.style.display = 'block';
+    const chips = bettors.map(nick => {
+      const isMe = nick === state.nickname;
+      return `<span class="bettor-chip${isMe ? ' bettor-me' : ''}">${esc(nick)}</span>`;
+    }).join('');
+    bettorsEl.innerHTML = `
+      <span class="text-muted small" style="margin-right:6px">Już obstawili:</span>${chips}
+    `;
+  } else {
+    bettorsEl.style.display = 'none';
   }
 }
 

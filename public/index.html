@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kiedy Michał?</title>
+  <title>Obiad Michała</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
@@ -15,7 +15,7 @@
   <header class="site-header">
     <div class="header-inner">
       <div class="header-logo">
-        <span class="logo-text">KIEDY MICHAŁ?</span>
+        <span class="logo-text">KIEDY MICHAŁ POSZEDŁ NA OBIAD?</span>
         <span class="logo-sub">bukmacherka biurowa</span>
       </div>
       <div class="header-user" id="header-user">
@@ -97,13 +97,16 @@
       <!-- Sloty -->
       <div class="slots-section" id="slots-section">
         <div class="slots-header">
-          <p class="slots-label">Wybierz slot</p>
+          <p class="slots-label">Wybierz slot <span class="blind-badge" id="blind-badge" style="display:none">🙈 tryb ślepy</span></p>
           <button class="slots-toggle" id="slots-toggle" aria-expanded="true">▲ zwiń</button>
         </div>
         <div class="slots-body" id="slots-body">
           <div class="slots-grid" id="slots-grid"></div>
         </div>
       </div>
+
+      <!-- Kto już obstawił dziś -->
+      <div class="bettors-today" id="bettors-today" style="display:none"></div>
 
       <!-- Formularz zakładu -->
       <div class="bet-form" id="bet-form" style="display:none">

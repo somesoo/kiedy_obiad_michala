@@ -124,6 +124,9 @@
         <span>Wynik już wpisany</span>
         <span class="mono accent" id="result-done-slot">–</span>
       </div>
+      <button class="btn-danger" id="btn-unlock" style="display:none;width:100%">
+        🔓 Cofnij rozliczenie i wpisz ponownie
+      </button>
 
       <div id="section-form">
         <div class="form-group">
@@ -202,6 +205,7 @@
           document.getElementById('result-done-row').style.display = 'flex';
           document.getElementById('result-done-slot').textContent = d.result.winning_slot;
           document.getElementById('section-form').style.display = 'none';
+          document.getElementById('btn-unlock').style.display = 'block';
         }
 
         checkEarlyWarning();
@@ -280,6 +284,30 @@
         errEl.textContent = e.message;
         document.getElementById('btn-confirm').disabled = false;
         document.getElementById('btn-confirm').textContent = 'Zatwierdź i rozlicz dzień';
+      }
+    });
+
+    document.getElementById('btn-unlock').addEventListener('click', async () => {
+      if (!confirm('Cofnąć rozliczenie dnia? Salda graczy zostaną przywrócone do stanu sprzed rozliczenia.')) return;
+      const errEl = document.getElementById('result-err');
+      errEl.textContent = '';
+      try {
+        const r = await fetch('/api/admin/result', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: adminPassword })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        document.getElementById('result-done-row').style.display = 'none';
+        document.getElementById('btn-unlock').style.display = 'none';
+        document.getElementById('section-form').style.display = 'block';
+        document.getElementById('preview-section').style.display = 'none';
+        document.getElementById('success-msg').style.display = 'none';
+        document.getElementById('btn-confirm').disabled = false;
+        document.getElementById('btn-confirm').textContent = 'Zatwierdź i rozlicz dzień';
+      } catch (e) {
+        errEl.textContent = e.message;
       }
     });
 
