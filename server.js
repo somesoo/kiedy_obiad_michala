@@ -9,8 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 
-// Na Vercel filesystem poza /tmp jest read-only
-const dbDir = process.env.VERCEL ? '/tmp/db' : path.join(__dirname, 'db');
+const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
