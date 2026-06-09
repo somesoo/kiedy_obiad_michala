@@ -633,8 +633,8 @@ h1, h2, h3, .logo-text {
 
 .info-list li {
   counter-increment: info-counter;
-  display: grid;
-  grid-template-columns: 22px 1fr;
+  display: flex;
+  align-items: flex-start;
   gap: 10px;
   font-size: 13px;
   color: var(--text-muted);
