@@ -19,6 +19,7 @@
         <span class="logo-sub">bukmacherka biurowa</span>
       </div>
       <div class="header-user" id="header-user">
+        <button class="btn-ghost" id="btn-how" title="Jak to działa?">?</button>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
         <span class="user-nick" id="user-nick-display"></span>
         <span class="user-balance" id="user-balance-display"></span>
@@ -41,6 +42,24 @@
     </div>
   </div>
 
+  <!-- JAK TO DZIAŁA -->
+  <div class="how-it-works" id="how-it-works" style="display:none">
+    <div class="how-inner">
+      <button class="how-close" id="how-close">✕</button>
+      <h3>Jak to działa?</h3>
+      <ol>
+        <li>Każdego dnia <strong>obstawiasz 15-minutowy slot</strong>, o której Michał pójdzie na obiad (np. 12:15–12:30).</li>
+        <li>Możesz obstawiać <strong>dopóki dany slot jeszcze nie minął</strong> — jeśli jest 12:20, sloty do 12:15 są już zablokowane.</li>
+        <li>Stawiasz dowolną liczbę <strong>monet</strong> ze swojego salda (min. 5).</li>
+        <li>Jeden zakład dziennie na osobę.</li>
+        <li><strong>Michał sam wpisuje</strong> w panelu admina, o której poszedł.</li>
+        <li>Wygrywa ten, kto trafił w odpowiedni slot. Jeśli nikt nie trafił dokładnie — wygrywa <strong>najbliższy slot</strong>.</li>
+        <li>Pula jest dzielona między wygranych proporcjonalnie do stawek (<strong>system parimutuel</strong>). 10% idzie do banku biurowego.</li>
+        <li>Startujesz z <strong>100 monetami</strong>. Jak stracisz wszystko — dostajesz 20 z kasy biurowej.</li>
+      </ol>
+    </div>
+  </div>
+
   <!-- MAIN -->
   <main class="main-grid" id="main-content" style="display:none">
 
@@ -50,7 +69,7 @@
       <div class="section-header">
         <h2 id="today-label">DZISIAJ</h2>
         <div class="pool-badge">
-          Łączna pula: <span class="mono accent" id="total-pool">0 ish</span>
+          Łączna pula: <span class="mono accent" id="total-pool">0 monet</span>
         </div>
       </div>
 
@@ -72,7 +91,7 @@
           <label>Stawka:</label>
           <input type="range" id="bet-slider" min="5" max="100" value="20" />
           <input type="number" id="bet-amount" min="5" max="100" value="20" />
-          <span class="mono text-muted">ish</span>
+          <span class="mono text-muted">monet</span>
         </div>
         <button class="btn-primary btn-bet" id="btn-place-bet">
           Stawiam <span id="btn-bet-label">20 install.sh</span>
@@ -126,7 +145,7 @@
   <!-- FOOTER -->
   <footer class="site-footer">
     <span class="bank-info" id="bank-info" title="Kliknij po więcej">
-      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 ish</span>
+      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 monet</span>
     </span>
     <span class="footer-copy text-muted">made with ❤️ i lekką zazdrością o 12:37</span>
   </footer>

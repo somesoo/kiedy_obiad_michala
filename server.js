@@ -127,6 +127,7 @@ function timeToSlot(timeStr) {
 }
 
 // Dystans od godziny do slotu w minutach (0 = trafiony)
+// Uwaga: slot [start, end) — end jest wyłączne, więc 12:15 należy do 12:15-12:30, nie do 12:00-12:15
 function slotDistance(slotStr, actualMins) {
   const [startStr, endStr] = slotStr.split('-');
   const [sh, sm] = startStr.split(':').map(Number);
@@ -135,7 +136,8 @@ function slotDistance(slotStr, actualMins) {
   const endMins = eh * 60 + em;
   if (actualMins >= startMins && actualMins < endMins) return 0;
   if (actualMins < startMins) return startMins - actualMins;
-  return actualMins - endMins;
+  // +1 żeby granica slotu (np. 12:15 dla 12:00-12:15) nie miała dystansu 0
+  return actualMins - endMins + 1;
 }
 
 // Znajdź zwycięskie zakłady — najpierw dokładne trafienie, potem najbliższy slot
@@ -582,6 +584,42 @@ app.get('/api/admin/today', (req, res) => {
   const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
 
   res.json({ bets, total_pool: totalPool, result: result || null, date: today });
+});
+
+// GET /api/day-results — publiczne wyniki dnia z listą wygranych
+app.get('/api/day-results', (req, res) => {
+  const date = req.query.date || todayWaw();
+
+  const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(date);
+  if (!result) return res.json({ date, result: null, bets: [] });
+
+  const allBets = db.prepare(`
+    SELECT b.player_id, b.slot, b.amount, p.nickname
+    FROM bets b JOIN players p ON p.id = b.player_id
+    WHERE b.bet_date = ?
+    ORDER BY b.amount DESC
+  `).all(date);
+
+  const totalPool = allBets.reduce((s, b) => s + Number(b.amount), 0);
+  const winnerBets = allBets.filter(b => b.slot === result.winning_slot);
+  const winnersSum = winnerBets.reduce((s, b) => s + Number(b.amount), 0);
+  const winnersPool = Math.floor(totalPool * 0.9);
+
+  const payoutMap = {};
+  winnerBets.forEach(b => {
+    const raw = winnersSum > 0 ? Math.floor((Number(b.amount) / winnersSum) * winnersPool) : 0;
+    payoutMap[b.player_id] = Math.max(raw, Number(b.amount));
+  });
+
+  const bets = allBets.map(b => ({
+    nickname: b.nickname,
+    slot: b.slot,
+    amount: Number(b.amount),
+    payout: payoutMap[b.player_id] || 0,
+    won: b.slot === result.winning_slot
+  }));
+
+  res.json({ date, result, bets });
 });
 
 // GET /api/admin/players — lista graczy do zarządzania

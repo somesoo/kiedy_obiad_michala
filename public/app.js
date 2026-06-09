@@ -164,7 +164,7 @@ function updateTodayHeader(data) {
   const d = new Date(data.date + 'T12:00:00');
   const label = d.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
   document.getElementById('today-label').textContent = 'DZISIAJ · ' + label.toUpperCase();
-  document.getElementById('total-pool').textContent = data.total_pool + ' ish';
+  document.getElementById('total-pool').textContent = data.total_pool + ' monet';
 }
 
 function renderSlots(data) {
@@ -186,7 +186,7 @@ function renderSlots(data) {
   } else if (alreadyBet) {
     banner.className = 'status-banner success';
     banner.style.display = 'block';
-    banner.innerHTML = `✓ Twój zakład: <span class="mono accent">${state.todayBet.slot}</span> — <span class="mono">${state.todayBet.amount} ish</span>`;
+    banner.innerHTML = `✓ Twój zakład: <span class="mono accent">${state.todayBet.slot}</span> — <span class="mono">${state.todayBet.amount} monet</span>`;
   } else {
     banner.style.display = 'none';
   }
@@ -197,7 +197,7 @@ function renderSlots(data) {
     const won = data.result && data.result.winning_slot === state.todayBet.slot;
     bp.style.display = 'flex';
     document.getElementById('bet-placed-info').textContent =
-      `${state.todayBet.slot} · ${state.todayBet.amount} ish${won ? ' · 🎉 TRAFIONY!' : ''}`;
+      `${state.todayBet.slot} · ${state.todayBet.amount} monet${won ? ' · 🎉 TRAFIONY!' : ''}`;
   }
 
   grid.innerHTML = '';
@@ -220,7 +220,7 @@ function renderSlots(data) {
         <div class="slot-bar" style="height:${Math.max(barH, 2)}px"></div>
       </div>
       <div class="slot-time">${s.slot.split('-')[0]}</div>
-      <div class="slot-amount">${s.total > 0 ? s.total + ' ish' : '–'}</div>
+      <div class="slot-amount">${s.total > 0 ? s.total + ' monet' : '–'}</div>
     `;
 
     if (!slotDisabled) {
@@ -268,14 +268,14 @@ function updateBetForm() {
   const val = Math.min(parseInt(slider.value) || 20, max);
   slider.value = val;
   numInput.value = val;
-  document.getElementById('btn-bet-label').textContent = `${val} install.sh na ${state.selectedSlot || '–'}`;
+  document.getElementById('btn-bet-label').textContent = `${val} monet na ${state.selectedSlot || '–'}`;
 }
 
 // Synchronizacja suwaka i pola liczbowego
 document.getElementById('bet-slider').addEventListener('input', () => {
   const v = document.getElementById('bet-slider').value;
   document.getElementById('bet-amount').value = v;
-  document.getElementById('btn-bet-label').textContent = `${v} install.sh na ${state.selectedSlot || '–'}`;
+  document.getElementById('btn-bet-label').textContent = `${v} monet na ${state.selectedSlot || '–'}`;
 });
 
 document.getElementById('bet-amount').addEventListener('input', () => {
@@ -283,7 +283,7 @@ document.getElementById('bet-amount').addEventListener('input', () => {
   const slider = document.getElementById('bet-slider');
   const clamped = Math.max(5, Math.min(raw || 5, parseInt(slider.max)));
   slider.value = clamped;
-  document.getElementById('btn-bet-label').textContent = `${clamped} install.sh na ${state.selectedSlot || '–'}`;
+  document.getElementById('btn-bet-label').textContent = `${clamped} monet na ${state.selectedSlot || '–'}`;
 });
 
 // ── PLACE BET ──
@@ -294,7 +294,7 @@ document.getElementById('btn-place-bet').addEventListener('click', async () => {
   errEl.textContent = '';
 
   if (!slot) { errEl.textContent = 'Wybierz slot'; return; }
-  if (!amount || amount < 5) { errEl.textContent = 'Minimum 5 ish'; return; }
+  if (!amount || amount < 5) { errEl.textContent = 'Minimum 5 monet'; return; }
 
   const btn = document.getElementById('btn-place-bet');
   btn.disabled = true;
@@ -311,7 +311,7 @@ document.getElementById('btn-place-bet').addEventListener('click', async () => {
 
     // Pokaż bet-placed
     document.getElementById('bet-placed').style.display = 'flex';
-    document.getElementById('bet-placed-info').textContent = `${slot} · ${amount} ish`;
+    document.getElementById('bet-placed-info').textContent = `${slot} · ${amount} monet`;
 
     // Pulsacja slotu
     pulseSlot(slot);
@@ -322,7 +322,7 @@ document.getElementById('btn-place-bet').addEventListener('click', async () => {
   } catch (e) {
     errEl.textContent = e.message;
     btn.disabled = false;
-    btn.innerHTML = `Stawiam <span id="btn-bet-label">${amount} install.sh</span>`;
+    btn.innerHTML = `Stawiam <span id="btn-bet-label">${amount} monet</span>`;
   }
 });
 
@@ -344,32 +344,66 @@ function renderDayResult(result) {
   section.style.display = 'block';
 
   const nearestNote = result.nearest_win
-    ? `<span class="text-muted small" style="display:block;margin-top:4px">⚡ Nikt nie trafił dokładnie — wygrywa najbliższy slot</span>`
-    : '';
+    ? `<div class="text-muted small" style="margin:6px 0 0">⚡ Nikt nie trafił dokładnie — wygrywa najbliższy slot (${result.winning_slot})</div>`
+    : `<div class="text-muted small" style="margin:6px 0 0">Wygrywający slot: <span class="mono accent">${result.winning_slot}</span></div>`;
 
   content.innerHTML = `
-    <div class="breaking-banner">🍽️ MICHAŁ WRÓCIŁ! · ${result.actual_time} · ${result.winning_slot}</div>
+    <div class="breaking-banner">🍽️ MICHAŁ POSZEDŁ NA OBIAD O ${result.actual_time}</div>
     ${nearestNote}
     ${result.michal_comment ? `<div class="michal-comment">"${result.michal_comment}"</div>` : ''}
-    <div style="margin-top:14px">
-      <span class="text-muted small">Pula całkowita: </span>
-      <span class="mono">${result.total_pool} ish</span>
-      &nbsp;·&nbsp;
-      <span class="text-muted small">Wygranych: </span>
-      <span class="mono accent">${result.winners_count}</span>
-    </div>
   `;
 
   // Near miss dla gracza
   if (state.todayBet && state.todayBet.slot !== result.winning_slot) {
-    const mySlotStart = state.todayBet.slot.split('-')[0];
     const winMins = timeToMins(result.actual_time);
-    const myMins = timeToMins(mySlotStart);
-    const diff = Math.abs(myMins - winMins);
-    if (diff <= 20) {
-      content.innerHTML += `<div class="near-miss">💔 Grałeś na ${state.todayBet.slot}, Michał wyszedł o ${result.actual_time}. Mogłeś wygrać.</div>`;
+    const myMins = timeToMins(state.todayBet.slot.split('-')[0]);
+    if (Math.abs(myMins - winMins) <= 20) {
+      content.innerHTML += `<div class="near-miss">💔 Grałeś na ${state.todayBet.slot}, Michał poszedł o ${result.actual_time}. Mogłeś wygrać.</div>`;
     }
   }
+
+  // Załaduj i pokaż listę wygranych
+  api('GET', '/api/day-results').then(data => {
+    if (!data.bets || !data.bets.length) return;
+
+    const winners = data.bets.filter(b => b.won);
+    const losers  = data.bets.filter(b => !b.won);
+
+    let html = `<div class="result-winner-list">`;
+
+    if (winners.length) {
+      html += `<div class="text-muted small" style="padding:4px 0;letter-spacing:0.5px">🏆 WYGRALI</div>`;
+      winners.forEach((b, i) => {
+        const isMe = state.nickname && b.nickname === state.nickname;
+        html += `
+          <div class="result-player-row won" style="animation-delay:${i * 0.08}s">
+            <span style="flex:1">${esc(b.nickname)}${isMe ? ' <span class="accent">(ty)</span>' : ''}</span>
+            <span class="text-muted small">postawił ${b.amount} monet</span>
+            <span class="mono gold" style="margin-left:12px">+${b.payout} monet</span>
+          </div>`;
+      });
+    }
+
+    if (losers.length) {
+      html += `<div class="text-muted small" style="padding:8px 0 4px;letter-spacing:0.5px">❌ NIE TRAFILI</div>`;
+      losers.forEach(b => {
+        const isMe = state.nickname && b.nickname === state.nickname;
+        html += `
+          <div class="result-player-row lost">
+            <span style="flex:1">${esc(b.nickname)}${isMe ? ' <span class="accent">(ty)</span>' : ''}</span>
+            <span class="mono text-muted">${b.slot}</span>
+            <span class="mono danger" style="margin-left:12px">-${b.amount} monet</span>
+          </div>`;
+      });
+    }
+
+    html += `</div>
+      <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">
+        Łączna pula: <span class="mono">${result.total_pool} monet</span>
+      </div>`;
+
+    content.innerHTML += html;
+  }).catch(() => {});
 }
 
 function timeToMins(t) {
@@ -409,7 +443,7 @@ function renderLeaderboard(data) {
       <div class="lb-row${meClass}">
         <span class="lb-rank">${medal}</span>
         <span class="lb-nick">${esc(p.nickname)}${streakBadge}</span>
-        <span class="lb-balance mono">${p.balance} ish</span>
+        <span class="lb-balance mono">${p.balance} monet</span>
       </div>
     `;
   });
@@ -454,7 +488,7 @@ function renderHistory(results) {
 async function loadBank() {
   try {
     const data = await api('GET', '/api/bank');
-    document.getElementById('bank-balance').textContent = data.balance + ' ish';
+    document.getElementById('bank-balance').textContent = data.balance + ' monet';
   } catch {}
 }
 
@@ -516,12 +550,28 @@ function updateCountdown() {
       textEl.textContent = `🟢 ostatni slot dostępny`;
     }
   } else {
-    // Po 14:15 — wszystkie sloty minęły
-    const elapsed = (totalMins - lastSlotMins) * 60 + s;
-    const mm = Math.floor(elapsed / 60);
-    const ssec = elapsed % 60;
-    textEl.textContent = `🔒 obstawianie zakończone — czekamy na Michała (${mm}m ${String(ssec).padStart(2,'0')}s temu)`;
-    barEl.style.width = '100%';
+    // Po 14:15 — sprawdź czy dzień już rozliczony
+    const daySettled = !!state.todayData?.result;
+
+    if (daySettled) {
+      // Odliczaj do 10:30 następnego dnia
+      const nextDayStart = new Date(wawStr);
+      nextDayStart.setDate(nextDayStart.getDate() + 1);
+      nextDayStart.setHours(10, 30, 0, 0);
+      const remaining = Math.max(0, Math.floor((nextDayStart - now) / 1000));
+      const hh = Math.floor(remaining / 3600);
+      const mm = Math.floor((remaining % 3600) / 60);
+      const ss = remaining % 60;
+      textEl.textContent = `⏳ następna runda za ${hh}h ${String(mm).padStart(2,'0')}m ${String(ss).padStart(2,'0')}s`;
+      barEl.style.width = '100%';
+    } else {
+      // Sloty minęły, czekamy na wynik
+      const elapsed = (totalMins - lastSlotMins) * 60 + s;
+      const mm = Math.floor(elapsed / 60);
+      const ssec = elapsed % 60;
+      textEl.textContent = `🔒 obstawianie zakończone — czekamy na Michała (${mm}m ${String(ssec).padStart(2,'0')}s temu)`;
+      barEl.style.width = '100%';
+    }
   }
 }
 
@@ -535,7 +585,7 @@ function updateBalanceDisplay(balance) {
     void el.offsetWidth; // reset animation
     el.classList.add('balance-rolling');
   }
-  el.textContent = `💰 ${balance} ish`;
+  el.textContent = `💰 ${balance} monet`;
   currentBalance = balance;
 }
 
@@ -570,7 +620,7 @@ function showRipNotice(nick) {
   const year = new Date().getFullYear();
   const notice = document.createElement('div');
   notice.className = 'rip-notice';
-  notice.textContent = `R.I.P. ${nick}'s install.sh (${year}–${year})`;
+  notice.textContent = `R.I.P. ${nick}'s monet (${year}–${year})`;
   document.querySelector('.col-game').prepend(notice);
 }
 
@@ -582,6 +632,17 @@ function esc(str) {
     .replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;');
 }
+
+// ── HOW IT WORKS MODAL ──
+document.getElementById('btn-how').addEventListener('click', () => {
+  document.getElementById('how-it-works').style.display = 'flex';
+});
+document.getElementById('how-close').addEventListener('click', () => {
+  document.getElementById('how-it-works').style.display = 'none';
+});
+document.getElementById('how-it-works').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+});
 
 // ── START ──
 init();

@@ -196,7 +196,7 @@
         document.getElementById('section-logged').style.gap = '16px';
 
         document.getElementById('info-bets').textContent = d.bets.length;
-        document.getElementById('info-pool').textContent = d.total_pool + ' ish';
+        document.getElementById('info-pool').textContent = d.total_pool + ' monet';
 
         if (d.result) {
           document.getElementById('result-done-row').style.display = 'flex';
@@ -231,13 +231,13 @@
           : d.winning_slot;
         document.getElementById('prev-slot').innerHTML = slotNote;
         document.getElementById('prev-winners').textContent = d.winners_count;
-        document.getElementById('prev-pool').textContent = d.winners_pool + ' ish';
-        document.getElementById('prev-bank').textContent = d.bank_cut + ' ish';
+        document.getElementById('prev-pool').textContent = d.winners_pool + ' monet';
+        document.getElementById('prev-bank').textContent = d.bank_cut + ' monet';
 
         const payoutList = document.getElementById('prev-payouts');
         document.getElementById('no-winner-section').style.display = 'none';
         payoutList.innerHTML = d.payouts.map(p =>
-          `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="mono accent">+${p.payout} ish</span></div>`
+          `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="mono accent">+${p.payout} monet</span></div>`
         ).join('');
 
         document.getElementById('preview-section').style.display = 'block';
@@ -307,7 +307,7 @@
       list.innerHTML = players.map(p => `
         <div class="payout-item" style="align-items:center;gap:8px" id="player-row-${p.id}">
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.nickname)}</span>
-          <span class="mono" style="font-size:11px;color:var(--text-muted)">${p.balance} ish</span>
+          <span class="mono" style="font-size:11px;color:var(--text-muted)">${p.balance} monet</span>
           <button class="btn-ghost" style="font-size:11px;color:var(--danger);border-color:var(--danger);padding:3px 8px"
             onclick="deletePlayer(${p.id}, '${esc(p.nickname)}')">usuń</button>
         </div>
