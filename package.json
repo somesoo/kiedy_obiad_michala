@@ -1,0 +1,15 @@
+{
+  "name": "michal-obiad",
+  "version": "1.0.0",
+  "description": "Biurowa bukmacherka — kiedy Michał idzie na obiad?",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0",
+    "dotenv": "^16.4.5"
+  }
+}

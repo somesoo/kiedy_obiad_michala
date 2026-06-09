@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kiedy Michał?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <span class="logo-text">KIEDY MICHAŁ?</span>
+        <span class="logo-sub">bukmacherka biurowa</span>
+      </div>
+      <div class="header-user" id="header-user">
+        <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
+        <span class="user-nick" id="user-nick-display"></span>
+        <span class="user-balance" id="user-balance-display"></span>
+      </div>
+    </div>
+    <div class="countdown-bar-wrap">
+      <div class="countdown-bar" id="countdown-bar"></div>
+      <div class="countdown-text" id="countdown-text">ładowanie...</div>
+    </div>
+  </header>
+
+  <!-- REJESTRACJA / LOGOWANIE -->
+  <div class="overlay" id="login-overlay">
+    <div class="login-card">
+      <h2>Dołącz do gry</h2>
+      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie jeśli już grasz.</p>
+      <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
+      <button class="btn-primary" id="btn-login">Wchodzę w to</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <main class="main-grid" id="main-content" style="display:none">
+
+    <!-- LEWA KOLUMNA — GRA -->
+    <section class="col-game">
+
+      <div class="section-header">
+        <h2 id="today-label">DZISIAJ</h2>
+        <div class="pool-badge">
+          Łączna pula: <span class="mono accent" id="total-pool">0 ish</span>
+        </div>
+      </div>
+
+      <!-- Status: bukmacheria zamknięta / wyniki -->
+      <div class="status-banner" id="status-banner" style="display:none"></div>
+
+      <!-- Sloty -->
+      <div class="slots-section" id="slots-section">
+        <p class="slots-label">Wybierz slot</p>
+        <div class="slots-grid" id="slots-grid"></div>
+      </div>
+
+      <!-- Formularz zakładu -->
+      <div class="bet-form" id="bet-form" style="display:none">
+        <div class="bet-selected">
+          Wybrany slot: <span class="mono accent" id="bet-slot-display">–</span>
+        </div>
+        <div class="bet-amount-row">
+          <label>Stawka:</label>
+          <input type="range" id="bet-slider" min="5" max="100" value="20" />
+          <input type="number" id="bet-amount" min="5" max="100" value="20" />
+          <span class="mono text-muted">ish</span>
+        </div>
+        <button class="btn-primary btn-bet" id="btn-place-bet">
+          Stawiam <span id="btn-bet-label">20 install.sh</span>
+        </button>
+        <div class="bet-error" id="bet-error"></div>
+      </div>
+
+      <!-- Po postawieniu zakładu -->
+      <div class="bet-placed" id="bet-placed" style="display:none">
+        <div class="bet-placed-inner">
+          <span class="bet-placed-emoji">🍽️</span>
+          <div>
+            <strong>Zakład postawiony!</strong><br/>
+            <span id="bet-placed-info" class="text-muted"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wyniki dnia -->
+      <div class="results-section" id="results-section" style="display:none">
+        <h3>Wyniki dnia</h3>
+        <div id="results-content"></div>
+      </div>
+
+    </section>
+
+    <!-- PRAWA KOLUMNA — SIDEBAR -->
+    <aside class="col-sidebar">
+
+      <!-- Leaderboard -->
+      <div class="sidebar-card leaderboard-card">
+        <div class="sidebar-card-header">
+          <h3>LEADERBOARD</h3>
+          <span class="text-muted small" id="players-count"></span>
+        </div>
+        <div id="leaderboard-list"></div>
+      </div>
+
+      <!-- Ostatnie wyniki -->
+      <div class="sidebar-card history-card">
+        <div class="sidebar-card-header">
+          <h3>OSTATNIE WYNIKI</h3>
+        </div>
+        <div id="history-list"></div>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <span class="bank-info" id="bank-info" title="Kliknij po więcej">
+      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 ish</span>
+    </span>
+    <span class="footer-copy text-muted">made with ❤️ i lekką zazdrością o 12:37</span>
+  </footer>
+
+  <!-- WELFARE TOAST -->
+  <div class="toast welfare-toast" id="welfare-toast" style="display:none">
+    <span>💸 Dostałeś 20 install.sh z kasy biurowej. Nie trać ich.</span>
+  </div>
+
+  <!-- CONFETTI -->
+  <div class="confetti-container" id="confetti-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
