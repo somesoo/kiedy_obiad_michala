@@ -154,6 +154,7 @@ async function loadTodayData() {
 
     if (data.result) {
       renderDayResult(data.result);
+      setSlotsCollapsed(true);
     }
   } catch (e) {
     console.error('Błąd ładowania danych dnia:', e);
@@ -533,8 +534,8 @@ function updateCountdown() {
     const ss = remaining % 60;
     textEl.textContent = `⏳ obstawianie zaczyna się za ${hh > 0 ? hh + 'h ' : ''}${String(mm).padStart(2,'0')}m ${String(ss).padStart(2,'0')}s`;
     barEl.style.width = '0%';
-  } else if (totalMins <= lastSlotMins) {
-    // 10:30–14:15 — jakieś sloty są dostępne
+  } else if (totalMins <= lastSlotMins && !state.todayData?.result) {
+    // 10:30–14:15 i dzień NIE jest jeszcze rozliczony
     const nextFuture = CLIENT_SLOTS.find(sl => sl.startMins > totalMins);
     const elapsed = (totalMins - firstSlotMins) * 60 + s;
     const total   = (lastSlotMins - firstSlotMins) * 60;
@@ -631,6 +632,23 @@ function esc(str) {
     .replace(/</g,'&lt;')
     .replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;');
+}
+
+// ── SLOTS TOGGLE ──
+document.getElementById('slots-toggle').addEventListener('click', () => {
+  const body = document.getElementById('slots-body');
+  const btn  = document.getElementById('slots-toggle');
+  const collapsed = body.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▼ rozwiń' : '▲ zwiń';
+  btn.setAttribute('aria-expanded', !collapsed);
+});
+
+function setSlotsCollapsed(collapsed) {
+  const body = document.getElementById('slots-body');
+  const btn  = document.getElementById('slots-toggle');
+  body.classList.toggle('collapsed', collapsed);
+  btn.textContent = collapsed ? '▼ rozwiń' : '▲ zwiń';
+  btn.setAttribute('aria-expanded', !collapsed);
 }
 
 // ── HOW IT WORKS MODAL ──

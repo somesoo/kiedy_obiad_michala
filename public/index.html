@@ -19,7 +19,7 @@
         <span class="logo-sub">bukmacherka biurowa</span>
       </div>
       <div class="header-user" id="header-user">
-        <button class="btn-ghost" id="btn-how" title="Jak to działa?">?</button>
+        <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">?</button>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
         <span class="user-nick" id="user-nick-display"></span>
         <span class="user-balance" id="user-balance-display"></span>
@@ -63,7 +63,25 @@
   <!-- MAIN -->
   <main class="main-grid" id="main-content" style="display:none">
 
-    <!-- LEWA KOLUMNA — GRA -->
+    <!-- LEWA KOLUMNA — INFO -->
+    <aside class="col-info">
+      <div class="sidebar-card info-card">
+        <div class="sidebar-card-header">
+          <h3>JAK TO DZIAŁA?</h3>
+        </div>
+        <ol class="info-list">
+          <li>Obstawiasz <strong>15-minutowy slot</strong>, o której Michał pójdzie na obiad.</li>
+          <li>Możesz stawiać <strong>dopóki slot nie minął</strong> — po jego starcie jest zablokowany.</li>
+          <li>Minimum <strong>5 monet</strong>, maksimum całe saldo. Jeden zakład dziennie.</li>
+          <li>Michał wpisuje godzinę w panelu admina po powrocie.</li>
+          <li>Wygrywa slot, w który Michał trafił. Jeśli nikt nie obstawił dokładnego — wygrywa <strong>najbliższy</strong>.</li>
+          <li>Pula dzielona proporcjonalnie do stawek. <strong>10%</strong> idzie do banku biurowego.</li>
+          <li>Startujesz z <strong>100 monetami</strong>. Przy zerowym saldzie dostajesz 20 z kasy biurowej.</li>
+        </ol>
+      </div>
+    </aside>
+
+    <!-- ŚRODKOWA KOLUMNA — GRA -->
     <section class="col-game">
 
       <div class="section-header">
@@ -78,8 +96,13 @@
 
       <!-- Sloty -->
       <div class="slots-section" id="slots-section">
-        <p class="slots-label">Wybierz slot</p>
-        <div class="slots-grid" id="slots-grid"></div>
+        <div class="slots-header">
+          <p class="slots-label">Wybierz slot</p>
+          <button class="slots-toggle" id="slots-toggle" aria-expanded="true">▲ zwiń</button>
+        </div>
+        <div class="slots-body" id="slots-body">
+          <div class="slots-grid" id="slots-grid"></div>
+        </div>
       </div>
 
       <!-- Formularz zakładu -->
