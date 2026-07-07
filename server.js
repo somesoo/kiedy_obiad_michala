@@ -182,9 +182,6 @@ function checkAndApplyWelfare(playerId) {
   const player = db.prepare('SELECT balance FROM players WHERE id = ?').get(playerId);
   if (player.balance > 0) return null;
 
-  const bank = db.prepare('SELECT balance FROM bank WHERE id = 1').get();
-  if (bank.balance < WELFARE_AMOUNT) return null;
-
   db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?').run(WELFARE_AMOUNT, playerId);
   db.prepare('UPDATE bank SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(WELFARE_AMOUNT);
   return WELFARE_AMOUNT;
@@ -264,19 +261,16 @@ app.get('/api/me', authPlayer, (req, res) => {
     ORDER BY m.kickoff_at DESC
   `).all(player.id);
 
-  const welfare = checkAndApplyWelfare(player.id);
-  const fresh = db.prepare('SELECT balance FROM players WHERE id = ?').get(player.id);
-
   res.json({
     id: player.id,
     nickname: player.nickname,
-    balance: fresh.balance,
+    balance: player.balance,
     current_streak: player.current_streak,
     best_streak: player.best_streak,
     total_wins: player.total_wins,
     rank: Number(rank.cnt) + 1,
     history,
-    welfare_received: welfare
+    welfare_received: null
   });
 });
 
