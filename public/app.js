@@ -221,11 +221,16 @@ function renderScoreMarket(m) {
       cls = b.payout > 0 ? 'won' : 'lost';
       payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
     }
+    const withdrawBtn = m.available && !b.withdraw_used
+      ? `<button class="withdraw-btn" data-action="withdraw-bet" data-bet="${b.id}">Wycofaj</button>`
+      : (m.available && b.withdraw_used ? `<span class="withdraw-used-note">wycofanie wykorzystane</span>` : '');
     body = `
       <div class="my-bet-badge ${cls}">
         <span>Twój typ: <span class="mono">${b.guess_score_a}:${b.guess_score_b}</span> · ${b.amount} coins</span>
         <span>${payoutNote}</span>
+        ${withdrawBtn}
       </div>
+      <div class="market-error" id="score-error-${m.id}"></div>
     `;
   } else if (m.available) {
     body = `
@@ -268,11 +273,16 @@ function renderWinnerMarket(m) {
       cls = b.payout > 0 ? 'won' : 'lost';
       payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
     }
+    const withdrawBtn = m.available && !b.withdraw_used
+      ? `<button class="withdraw-btn" data-action="withdraw-bet" data-bet="${b.id}">Wycofaj</button>`
+      : (m.available && b.withdraw_used ? `<span class="withdraw-used-note">wycofanie wykorzystane</span>` : '');
     body = `
       <div class="my-bet-badge ${cls}">
         <span>Twój typ: <span class="mono">${esc(pickName)}</span> · ${b.amount} coins</span>
         <span>${payoutNote}</span>
+        ${withdrawBtn}
       </div>
+      <div class="market-error" id="winner-error-${m.id}"></div>
     `;
   } else if (m.available) {
     const sel = state.winnerSelection[m.id];
@@ -304,6 +314,12 @@ document.getElementById('matches-list').addEventListener('click', e => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
   const action = btn.dataset.action;
+
+  if (action === 'withdraw-bet') {
+    withdrawBet(parseInt(btn.dataset.bet, 10));
+    return;
+  }
+
   const matchId = parseInt(btn.dataset.match, 10);
 
   if (action === 'pick-winner') {
@@ -317,6 +333,17 @@ document.getElementById('matches-list').addEventListener('click', e => {
     placeWinnerBet(matchId);
   }
 });
+
+async function withdrawBet(betId) {
+  try {
+    const res = await api('DELETE', `/api/bet/${betId}`);
+    state.balance = res.new_balance;
+    updateBalanceDisplay(res.new_balance);
+    await loadMatches();
+  } catch (e) {
+    alert(e.message);
+  }
+}
 
 async function placeScoreBet(matchId) {
   const a = parseInt(document.getElementById(`score-a-${matchId}`).value, 10);

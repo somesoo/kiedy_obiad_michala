@@ -82,6 +82,15 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS bet_withdrawals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER REFERENCES players(id),
+    match_id INTEGER REFERENCES matches(id),
+    bet_type TEXT NOT NULL,
+    withdrawn_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(player_id, match_id, bet_type)
+  );
+
   INSERT OR IGNORE INTO bank VALUES (1, 0, CURRENT_TIMESTAMP);
 `);
 
@@ -293,6 +302,10 @@ app.get('/api/matches', (req, res) => {
     const myScoreBet = player ? scoreBets.find(b => b.player_id === player.id) : null;
     const myWinnerBet = player ? winnerBets.find(b => b.player_id === player.id) : null;
 
+    const withdrawUsed = type => !!(player && db.prepare(
+      'SELECT id FROM bet_withdrawals WHERE player_id = ? AND match_id = ? AND bet_type = ?'
+    ).get(player.id, m.id, type));
+
     return {
       id: m.id,
       round: m.round,
@@ -316,10 +329,10 @@ app.get('/api/matches', (req, res) => {
         total_b: blind ? null : winnerBPool
       },
       my_score_bet: myScoreBet
-        ? { guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout }
+        ? { id: myScoreBet.id, guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout, withdraw_used: withdrawUsed('score') }
         : null,
       my_winner_bet: myWinnerBet
-        ? { guess_winner: myWinnerBet.guess_winner, amount: myWinnerBet.amount, payout: myWinnerBet.payout }
+        ? { id: myWinnerBet.id, guess_winner: myWinnerBet.guess_winner, amount: myWinnerBet.amount, payout: myWinnerBet.payout, withdraw_used: withdrawUsed('winner') }
         : null
     };
   });
@@ -402,6 +415,35 @@ app.post('/api/bet/winner', authPlayer, (req, res) => {
   });
 
   const fresh = db.prepare('SELECT balance FROM players WHERE id = ?').get(player.id);
+  res.json({ success: true, new_balance: fresh.balance });
+});
+
+// DELETE /api/bet/:id — wycofaj własny zakład, dopóki okno betowania jest otwarte
+app.delete('/api/bet/:id', authPlayer, (req, res) => {
+  const betId = parseInt(req.params.id, 10);
+  const bet = db.prepare('SELECT * FROM bets WHERE id = ?').get(betId);
+  if (!bet) return res.status(404).json({ error: 'Zakład nie istnieje' });
+  if (bet.player_id !== req.player.id) return res.status(403).json({ error: 'To nie jest Twój zakład' });
+
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(bet.match_id);
+  if (!isMatchAvailable(match)) return res.status(400).json({ error: matchLockReason(match) });
+
+  const alreadyWithdrawn = db.prepare(
+    'SELECT id FROM bet_withdrawals WHERE player_id = ? AND match_id = ? AND bet_type = ?'
+  ).get(bet.player_id, bet.match_id, bet.bet_type);
+  if (alreadyWithdrawn) {
+    return res.status(400).json({ error: 'Zakład na ten rynek możesz wycofać tylko raz' });
+  }
+
+  transaction(() => {
+    db.prepare('DELETE FROM bets WHERE id = ?').run(bet.id);
+    db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?').run(bet.amount, bet.player_id);
+    db.prepare(
+      'INSERT INTO bet_withdrawals (player_id, match_id, bet_type) VALUES (?, ?, ?)'
+    ).run(bet.player_id, bet.match_id, bet.bet_type);
+  });
+
+  const fresh = db.prepare('SELECT balance FROM players WHERE id = ?').get(bet.player_id);
   res.json({ success: true, new_balance: fresh.balance });
 });
 
@@ -636,6 +678,7 @@ app.delete('/api/admin/player/:id', (req, res) => {
 
   transaction(() => {
     db.prepare('DELETE FROM bets WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM bet_withdrawals WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM players WHERE id = ?').run(playerId);
   });
 

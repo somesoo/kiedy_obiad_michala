@@ -549,8 +549,33 @@ h1, h2, h3, .logo-text {
   border: 1px solid rgba(200,241,53,0.25);
   color: var(--text-primary);
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.withdraw-btn {
+  background: transparent;
+  border: 1px solid var(--muted);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.withdraw-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.withdraw-used-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .my-bet-badge.won {
