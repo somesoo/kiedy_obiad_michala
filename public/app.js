@@ -214,7 +214,7 @@ function renderMatchCard(m) {
 function renderScoreMarket(m) {
   const pool = m.score_market.total === null
     ? `${m.score_market.count} zakł.`
-    : `${m.score_market.total} VAR · ${m.score_market.count} zakł.`;
+    : `${m.score_market.total} coins · ${m.score_market.count} zakł.`;
 
   let body;
   if (m.my_score_bet) {
@@ -223,11 +223,11 @@ function renderScoreMarket(m) {
     let payoutNote = 'oczekuje na wynik';
     if (m.finished) {
       cls = b.payout > 0 ? 'won' : 'lost';
-      payoutNote = b.payout > 0 ? `✓ +${b.payout} VAR` : '✗ przegrany';
+      payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
     }
     body = `
       <div class="my-bet-badge ${cls}">
-        <span>Twój typ: <span class="mono">${b.guess_score_a}:${b.guess_score_b}</span> · ${b.amount} VAR</span>
+        <span>Twój typ: <span class="mono">${b.guess_score_a}:${b.guess_score_b}</span> · ${b.amount} coins</span>
         <span>${payoutNote}</span>
       </div>
     `;
@@ -260,7 +260,7 @@ function renderWinnerMarket(m) {
   const poolTotal = m.winner_market.total_a === null ? null : (m.winner_market.total_a + m.winner_market.total_b);
   const pool = poolTotal === null
     ? `${m.winner_market.count} zakł.`
-    : `${poolTotal} VAR · ${m.winner_market.count} zakł.`;
+    : `${poolTotal} coins · ${m.winner_market.count} zakł.`;
 
   let body;
   if (m.my_winner_bet) {
@@ -270,11 +270,11 @@ function renderWinnerMarket(m) {
     let payoutNote = 'oczekuje na wynik';
     if (m.finished) {
       cls = b.payout > 0 ? 'won' : 'lost';
-      payoutNote = b.payout > 0 ? `✓ +${b.payout} VAR` : '✗ przegrany';
+      payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
     }
     body = `
       <div class="my-bet-badge ${cls}">
-        <span>Twój typ: <span class="mono">${esc(pickName)}</span> · ${b.amount} VAR</span>
+        <span>Twój typ: <span class="mono">${esc(pickName)}</span> · ${b.amount} coins</span>
         <span>${payoutNote}</span>
       </div>
     `;
@@ -413,7 +413,7 @@ function renderLeaderboard(data) {
       <div class="lb-row${meClass}">
         <span class="lb-rank">${medal}</span>
         <span class="lb-nick">${esc(p.nickname)}${streakBadge}</span>
-        <span class="lb-balance mono">${p.balance} VAR</span>
+        <span class="lb-balance mono">${p.balance} coins</span>
       </div>
     `;
   });
@@ -425,7 +425,7 @@ function renderLeaderboard(data) {
 async function loadBank() {
   try {
     const data = await api('GET', '/api/bank');
-    document.getElementById('bank-balance').textContent = data.balance + ' VAR';
+    document.getElementById('bank-balance').textContent = data.balance + ' coins';
   } catch {}
 }
 
@@ -494,7 +494,7 @@ function updateBalanceDisplay(balance) {
     void el.offsetWidth;
     el.classList.add('balance-rolling');
   }
-  el.textContent = `💰 ${balance} VAR`;
+  el.textContent = `💰 ${balance} coins`;
   currentBalance = balance;
 }
 
@@ -516,7 +516,7 @@ function showConfetti() {
 // ── WELFARE TOAST ──
 function showWelfareToast(amount) {
   const t = document.getElementById('welfare-toast');
-  document.getElementById('welfare-toast-text').textContent = `💸 Dostałeś ${amount} VAR z kasy biurowej. Nie trać ich.`;
+  document.getElementById('welfare-toast-text').textContent = `💸 Dostałeś ${amount} coins z kasy biurowej. Nie trać ich.`;
   t.style.display = 'block';
   t.classList.add('show');
   setTimeout(() => {
@@ -530,7 +530,7 @@ function showRipNotice(nick) {
   const year = new Date().getFullYear();
   const notice = document.createElement('div');
   notice.className = 'rip-notice';
-  notice.textContent = `R.I.P. ${nick}'s VAR-y (${year}–${year})`;
+  notice.textContent = `R.I.P. ${nick}'s coins (${year}–${year})`;
   document.querySelector('.col-game').prepend(notice);
 }
 

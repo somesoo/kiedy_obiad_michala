@@ -337,12 +337,12 @@ app.post('/api/bet/score', authPlayer, (req, res) => {
 
   const amountInt = parseInt(amount, 10);
   if (!amountInt || amountInt < MIN_BET) {
-    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} VAR` });
+    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} coins` });
   }
 
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
   if (amountInt > player.balance) {
-    return res.status(400).json({ error: `Za mało VARów. Obecne saldo: ${player.balance}` });
+    return res.status(400).json({ error: `Za mało coins. Obecne saldo: ${player.balance}` });
   }
 
   const existing = db.prepare(
@@ -375,12 +375,12 @@ app.post('/api/bet/winner', authPlayer, (req, res) => {
 
   const amountInt = parseInt(amount, 10);
   if (!amountInt || amountInt < MIN_BET) {
-    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} VAR` });
+    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} coins` });
   }
 
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
   if (amountInt > player.balance) {
-    return res.status(400).json({ error: `Za mało VARów. Obecne saldo: ${player.balance}` });
+    return res.status(400).json({ error: `Za mało coins. Obecne saldo: ${player.balance}` });
   }
 
   const existing = db.prepare(

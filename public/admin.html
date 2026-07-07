@@ -302,16 +302,16 @@
     function renderPreview(matchId, d) {
       const box = document.getElementById(`preview-${matchId}`);
       const payoutHtml = (payouts) => payouts.map(p =>
-        `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="accent mono">+${p.payout} VAR</span></div>`
+        `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="accent mono">+${p.payout} coins</span></div>`
       ).join('') || '<div class="text-muted small">brak trafionych — cała pula do banku</div>';
 
       box.innerHTML = `
         <div class="preview-row"><span class="label">Wynik do zatwierdzenia</span><span class="mono">${d.team_a} ${d.score_a}:${d.score_b} ${d.team_b} (wygrywa: ${d.winner === 'A' ? d.team_a : d.team_b})</span></div>
-        <div class="preview-row"><span class="label">Pula "wynik"</span><span class="mono">${d.score_market.total_pool} VAR · ${d.score_market.winners_count} traf.</span></div>
+        <div class="preview-row"><span class="label">Pula "wynik"</span><span class="mono">${d.score_market.total_pool} coins · ${d.score_market.winners_count} traf.</span></div>
         <div class="payout-list">${payoutHtml(d.score_market.payouts)}</div>
-        <div class="preview-row"><span class="label">Pula "zwycięzca"</span><span class="mono">${d.winner_market.total_pool} VAR · ${d.winner_market.winners_count} traf.</span></div>
+        <div class="preview-row"><span class="label">Pula "zwycięzca"</span><span class="mono">${d.winner_market.total_pool} coins · ${d.winner_market.winners_count} traf.</span></div>
         <div class="payout-list">${payoutHtml(d.winner_market.payouts)}</div>
-        <div class="preview-row"><span class="label">Do banku biurowego</span><span class="mono gold">${d.bank_total} VAR</span></div>
+        <div class="preview-row"><span class="label">Do banku biurowego</span><span class="mono gold">${d.bank_total} coins</span></div>
         <button class="btn-danger btn-small" style="margin-top:6px" onclick="confirmResult(${matchId})">Zatwierdź i rozlicz mecz</button>
       `;
       box.classList.add('show');
@@ -386,7 +386,7 @@
       list.innerHTML = players.map(p => `
         <div class="payout-item" style="align-items:center;gap:8px;font-size:12px" id="player-row-${p.id}">
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.nickname)}</span>
-          <span class="mono" style="color:var(--text-muted)">${p.balance} VAR</span>
+          <span class="mono" style="color:var(--text-muted)">${p.balance} coins</span>
           <button class="btn-ghost" style="font-size:11px;color:var(--danger);border-color:var(--danger);padding:3px 8px"
             onclick="deletePlayer(${p.id}, '${esc(p.nickname)}')">usuń</button>
         </div>

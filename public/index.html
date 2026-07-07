@@ -35,7 +35,7 @@
   <div class="overlay" id="login-overlay">
     <div class="login-card">
       <h2>Dołącz do gry</h2>
-      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie jeśli już grasz. Startujesz z 1000 VAR.</p>
+      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie jeśli już grasz. Startujesz z 1000 coins.</p>
       <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
       <button class="btn-primary" id="btn-login">Wchodzę w to</button>
       <div class="login-error" id="login-error"></div>
@@ -51,11 +51,11 @@
         <li>Każdy mecz mundialu obstawiasz <strong>dwoma niezależnymi zakładami</strong>: dokładny <strong>wynik</strong> (np. 2:1) i osobno <strong>kto wygra</strong>.</li>
         <li>Możesz obstawiać tylko mecze, które mają <strong>wpisane obie drużyny</strong> i jeszcze się nie zaczęły.</li>
         <li>Gdy drużyny kolejnej rundy nie są jeszcze znane — poczekaj, aż admin je uzupełni po poprzednim meczu.</li>
-        <li>Stawiasz dowolną liczbę <strong>VAR-ów</strong> ze swojego salda (min. 10) na każdy z dwóch zakładów osobno.</li>
+        <li>Stawiasz dowolną liczbę <strong>coins</strong> ze swojego salda (min. 10) na każdy z dwóch zakładów osobno.</li>
         <li><strong>Admin wpisuje wynik</strong> po zakończeniu meczu (i zwycięzcę — na wypadek karnych).</li>
         <li>Trafienie dokładnego wyniku wygrywa pulę "wynik". Trafienie zwycięzcy wygrywa pulę "zwycięzca".</li>
         <li>Pula jest dzielona między trafionych proporcjonalnie do stawek (<strong>system parimutuel</strong>). 10% idzie do banku biurowego.</li>
-        <li>Startujesz z <strong>1000 VAR</strong>. Jak stracisz wszystko — dostajesz zastrzyk z kasy biurowej.</li>
+        <li>Startujesz z <strong>1000 coins</strong>. Jak stracisz wszystko — dostajesz zastrzyk z kasy biurowej.</li>
       </ol>
     </div>
   </div>
@@ -72,10 +72,10 @@
         <ol class="info-list">
           <li><span>Każdy mecz ma <strong>dwa niezależne zakłady</strong>: dokładny wynik i zwycięzca.</span></li>
           <li><span>Obstawiasz tylko mecze z <strong>wpisanymi obiema drużynami</strong>, dopóki się nie zaczęły.</span></li>
-          <li><span>Minimum <strong>10 VAR</strong> na zakład, maksimum całe saldo.</span></li>
+          <li><span>Minimum <strong>10 coins</strong> na zakład, maksimum całe saldo.</span></li>
           <li><span>Admin wpisuje wynik po meczu — <strong>zwycięzcę</strong> wskazuje osobno (liczą się karne).</span></li>
           <li><span>Pula dzielona proporcjonalnie do stawek wśród trafionych. <strong>10%</strong> idzie do banku biurowego.</span></li>
-          <li><span>Startujesz z <strong>1000 VAR</strong>. Przy zerowym saldzie dostajesz zastrzyk z kasy biurowej.</span></li>
+          <li><span>Startujesz z <strong>1000 coins</strong>. Przy zerowym saldzie dostajesz zastrzyk z kasy biurowej.</span></li>
         </ol>
       </div>
     </aside>
@@ -118,14 +118,14 @@
   <!-- FOOTER -->
   <footer class="site-footer">
     <span class="bank-info" id="bank-info" title="Kliknij po więcej">
-      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 VAR</span>
+      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 coins</span>
     </span>
     <span class="footer-copy text-muted">made with ❤️ i lekką stratą do lat 30.</span>
   </footer>
 
   <!-- WELFARE TOAST -->
   <div class="toast welfare-toast" id="welfare-toast" style="display:none">
-    <span id="welfare-toast-text">💸 Dostałeś zastrzyk VAR-ów z kasy biurowej. Nie trać ich.</span>
+    <span id="welfare-toast-text">💸 Dostałeś zastrzyk coins z kasy biurowej. Nie trać ich.</span>
   </div>
 
   <!-- CONFETTI -->
