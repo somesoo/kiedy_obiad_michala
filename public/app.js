@@ -430,9 +430,17 @@ async function loadBank() {
 }
 
 // ── COUNTDOWN ──
+// formatToParts zamiast toLocaleString('sv-SE', ...) — w przeglądarkach/silnikach z okrojonym
+// ICU locale 'sv-SE' może po cichu wrócić do domyślnego formatu i rozjechać parsowanie.
 function nowWawDate() {
-  const s = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' });
-  return new Date(s.replace(' ', 'T'));
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date());
+  const get = type => parts.find(p => p.type === type).value;
+  return new Date(`${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`);
 }
 
 function kickoffDate(str) {

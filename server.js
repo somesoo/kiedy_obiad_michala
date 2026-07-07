@@ -115,19 +115,30 @@ FIXTURES.forEach(f => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Rozbij "teraz" na składowe daty/czasu w strefie Warsaw przez formatToParts —
+// w przeciwieństwie do toLocaleString(), nie zależy od tego, czy silnik ICU zna
+// dany locale (np. sv-SE) — na buildach Node z okrojonym ICU toLocaleString('sv-SE', ...)
+// po cichu wraca do formatu en-US, co psuje porównania stringów.
+function warsawParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date);
+  const get = type => parts.find(p => p.type === type).value;
+  return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute'), s: get('second') };
+}
+
 // Aktualny czas w Warsaw jako "YYYY-MM-DDTHH:MM" — porównywalny leksykograficznie z kickoff_at
 function nowWawStr() {
-  const s = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' }); // "2026-07-07 18:03:00"
-  return s.replace(' ', 'T').slice(0, 16);
+  const p = warsawParts();
+  return `${p.y}-${p.mo}-${p.d}T${p.h}:${p.mi}`;
 }
 
 function nowTimeWaw() {
-  return new Date().toLocaleTimeString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
+  const p = warsawParts();
+  return `${p.h}:${p.mi}`;
 }
 
 // Mecz można obstawiać tylko gdy obie drużyny są znane, mecz się jeszcze nie zaczął i nie jest rozliczony
