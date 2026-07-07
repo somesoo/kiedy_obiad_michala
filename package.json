@@ -1,7 +1,7 @@
 {
   "name": "michal-obiad",
   "version": "1.0.0",
-  "description": "Biurowa bukmacherka — kiedy Michał idzie na obiad?",
+  "description": "Biurowa bukmacherka — mundial: wynik i zwycięzca każdego meczu",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

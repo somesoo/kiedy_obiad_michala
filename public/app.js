@@ -4,28 +4,29 @@ let state = {
   token: null,
   nickname: null,
   balance: 0,
-  selectedSlot: null,
-  todayBet: null,
-  todayData: null,
+  matches: [],
+  winnerSelection: {},   // { [matchId]: 'A' | 'B' }
   leaderboardInterval: null,
   mainInterval: null,
 };
 
+const MONTHS_PL = ['stycznia','lutego','marca','kwietnia','maja','czerwca','lipca','sierpnia','września','października','listopada','grudnia'];
+
 // ── STORAGE ──
 function saveAuth(id, token, nickname) {
-  localStorage.setItem('mko_player_id', id);
-  localStorage.setItem('mko_token', token);
-  localStorage.setItem('mko_nickname', nickname);
+  localStorage.setItem('mundial_player_id', id);
+  localStorage.setItem('mundial_token', token);
+  localStorage.setItem('mundial_nickname', nickname);
 }
 
 function loadAuth() {
-  state.playerId = localStorage.getItem('mko_player_id');
-  state.token = localStorage.getItem('mko_token');
-  state.nickname = localStorage.getItem('mko_nickname');
+  state.playerId = localStorage.getItem('mundial_player_id');
+  state.token = localStorage.getItem('mundial_token');
+  state.nickname = localStorage.getItem('mundial_nickname');
 }
 
 function clearAuth() {
-  ['mko_player_id', 'mko_token', 'mko_nickname'].forEach(k => localStorage.removeItem(k));
+  ['mundial_player_id', 'mundial_token', 'mundial_nickname'].forEach(k => localStorage.removeItem(k));
   state.playerId = state.token = state.nickname = null;
 }
 
@@ -93,7 +94,6 @@ function loginSuccess(id, token, nickname, balance, me) {
   state.token = token;
   state.nickname = nickname;
   state.balance = balance;
-  state.todayBet = me.today_bet;
 
   document.getElementById('login-overlay').style.display = 'none';
   document.getElementById('main-content').style.display = 'grid';
@@ -102,7 +102,7 @@ function loginSuccess(id, token, nickname, balance, me) {
   updateBalanceDisplay(balance);
   document.getElementById('btn-logout').style.display = 'inline-block';
 
-  if (me.welfare_received) showWelfareToast();
+  if (me.welfare_received) showWelfareToast(me.welfare_received);
   if (me.balance === 0) showRipNotice(nickname);
 
   startApp();
@@ -123,311 +123,262 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 
 // ── APP MAIN LOOP ──
 function startApp() {
-  loadTodayData();
+  loadMatches();
   loadLeaderboard();
-  loadHistory();
   loadBank();
-  setupCountdown();
 
-  // Odśwież dane co 30s
   state.mainInterval = setInterval(() => {
-    loadTodayData();
+    loadMatches();
     loadBank();
-  }, 30000);
+  }, 20000);
 
-  // Leaderboard co 15s
   state.leaderboardInterval = setInterval(() => {
     loadLeaderboard();
   }, 15000);
 
-  // Countdown co sekundę
   setInterval(updateCountdown, 1000);
 }
 
-// ── TODAY DATA ──
-async function loadTodayData() {
+// ── MATCHES ──
+async function loadMatches() {
   try {
-    const data = await api('GET', '/api/today');
-    state.todayData = data;
-    renderSlots(data);
-    updateTodayHeader(data);
-
-    if (data.result) {
-      renderDayResult(data.result);
-      setSlotsCollapsed(true);
-    }
+    const data = await api('GET', '/api/matches');
+    state.matches = data.matches;
+    renderMatches(state.matches);
+    renderRecentResults(state.matches);
+    updateCountdown();
   } catch (e) {
-    console.error('Błąd ładowania danych dnia:', e);
+    console.error('Błąd ładowania meczów:', e);
   }
 }
 
-function updateTodayHeader(data) {
-  const d = new Date(data.date + 'T12:00:00');
-  const label = d.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
-  document.getElementById('today-label').textContent = 'DZISIAJ · ' + label.toUpperCase();
-  document.getElementById('total-pool').textContent = data.total_pool + ' monet';
+function teamLabel(m, side) {
+  const team = side === 'A' ? m.team_a : m.team_b;
+  const placeholder = side === 'A' ? m.placeholder_a : m.placeholder_b;
+  return team || placeholder || '???';
 }
 
-function renderSlots(data) {
-  const grid = document.getElementById('slots-grid');
-  const alreadyBet = !!state.todayBet;
-  document.getElementById('blind-badge').style.display = (data.blind && !data.result) ? 'inline' : 'none';
-  const anyAvailable = data.any_slot_available && !data.result;
+function statusInfo(m) {
+  if (m.finished) return { cls: 'done', text: 'ROZLICZONY' };
+  if (m.available) return { cls: 'open', text: 'OTWARTE' };
+  if (!m.team_a || !m.team_b) return { cls: 'locked', text: 'DRUŻYNY NIEZNANE' };
+  return { cls: 'locked', text: 'ZAMKNIĘTE' };
+}
 
-  // Znajdź max dla proporcji barów
-  const maxTotal = Math.max(...data.slots.map(s => s.total), 1);
+function formatKickoff(str) {
+  const [datePart, timePart] = str.split('T');
+  const [y, mo, d] = datePart.split('-').map(Number);
+  return `${d} ${MONTHS_PL[mo - 1]}, ${timePart}`;
+}
 
-  // Status banner
-  const banner = document.getElementById('status-banner');
-  if (data.result) {
-    banner.style.display = 'none';
-  } else if (!data.any_slot_available) {
-    banner.className = 'status-banner closed';
-    banner.style.display = 'block';
-    banner.textContent = '🔒 Wszystkie sloty minęły — czekamy na powrót Michała';
-  } else if (alreadyBet) {
-    banner.className = 'status-banner success';
-    banner.style.display = 'block';
-    banner.innerHTML = `✓ Twój zakład: <span class="mono accent">${state.todayBet.slot}</span> — <span class="mono">${state.todayBet.amount} monet</span>`;
-  } else {
-    banner.style.display = 'none';
-  }
+function renderMatches(matches) {
+  const container = document.getElementById('matches-list');
+  let html = '';
+  let lastRound = null;
 
-  // Jeśli mamy wynik — pokaż bet-placed jeśli gracz grał
-  if (state.todayBet) {
-    const bp = document.getElementById('bet-placed');
-    const won = data.result && data.result.winning_slot === state.todayBet.slot;
-    bp.style.display = 'flex';
-    document.getElementById('bet-placed-info').textContent =
-      `${state.todayBet.slot} · ${state.todayBet.amount} monet${won ? ' · 🎉 TRAFIONY!' : ''}`;
-  }
-
-  grid.innerHTML = '';
-  data.slots.forEach(s => {
-    const card = document.createElement('div');
-    card.className = 'slot-card';
-
-    // Slot zablokowany: już minął, gracz już obstawił, albo jest wynik
-    const slotDisabled = !s.available || alreadyBet || !!data.result;
-    if (slotDisabled) card.classList.add('disabled');
-    if (!s.available && !data.result) card.classList.add('slot-past');
-    if (state.selectedSlot === s.slot && !alreadyBet) card.classList.add('selected');
-    if (data.result && data.result.winning_slot === s.slot) card.classList.add('winning');
-    if (state.todayBet && state.todayBet.slot === s.slot) card.classList.add('selected');
-
-    const barH = data.blind ? 2 : Math.round((s.total / maxTotal) * 32);
-    const amountLabel = data.blind ? '' : (s.total > 0 ? s.total + ' monet' : '–');
-
-    card.innerHTML = `
-      <div class="slot-bar-wrap">
-        <div class="slot-bar" style="height:${Math.max(barH, 2)}px"></div>
-      </div>
-      <div class="slot-time">${s.slot.split('-')[0]}</div>
-      <div class="slot-amount">${amountLabel}</div>
-    `;
-
-    if (!slotDisabled) {
-      card.addEventListener('click', () => selectSlot(s.slot));
+  matches.forEach(m => {
+    if (m.round !== lastRound) {
+      html += `<div class="round-heading">${esc(m.round)}</div>`;
+      lastRound = m.round;
     }
-
-    grid.appendChild(card);
+    html += renderMatchCard(m);
   });
 
-  // Formularz zakładu — pokaż tylko jeśli wybrany slot jest nadal dostępny
-  const betForm = document.getElementById('bet-form');
-  const selectedStillAvailable = state.selectedSlot &&
-    data.slots.find(s => s.slot === state.selectedSlot)?.available;
+  container.innerHTML = html || '<div class="text-muted small">Brak meczów</div>';
+}
 
-  if (anyAvailable && !alreadyBet && state.selectedSlot && selectedStillAvailable) {
-    betForm.style.display = 'flex';
-    updateBetForm();
-  } else {
-    betForm.style.display = 'none';
-    // Wyczyść zaznaczenie jeśli wybrany slot minął
-    if (state.selectedSlot && !selectedStillAvailable) {
-      state.selectedSlot = null;
+function renderMatchCard(m) {
+  const st = statusInfo(m);
+  const teamsHtml = (m.team_a && m.team_b)
+    ? `${esc(m.team_a)} <span class="text-muted">–</span> ${esc(m.team_b)}`
+    : `<span class="placeholder">${esc(teamLabel(m,'A'))} – ${esc(teamLabel(m,'B'))}</span>`;
+  const scoreHtml = m.finished ? `<span class="match-score">${m.score_a}:${m.score_b}</span>` : '';
+
+  return `
+    <div class="match-card ${m.finished ? 'finished' : ''} ${!m.available && !m.finished ? 'locked' : ''}" id="match-${m.id}">
+      <div class="match-head">
+        <div class="match-teams">${teamsHtml}${scoreHtml}</div>
+        <div class="match-meta">
+          <span class="match-kickoff">${formatKickoff(m.kickoff_at)}</span>
+          <span class="match-status ${st.cls}">${st.text}</span>
+        </div>
+      </div>
+      <div class="markets">
+        ${renderScoreMarket(m)}
+        ${renderWinnerMarket(m)}
+      </div>
+    </div>
+  `;
+}
+
+function renderScoreMarket(m) {
+  const pool = m.score_market.total === null
+    ? `${m.score_market.count} zakł.`
+    : `${m.score_market.total} VAR · ${m.score_market.count} zakł.`;
+
+  let body;
+  if (m.my_score_bet) {
+    const b = m.my_score_bet;
+    let cls = '';
+    let payoutNote = 'oczekuje na wynik';
+    if (m.finished) {
+      cls = b.payout > 0 ? 'won' : 'lost';
+      payoutNote = b.payout > 0 ? `✓ +${b.payout} VAR` : '✗ przegrany';
     }
-  }
-
-  // Lista obstawiających dzisiaj
-  const bettorsEl = document.getElementById('bettors-today');
-  const bettors = data.today_bettors || [];
-  if (bettors.length > 0 && !data.result) {
-    bettorsEl.style.display = 'block';
-    const chips = bettors.map(nick => {
-      const isMe = nick === state.nickname;
-      return `<span class="bettor-chip${isMe ? ' bettor-me' : ''}">${esc(nick)}</span>`;
-    }).join('');
-    bettorsEl.innerHTML = `
-      <span class="text-muted small" style="margin-right:6px">Już obstawili:</span>${chips}
+    body = `
+      <div class="my-bet-badge ${cls}">
+        <span>Twój typ: <span class="mono">${b.guess_score_a}:${b.guess_score_b}</span> · ${b.amount} VAR</span>
+        <span>${payoutNote}</span>
+      </div>
+    `;
+  } else if (m.available) {
+    body = `
+      <div class="score-inputs">
+        <input type="number" id="score-a-${m.id}" min="0" max="20" value="1" />
+        <span class="sep">:</span>
+        <input type="number" id="score-b-${m.id}" min="0" max="20" value="1" />
+      </div>
+      <div class="stake-row">
+        <input type="number" id="score-amount-${m.id}" min="10" value="50" />
+        <button data-action="bet-score" data-match="${m.id}">Stawiam</button>
+      </div>
+      <div class="market-error" id="score-error-${m.id}"></div>
     `;
   } else {
-    bettorsEl.style.display = 'none';
+    body = `<div class="market-locked-note">Niedostępny</div>`;
   }
+
+  return `
+    <div class="market">
+      <div class="market-title"><span>WYNIK</span><span class="market-pool">${pool}</span></div>
+      ${body}
+    </div>
+  `;
 }
 
-function selectSlot(slot) {
-  state.selectedSlot = slot;
-  document.getElementById('bet-slot-display').textContent = slot;
-  document.getElementById('bet-form').style.display = 'flex';
-  document.getElementById('bet-error').textContent = '';
-  updateBetForm();
+function renderWinnerMarket(m) {
+  const poolTotal = m.winner_market.total_a === null ? null : (m.winner_market.total_a + m.winner_market.total_b);
+  const pool = poolTotal === null
+    ? `${m.winner_market.count} zakł.`
+    : `${poolTotal} VAR · ${m.winner_market.count} zakł.`;
 
-  // Re-render kart żeby pokazać selected
-  if (state.todayData) renderSlots(state.todayData);
+  let body;
+  if (m.my_winner_bet) {
+    const b = m.my_winner_bet;
+    const pickName = b.guess_winner === 'A' ? teamLabel(m, 'A') : teamLabel(m, 'B');
+    let cls = '';
+    let payoutNote = 'oczekuje na wynik';
+    if (m.finished) {
+      cls = b.payout > 0 ? 'won' : 'lost';
+      payoutNote = b.payout > 0 ? `✓ +${b.payout} VAR` : '✗ przegrany';
+    }
+    body = `
+      <div class="my-bet-badge ${cls}">
+        <span>Twój typ: <span class="mono">${esc(pickName)}</span> · ${b.amount} VAR</span>
+        <span>${payoutNote}</span>
+      </div>
+    `;
+  } else if (m.available) {
+    const sel = state.winnerSelection[m.id];
+    body = `
+      <div class="winner-buttons">
+        <button class="winner-btn ${sel === 'A' ? 'selected' : ''}" data-action="pick-winner" data-match="${m.id}" data-side="A">${esc(teamLabel(m, 'A'))}</button>
+        <button class="winner-btn ${sel === 'B' ? 'selected' : ''}" data-action="pick-winner" data-match="${m.id}" data-side="B">${esc(teamLabel(m, 'B'))}</button>
+      </div>
+      <div class="stake-row">
+        <input type="number" id="winner-amount-${m.id}" min="10" value="50" />
+        <button data-action="bet-winner" data-match="${m.id}">Stawiam</button>
+      </div>
+      <div class="market-error" id="winner-error-${m.id}"></div>
+    `;
+  } else {
+    body = `<div class="market-locked-note">Niedostępny</div>`;
+  }
+
+  return `
+    <div class="market">
+      <div class="market-title"><span>ZWYCIĘZCA</span><span class="market-pool">${pool}</span></div>
+      ${body}
+    </div>
+  `;
 }
 
-function updateBetForm() {
-  const slider = document.getElementById('bet-slider');
-  const numInput = document.getElementById('bet-amount');
-  const max = Math.max(5, state.balance);
-  slider.max = max;
-  numInput.max = max;
+// ── EVENT DELEGATION FOR MATCH CARDS ──
+document.getElementById('matches-list').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const matchId = parseInt(btn.dataset.match, 10);
 
-  const val = Math.min(parseInt(slider.value) || 20, max);
-  slider.value = val;
-  numInput.value = val;
-  document.getElementById('btn-bet-label').textContent = `${val} monet na ${state.selectedSlot || '–'}`;
-}
-
-// Synchronizacja suwaka i pola liczbowego
-document.getElementById('bet-slider').addEventListener('input', () => {
-  const v = document.getElementById('bet-slider').value;
-  document.getElementById('bet-amount').value = v;
-  document.getElementById('btn-bet-label').textContent = `${v} monet na ${state.selectedSlot || '–'}`;
+  if (action === 'pick-winner') {
+    state.winnerSelection[matchId] = btn.dataset.side;
+    const card = document.getElementById(`match-${matchId}`);
+    card.querySelectorAll('.winner-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+  } else if (action === 'bet-score') {
+    placeScoreBet(matchId);
+  } else if (action === 'bet-winner') {
+    placeWinnerBet(matchId);
+  }
 });
 
-document.getElementById('bet-amount').addEventListener('input', () => {
-  const raw = parseInt(document.getElementById('bet-amount').value, 10);
-  const slider = document.getElementById('bet-slider');
-  const clamped = Math.max(5, Math.min(raw || 5, parseInt(slider.max)));
-  slider.value = clamped;
-  document.getElementById('btn-bet-label').textContent = `${clamped} monet na ${state.selectedSlot || '–'}`;
-});
-
-// ── PLACE BET ──
-document.getElementById('btn-place-bet').addEventListener('click', async () => {
-  const amount = parseInt(document.getElementById('bet-amount').value, 10);
-  const slot = state.selectedSlot;
-  const errEl = document.getElementById('bet-error');
+async function placeScoreBet(matchId) {
+  const a = parseInt(document.getElementById(`score-a-${matchId}`).value, 10);
+  const b = parseInt(document.getElementById(`score-b-${matchId}`).value, 10);
+  const amount = parseInt(document.getElementById(`score-amount-${matchId}`).value, 10);
+  const errEl = document.getElementById(`score-error-${matchId}`);
   errEl.textContent = '';
 
-  if (!slot) { errEl.textContent = 'Wybierz slot'; return; }
-  if (!amount || amount < 5) { errEl.textContent = 'Minimum 5 monet'; return; }
-
-  const btn = document.getElementById('btn-place-bet');
-  btn.disabled = true;
-  btn.textContent = 'Stawiam...';
-
   try {
-    const res = await api('POST', '/api/bet', { slot, amount });
-
+    const res = await api('POST', '/api/bet/score', { match_id: matchId, guess_score_a: a, guess_score_b: b, amount });
     state.balance = res.new_balance;
-    state.todayBet = { slot, amount };
-
     updateBalanceDisplay(res.new_balance);
     showConfetti();
-
-    // Pokaż bet-placed
-    document.getElementById('bet-placed').style.display = 'flex';
-    document.getElementById('bet-placed-info').textContent = `${slot} · ${amount} monet`;
-
-    // Pulsacja slotu
-    pulseSlot(slot);
-
-    // Odśwież dane
-    await loadTodayData();
-
+    await loadMatches();
   } catch (e) {
     errEl.textContent = e.message;
-    btn.disabled = false;
-    btn.innerHTML = `Stawiam <span id="btn-bet-label">${amount} monet</span>`;
   }
-});
-
-function pulseSlot(slot) {
-  const cards = document.querySelectorAll('.slot-card');
-  cards.forEach(card => {
-    const time = card.querySelector('.slot-time');
-    if (time && slot.startsWith(time.textContent)) {
-      card.classList.add('slot-pulse');
-      setTimeout(() => card.classList.remove('slot-pulse'), 600);
-    }
-  });
 }
 
-// ── DAY RESULT ──
-function renderDayResult(result) {
-  const section = document.getElementById('results-section');
-  const content = document.getElementById('results-content');
-  section.style.display = 'block';
+async function placeWinnerBet(matchId) {
+  const guess_winner = state.winnerSelection[matchId];
+  const amount = parseInt(document.getElementById(`winner-amount-${matchId}`).value, 10);
+  const errEl = document.getElementById(`winner-error-${matchId}`);
+  errEl.textContent = '';
 
-  const nearestNote = result.nearest_win
-    ? `<div class="text-muted small" style="margin:6px 0 0">⚡ Nikt nie trafił dokładnie — wygrywa najbliższy slot (${result.winning_slot})</div>`
-    : `<div class="text-muted small" style="margin:6px 0 0">Wygrywający slot: <span class="mono accent">${result.winning_slot}</span></div>`;
+  if (!guess_winner) { errEl.textContent = 'Wybierz drużynę'; return; }
 
-  content.innerHTML = `
-    <div class="breaking-banner">🍽️ MICHAŁ POSZEDŁ NA OBIAD O ${result.actual_time}</div>
-    ${nearestNote}
-    ${result.michal_comment ? `<div class="michal-comment">"${result.michal_comment}"</div>` : ''}
-  `;
-
-  // Near miss dla gracza
-  if (state.todayBet && state.todayBet.slot !== result.winning_slot) {
-    const winMins = timeToMins(result.actual_time);
-    const myMins = timeToMins(state.todayBet.slot.split('-')[0]);
-    if (Math.abs(myMins - winMins) <= 20) {
-      content.innerHTML += `<div class="near-miss">💔 Grałeś na ${state.todayBet.slot}, Michał poszedł o ${result.actual_time}. Mogłeś wygrać.</div>`;
-    }
+  try {
+    const res = await api('POST', '/api/bet/winner', { match_id: matchId, guess_winner, amount });
+    state.balance = res.new_balance;
+    updateBalanceDisplay(res.new_balance);
+    showConfetti();
+    await loadMatches();
+  } catch (e) {
+    errEl.textContent = e.message;
   }
-
-  // Załaduj i pokaż listę wygranych
-  api('GET', '/api/day-results').then(data => {
-    if (!data.bets || !data.bets.length) return;
-
-    const winners = data.bets.filter(b => b.won);
-    const losers  = data.bets.filter(b => !b.won);
-
-    let html = `<div class="result-winner-list">`;
-
-    if (winners.length) {
-      html += `<div class="text-muted small" style="padding:4px 0;letter-spacing:0.5px">🏆 WYGRALI</div>`;
-      winners.forEach((b, i) => {
-        const isMe = state.nickname && b.nickname === state.nickname;
-        html += `
-          <div class="result-player-row won" style="animation-delay:${i * 0.08}s">
-            <span style="flex:1">${esc(b.nickname)}${isMe ? ' <span class="accent">(ty)</span>' : ''}</span>
-            <span class="text-muted small">postawił ${b.amount} monet</span>
-            <span class="mono gold" style="margin-left:12px">+${b.payout} monet</span>
-          </div>`;
-      });
-    }
-
-    if (losers.length) {
-      html += `<div class="text-muted small" style="padding:8px 0 4px;letter-spacing:0.5px">❌ NIE TRAFILI</div>`;
-      losers.forEach(b => {
-        const isMe = state.nickname && b.nickname === state.nickname;
-        html += `
-          <div class="result-player-row lost">
-            <span style="flex:1">${esc(b.nickname)}${isMe ? ' <span class="accent">(ty)</span>' : ''}</span>
-            <span class="mono text-muted">${b.slot}</span>
-            <span class="mono danger" style="margin-left:12px">-${b.amount} monet</span>
-          </div>`;
-      });
-    }
-
-    html += `</div>
-      <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">
-        Łączna pula: <span class="mono">${result.total_pool} monet</span>
-      </div>`;
-
-    content.innerHTML += html;
-  }).catch(() => {});
 }
 
-function timeToMins(t) {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
+// ── RECENT RESULTS ──
+function renderRecentResults(matches) {
+  const list = document.getElementById('history-list');
+  const finished = matches.filter(m => m.finished).sort((a, b) => b.kickoff_at.localeCompare(a.kickoff_at)).slice(0, 8);
+
+  if (!finished.length) {
+    list.innerHTML = '<div class="text-muted small" style="padding:8px 4px">Brak wyników</div>';
+    return;
+  }
+
+  list.innerHTML = finished.map(m => {
+    const [datePart] = m.kickoff_at.split('T');
+    const [y, mo, d] = datePart.split('-').map(Number);
+    return `
+      <div class="history-row">
+        <span class="history-date">${d} ${MONTHS_PL[mo - 1].slice(0, 3)}</span>
+        <span class="history-slot mono">${esc(m.team_a)} ${m.score_a}:${m.score_b} ${esc(m.team_b)}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 // ── LEADERBOARD ──
@@ -448,7 +399,7 @@ function renderLeaderboard(data) {
   let html = '';
   let prevWasTop = false;
 
-  data.leaderboard.forEach((p, i) => {
+  data.leaderboard.forEach((p) => {
     if (p.outside_top && !prevWasTop) {
       html += `<div class="lb-separator">···</div>`;
     }
@@ -462,7 +413,7 @@ function renderLeaderboard(data) {
       <div class="lb-row${meClass}">
         <span class="lb-rank">${medal}</span>
         <span class="lb-nick">${esc(p.nickname)}${streakBadge}</span>
-        <span class="lb-balance mono">${p.balance} monet</span>
+        <span class="lb-balance mono">${p.balance} VAR</span>
       </div>
     `;
   });
@@ -470,128 +421,67 @@ function renderLeaderboard(data) {
   list.innerHTML = html;
 }
 
-// ── HISTORY ──
-async function loadHistory() {
-  try {
-    const data = await api('GET', '/api/history');
-    renderHistory(data.results);
-  } catch (e) {
-    console.error('History error:', e);
-  }
-}
-
-function renderHistory(results) {
-  const list = document.getElementById('history-list');
-  if (!results.length) {
-    list.innerHTML = '<div class="text-muted small" style="padding:8px 4px">Brak wyników</div>';
-    return;
-  }
-
-  list.innerHTML = results.map(r => {
-    const d = new Date(r.result_date + 'T12:00:00');
-    const label = d.toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' });
-    const slotClass = r.winners_count === 0 ? 'history-slot no-winner' : 'history-slot';
-    const winnerText = r.winners_count === 0 ? 'brak trafień' : `${r.winners_count} traf.`;
-
-    return `
-      <div class="history-row">
-        <span class="history-date">${label}</span>
-        <span class="${slotClass}">${r.winning_slot ? r.winning_slot.split('-')[0] : '–'} ✓</span>
-        <span class="history-winners">${winnerText}</span>
-      </div>
-    `;
-  }).join('');
-}
-
 // ── BANK ──
 async function loadBank() {
   try {
     const data = await api('GET', '/api/bank');
-    document.getElementById('bank-balance').textContent = data.balance + ' monet';
+    document.getElementById('bank-balance').textContent = data.balance + ' VAR';
   } catch {}
 }
 
 // ── COUNTDOWN ──
-let countdownInterval = null;
-
-function setupCountdown() {
-  updateCountdown();
+function nowWawDate() {
+  const s = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' });
+  return new Date(s.replace(' ', 'T'));
 }
 
-// Sloty po stronie klienta (zgodne z serwerem: 10:30–14:30)
-const CLIENT_SLOTS = (() => {
-  const s = [];
-  let h = 10, m = 30;
-  while (h < 14 || (h === 14 && m <= 15)) {
-    const pad = n => String(n).padStart(2, '0');
-    const em = m + 15, eh = em >= 60 ? h + 1 : h, enm = em >= 60 ? em - 60 : em;
-    s.push({ slot: `${pad(h)}:${pad(m)}-${pad(eh)}:${pad(enm)}`, startMins: h * 60 + m });
-    m += 15; if (m >= 60) { h++; m -= 60; }
-  }
-  return s;
-})();
+function kickoffDate(str) {
+  return new Date(str + ':00');
+}
 
 function updateCountdown() {
-  const now = new Date();
-  const wawStr = now.toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' });
-  const waw = new Date(wawStr);
-  const h = waw.getHours(), m = waw.getMinutes(), s = waw.getSeconds();
-  const totalMins = h * 60 + m;
-
   const textEl = document.getElementById('countdown-text');
   const barEl = document.getElementById('countdown-bar');
+  const matches = state.matches || [];
 
-  const firstSlotMins = CLIENT_SLOTS[0].startMins;   // 10:30 = 630
-  const lastSlotMins  = CLIENT_SLOTS[CLIENT_SLOTS.length - 1].startMins; // 14:15 = 855
+  if (!matches.length) { textEl.textContent = 'ładowanie...'; return; }
 
-  if (totalMins < firstSlotMins) {
-    // Przed 10:30
-    const remaining = (firstSlotMins - totalMins) * 60 - s;
-    const hh = Math.floor(remaining / 3600);
-    const mm = Math.floor((remaining % 3600) / 60);
-    const ss = remaining % 60;
-    textEl.textContent = `⏳ obstawianie zaczyna się za ${hh > 0 ? hh + 'h ' : ''}${String(mm).padStart(2,'0')}m ${String(ss).padStart(2,'0')}s`;
-    barEl.style.width = '0%';
-  } else if (totalMins <= lastSlotMins && !state.todayData?.result) {
-    // 10:30–14:15 i dzień NIE jest jeszcze rozliczony
-    const nextFuture = CLIENT_SLOTS.find(sl => sl.startMins > totalMins);
-    const elapsed = (totalMins - firstSlotMins) * 60 + s;
-    const total   = (lastSlotMins - firstSlotMins) * 60;
-    const pct = Math.min((elapsed / total) * 100, 100);
-    barEl.style.width = `${pct}%`;
+  const upcoming = matches.filter(m => !m.finished).sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at));
 
-    if (nextFuture) {
-      const remaining = (nextFuture.startMins - totalMins) * 60 - s;
-      const mm = Math.floor(remaining / 60);
-      const ss = remaining % 60;
-      textEl.textContent = `🟢 następny slot (${nextFuture.slot.split('-')[0]}) za ${mm}m ${String(ss).padStart(2,'0')}s`;
-    } else {
-      textEl.textContent = `🟢 ostatni slot dostępny`;
-    }
-  } else {
-    // Po 14:15 — sprawdź czy dzień już rozliczony
-    const daySettled = !!state.todayData?.result;
-
-    if (daySettled) {
-      // Odliczaj do 10:30 następnego dnia
-      const nextDayStart = new Date(wawStr);
-      nextDayStart.setDate(nextDayStart.getDate() + 1);
-      nextDayStart.setHours(10, 30, 0, 0);
-      const remaining = Math.max(0, Math.floor((nextDayStart - now) / 1000));
-      const hh = Math.floor(remaining / 3600);
-      const mm = Math.floor((remaining % 3600) / 60);
-      const ss = remaining % 60;
-      textEl.textContent = `⏳ następna runda za ${hh}h ${String(mm).padStart(2,'0')}m ${String(ss).padStart(2,'0')}s`;
-      barEl.style.width = '100%';
-    } else {
-      // Sloty minęły, czekamy na wynik
-      const elapsed = (totalMins - lastSlotMins) * 60 + s;
-      const mm = Math.floor(elapsed / 60);
-      const ssec = elapsed % 60;
-      textEl.textContent = `🔒 obstawianie zakończone — czekamy na Michała (${mm}m ${String(ssec).padStart(2,'0')}s temu)`;
-      barEl.style.width = '100%';
-    }
+  if (!upcoming.length) {
+    textEl.textContent = '🏆 Turniej rozliczony do końca!';
+    barEl.style.width = '100%';
+    return;
   }
+
+  const next = upcoming[0];
+  const now = nowWawDate();
+  const target = kickoffDate(next.kickoff_at);
+  const diffMs = target - now;
+  const teamsLabel = (next.team_a && next.team_b) ? `${next.team_a} – ${next.team_b}` : next.round;
+
+  if (diffMs > 0) {
+    const totalSec = Math.floor(diffMs / 1000);
+    const d = Math.floor(totalSec / 86400);
+    const h = Math.floor((totalSec % 86400) / 3600);
+    const mnt = Math.floor((totalSec % 3600) / 60);
+    const sec = totalSec % 60;
+    const parts = [];
+    if (d > 0) parts.push(d + 'd');
+    if (d > 0 || h > 0) parts.push(h + 'h');
+    parts.push(String(mnt).padStart(2, '0') + 'm');
+    parts.push(String(sec).padStart(2, '0') + 's');
+    textEl.textContent = `⏳ ${teamsLabel} za ${parts.join(' ')}`;
+  } else {
+    textEl.textContent = `🔒 ${teamsLabel} — zakłady zamknięte, czekamy na wynik`;
+  }
+
+  const first = kickoffDate(matches[0].kickoff_at);
+  const last = kickoffDate(matches[matches.length - 1].kickoff_at);
+  const span = last - first;
+  const elapsed = now - first;
+  const pct = span > 0 ? Math.min(100, Math.max(0, (elapsed / span) * 100)) : 0;
+  barEl.style.width = pct + '%';
 }
 
 // ── BALANCE DISPLAY ──
@@ -601,10 +491,10 @@ function updateBalanceDisplay(balance) {
   const el = document.getElementById('user-balance-display');
   if (currentBalance !== null && currentBalance !== balance) {
     el.classList.remove('balance-rolling');
-    void el.offsetWidth; // reset animation
+    void el.offsetWidth;
     el.classList.add('balance-rolling');
   }
-  el.textContent = `💰 ${balance} monet`;
+  el.textContent = `💰 ${balance} VAR`;
   currentBalance = balance;
 }
 
@@ -614,7 +504,7 @@ function showConfetti() {
   for (let i = 0; i < 18; i++) {
     const el = document.createElement('div');
     el.className = 'confetti-piece';
-    el.textContent = '🍽️';
+    el.textContent = '⚽';
     el.style.left = Math.random() * 100 + 'vw';
     el.style.animationDelay = (Math.random() * 0.6) + 's';
     el.style.fontSize = (16 + Math.random() * 16) + 'px';
@@ -624,8 +514,9 @@ function showConfetti() {
 }
 
 // ── WELFARE TOAST ──
-function showWelfareToast() {
+function showWelfareToast(amount) {
   const t = document.getElementById('welfare-toast');
+  document.getElementById('welfare-toast-text').textContent = `💸 Dostałeś ${amount} VAR z kasy biurowej. Nie trać ich.`;
   t.style.display = 'block';
   t.classList.add('show');
   setTimeout(() => {
@@ -639,7 +530,7 @@ function showRipNotice(nick) {
   const year = new Date().getFullYear();
   const notice = document.createElement('div');
   notice.className = 'rip-notice';
-  notice.textContent = `R.I.P. ${nick}'s monet (${year}–${year})`;
+  notice.textContent = `R.I.P. ${nick}'s VAR-y (${year}–${year})`;
   document.querySelector('.col-game').prepend(notice);
 }
 
@@ -650,23 +541,6 @@ function esc(str) {
     .replace(/</g,'&lt;')
     .replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;');
-}
-
-// ── SLOTS TOGGLE ──
-document.getElementById('slots-toggle').addEventListener('click', () => {
-  const body = document.getElementById('slots-body');
-  const btn  = document.getElementById('slots-toggle');
-  const collapsed = body.classList.toggle('collapsed');
-  btn.textContent = collapsed ? '▼ rozwiń' : '▲ zwiń';
-  btn.setAttribute('aria-expanded', !collapsed);
-});
-
-function setSlotsCollapsed(collapsed) {
-  const body = document.getElementById('slots-body');
-  const btn  = document.getElementById('slots-toggle');
-  body.classList.toggle('collapsed', collapsed);
-  btn.textContent = collapsed ? '▼ rozwiń' : '▲ zwiń';
-  btn.setAttribute('aria-expanded', !collapsed);
 }
 
 // ── HOW IT WORKS MODAL ──

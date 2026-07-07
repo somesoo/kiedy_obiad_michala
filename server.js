@@ -9,10 +9,28 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 
+const STARTING_BALANCE = 1000;
+const MIN_BET = 10;
+const WELFARE_AMOUNT = 150;
+
 const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
+
+// Jeśli baza jeszcze nie ma tabeli "matches" — to stara baza z gry "obiad Michała".
+// Mundial to nowy rozdział, więc czyścimy stare tabele przed zbudowaniem nowego schematu.
+const hasMatchesTable = db.prepare(
+  `SELECT name FROM sqlite_master WHERE type='table' AND name='matches'`
+).get();
+if (!hasMatchesTable) {
+  db.exec(`
+    DROP TABLE IF EXISTS bets;
+    DROP TABLE IF EXISTS results;
+    DROP TABLE IF EXISTS players;
+    DROP TABLE IF EXISTS bank;
+  `);
+}
 
 // Inicjalizacja schematu bazy
 db.exec(`
@@ -20,7 +38,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nickname TEXT UNIQUE NOT NULL,
     token TEXT UNIQUE NOT NULL,
-    balance INTEGER DEFAULT 100,
+    balance INTEGER DEFAULT ${STARTING_BALANCE},
     current_streak INTEGER DEFAULT 0,
     best_streak INTEGER DEFAULT 0,
     total_wins INTEGER DEFAULT 0,
@@ -28,26 +46,34 @@ db.exec(`
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    round TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    team_a TEXT,
+    team_b TEXT,
+    placeholder_a TEXT,
+    placeholder_b TEXT,
+    kickoff_at TEXT NOT NULL,
+    score_a INTEGER,
+    score_b INTEGER,
+    winner TEXT,
+    finished INTEGER DEFAULT 0,
+    UNIQUE(round, position)
+  );
+
   CREATE TABLE IF NOT EXISTS bets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id INTEGER REFERENCES players(id),
-    bet_date TEXT NOT NULL,
-    slot TEXT NOT NULL,
+    match_id INTEGER REFERENCES matches(id),
+    bet_type TEXT NOT NULL,
+    guess_score_a INTEGER,
+    guess_score_b INTEGER,
+    guess_winner TEXT,
     amount INTEGER NOT NULL,
+    payout INTEGER,
     placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(player_id, bet_date)
-  );
-
-  CREATE TABLE IF NOT EXISTS results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    result_date TEXT UNIQUE NOT NULL,
-    winning_slot TEXT NOT NULL,
-    actual_time TEXT NOT NULL,
-    total_pool INTEGER NOT NULL,
-    winners_count INTEGER NOT NULL,
-    michal_comment TEXT,
-    nearest_win INTEGER DEFAULT 0,
-    confirmed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    UNIQUE(player_id, match_id, bet_type)
   );
 
   CREATE TABLE IF NOT EXISTS bank (
@@ -59,15 +85,42 @@ db.exec(`
   INSERT OR IGNORE INTO bank VALUES (1, 0, CURRENT_TIMESTAMP);
 `);
 
+// Drabinka mundialu — sloty czasowe w strefie Europe/Warsaw ("YYYY-MM-DDTHH:MM")
+const FIXTURES = [
+  { round: '1/8 finału', position: 1, team_a: 'Argentyna', team_b: 'Egipt', kickoff_at: '2026-07-07T18:00' },
+  { round: '1/8 finału', position: 2, team_a: 'Szwajcaria', team_b: 'Kolumbia', kickoff_at: '2026-07-07T22:00' },
+  { round: 'Ćwierćfinał', position: 1, team_a: 'Francja', team_b: 'Maroko', kickoff_at: '2026-07-09T22:00' },
+  { round: 'Ćwierćfinał', position: 2, team_a: 'Hiszpania', team_b: 'Belgia', kickoff_at: '2026-07-10T21:00' },
+  { round: 'Ćwierćfinał', position: 3, team_a: 'Norwegia', team_b: 'Anglia', kickoff_at: '2026-07-11T23:00' },
+  { round: 'Ćwierćfinał', position: 4, placeholder_a: 'Argentyna / Egipt', placeholder_b: 'Szwajcaria / Kolumbia', kickoff_at: '2026-07-12T03:00' },
+  { round: 'Półfinał', position: 1, placeholder_a: 'Francja / Maroko', placeholder_b: 'Hiszpania / Belgia', kickoff_at: '2026-07-14T21:00' },
+  { round: 'Półfinał', position: 2, placeholder_a: 'Norwegia / Anglia', placeholder_b: 'Argentyna/Egipt/Szwajcaria/Kolumbia', kickoff_at: '2026-07-15T21:00' },
+  { round: 'Mecz o 3. miejsce', position: 1, placeholder_a: 'Przegrany półfinału 1', placeholder_b: 'Przegrany półfinału 2', kickoff_at: '2026-07-18T23:00' },
+  { round: 'Finał', position: 1, placeholder_a: 'Zwycięzca półfinału 1', placeholder_b: 'Zwycięzca półfinału 2', kickoff_at: '2026-07-19T21:00' }
+];
+
+const insertFixture = db.prepare(`
+  INSERT OR IGNORE INTO matches (round, position, team_a, team_b, placeholder_a, placeholder_b, kickoff_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+FIXTURES.forEach(f => {
+  insertFixture.run(
+    f.round, f.position,
+    f.team_a || null, f.team_b || null,
+    f.placeholder_a || null, f.placeholder_b || null,
+    f.kickoff_at
+  );
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Pomocnicze — aktualna data w Europe/Warsaw
-function todayWaw() {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Warsaw' });
+// Aktualny czas w Warsaw jako "YYYY-MM-DDTHH:MM" — porównywalny leksykograficznie z kickoff_at
+function nowWawStr() {
+  const s = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' }); // "2026-07-07 18:03:00"
+  return s.replace(' ', 'T').slice(0, 16);
 }
 
-// Aktualna godzina w Warsaw jako "HH:MM"
 function nowTimeWaw() {
   return new Date().toLocaleTimeString('pl-PL', {
     timeZone: 'Europe/Warsaw',
@@ -77,104 +130,16 @@ function nowTimeWaw() {
   });
 }
 
-// Generuj sloty 10:30–14:30 (co 15 min, ostatni slot: 14:15-14:30)
-function generateSlots() {
-  const slots = [];
-  let h = 10, m = 30;
-  while (h < 14 || (h === 14 && m <= 15)) {
-    const pad = n => String(n).padStart(2, '0');
-    const endM = m + 15;
-    const endH = endM >= 60 ? h + 1 : h;
-    const endMNorm = endM >= 60 ? endM - 60 : endM;
-    slots.push(`${pad(h)}:${pad(m)}-${pad(endH)}:${pad(endMNorm)}`);
-    m += 15;
-    if (m >= 60) { h++; m -= 60; }
-  }
-  return slots;
+// Mecz można obstawiać tylko gdy obie drużyny są znane, mecz się jeszcze nie zaczął i nie jest rozliczony
+function isMatchAvailable(match) {
+  return !!(match.team_a && match.team_b) && !match.finished && nowWawStr() < match.kickoff_at;
 }
 
-const ALL_SLOTS = generateSlots();
-
-// Aktualne minuty w strefie Warsaw
-function nowMinsWaw() {
-  const wawStr = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Warsaw' });
-  const waw = new Date(wawStr);
-  return waw.getHours() * 60 + waw.getMinutes();
-}
-
-// Czy konkretny slot jest jeszcze dostępny do obstawiania (start slotu jeszcze nie minął)
-function isSlotAvailable(slotStr) {
-  const startStr = slotStr.split('-')[0];
-  const [sh, sm] = startStr.split(':').map(Number);
-  return nowMinsWaw() < sh * 60 + sm;
-}
-
-// Czy jest przynajmniej jeden slot do obstawienia
-function hasAvailableSlots() {
-  return ALL_SLOTS.some(isSlotAvailable);
-}
-
-// Wyznacz slot który zawiera podaną godzinę (np. "12:37" → "12:30-12:45")
-function timeToSlot(timeStr) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const slotStart = Math.floor(m / 15) * 15;
-  const slotEnd = slotStart + 15;
-  const pad = n => String(n).padStart(2, '0');
-  const endH = slotEnd >= 60 ? h + 1 : h;
-  const endM = slotEnd >= 60 ? slotEnd - 60 : slotEnd;
-  return `${pad(h)}:${pad(slotStart)}-${pad(endH)}:${pad(endM)}`;
-}
-
-// Dystans od godziny do slotu w minutach (0 = trafiony)
-// Uwaga: slot [start, end) — end jest wyłączne, więc 12:15 należy do 12:15-12:30, nie do 12:00-12:15
-function slotDistance(slotStr, actualMins) {
-  const [startStr, endStr] = slotStr.split('-');
-  const [sh, sm] = startStr.split(':').map(Number);
-  const [eh, em] = endStr.split(':').map(Number);
-  const startMins = sh * 60 + sm;
-  const endMins = eh * 60 + em;
-  if (actualMins >= startMins && actualMins < endMins) return 0;
-  if (actualMins < startMins) return startMins - actualMins;
-  // +1 żeby granica slotu (np. 12:15 dla 12:00-12:15) nie miała dystansu 0
-  return actualMins - endMins + 1;
-}
-
-// Znajdź zwycięskie zakłady — najpierw dokładne trafienie, potem najbliższy slot
-// Zwraca zawsze kogoś jeśli są jakiekolwiek zakłady
-function findWinningBets(allBets, actualTime) {
-  if (allBets.length === 0) return { bets: [], isNearestWin: false, winningSlot: null };
-
-  const exactSlot = timeToSlot(actualTime);
-  const exactWinners = allBets.filter(b => b.slot === exactSlot);
-  if (exactWinners.length > 0) {
-    return { bets: exactWinners, isNearestWin: false, winningSlot: exactSlot };
-  }
-
-  // Nikt nie trafił dokładnie — znajdź najbliższy slot z zakładami
-  const [ah, am] = actualTime.split(':').map(Number);
-  const actualMins = ah * 60 + am;
-
-  const uniqueSlots = [...new Set(allBets.map(b => b.slot))];
-  const withDist = uniqueSlots.map(slot => ({ slot, dist: slotDistance(slot, actualMins) }));
-  const minDist = Math.min(...withDist.map(s => s.dist));
-  const nearestSlots = withDist.filter(s => s.dist === minDist).map(s => s.slot);
-
-  const nearestBets = allBets.filter(b => nearestSlots.includes(b.slot));
-  // Jeśli remis dystansu — wygrywa slot z większą pulą (bardziej "zdecydowany" wybór biura)
-  if (nearestSlots.length > 1) {
-    const poolPerSlot = {};
-    nearestBets.forEach(b => {
-      poolPerSlot[b.slot] = (poolPerSlot[b.slot] || 0) + Number(b.amount);
-    });
-    const bestSlot = nearestSlots.reduce((a, b) => (poolPerSlot[a] >= poolPerSlot[b] ? a : b));
-    return {
-      bets: allBets.filter(b => b.slot === bestSlot),
-      isNearestWin: true,
-      winningSlot: bestSlot
-    };
-  }
-
-  return { bets: nearestBets, isNearestWin: true, winningSlot: nearestSlots[0] };
+function matchLockReason(match) {
+  if (!match.team_a || !match.team_b) return 'Drużyny jeszcze nieznane — poczekaj, aż admin je uzupełni';
+  if (match.finished) return 'Mecz już rozliczony';
+  if (nowWawStr() >= match.kickoff_at) return 'Zakłady na ten mecz są zamknięte — mecz się zaczął';
+  return 'Zakłady na ten mecz są niedostępne';
 }
 
 // Wrapper transakcji
@@ -201,21 +166,45 @@ function authPlayer(req, res, next) {
   next();
 }
 
-// Welfare — jeśli saldo gracza = 0, daj 20 ish z banku
+// Welfare — jeśli saldo gracza = 0, daj zastrzyk z banku
 function checkAndApplyWelfare(playerId) {
   const player = db.prepare('SELECT balance FROM players WHERE id = ?').get(playerId);
   if (player.balance > 0) return null;
 
   const bank = db.prepare('SELECT balance FROM bank WHERE id = 1').get();
-  if (bank.balance < 20) return null;
+  if (bank.balance < WELFARE_AMOUNT) return null;
 
-  db.prepare('UPDATE players SET balance = balance + 20 WHERE id = ?').run(playerId);
-  db.prepare('UPDATE bank SET balance = balance - 20, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run();
-  return 20;
+  db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?').run(WELFARE_AMOUNT, playerId);
+  db.prepare('UPDATE bank SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(WELFARE_AMOUNT);
+  return WELFARE_AMOUNT;
+}
+
+// System parimutuel — pula wspólna dzielona proporcjonalnie między trafionych, z minimalnym zwrotem stawki
+function settleMarket(bets, isWinner) {
+  const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0);
+  const winners = bets.filter(isWinner);
+
+  if (winners.length === 0) {
+    return { totalPool, winnersPool: 0, bankCut: totalPool, payouts: [], winnersCount: 0 };
+  }
+
+  const winnersPool = Math.floor(totalPool * 0.9);
+  const winnersSum = winners.reduce((s, b) => s + Number(b.amount), 0);
+
+  const payouts = winners.map(b => {
+    const raw = winnersSum > 0 ? Math.floor((Number(b.amount) / winnersSum) * winnersPool) : 0;
+    const payout = Math.max(raw, Number(b.amount));
+    return { player_id: b.player_id, bet_id: b.id, amount: Number(b.amount), payout };
+  });
+
+  const actualWinnersPool = payouts.reduce((s, p) => s + p.payout, 0);
+  const bankCut = (totalPool - winnersPool) + Math.max(0, winnersPool - actualWinnersPool);
+
+  return { totalPool, winnersPool, bankCut, payouts, winnersCount: winners.length };
 }
 
 // ──────────────────────────────────────────────
-// ENDPOINTS
+// ENDPOINTS — GRACZE
 // ──────────────────────────────────────────────
 
 // POST /api/register
@@ -230,15 +219,14 @@ app.post('/api/register', (req, res) => {
 
   const existing = db.prepare('SELECT id, token FROM players WHERE nickname = ?').get(nickname.trim());
   if (existing) {
-    // Zwróć istniejącego gracza (logowanie po nicku)
     return res.json({ player_id: existing.id, token: existing.token, new: false });
   }
 
   const token = uuidv4();
   try {
     const result = db.prepare(
-      'INSERT INTO players (nickname, token) VALUES (?, ?)'
-    ).run(nickname.trim(), token);
+      'INSERT INTO players (nickname, token, balance) VALUES (?, ?, ?)'
+    ).run(nickname.trim(), token, STARTING_BALANCE);
     res.json({ player_id: Number(result.lastInsertRowid), token, new: true });
   } catch (e) {
     if (e.message && e.message.includes('UNIQUE')) {
@@ -256,18 +244,13 @@ app.get('/api/me', authPlayer, (req, res) => {
     'SELECT COUNT(*) as cnt FROM players WHERE balance > ?'
   ).get(player.balance);
 
-  const todayBet = db.prepare(
-    'SELECT * FROM bets WHERE player_id = ? AND bet_date = ?'
-  ).get(player.id, todayWaw());
-
   const history = db.prepare(`
-    SELECT b.bet_date, b.slot, b.amount, r.winning_slot, r.actual_time,
-      CASE WHEN r.winning_slot = b.slot THEN 1 ELSE 0 END as won
+    SELECT b.id, b.bet_type, b.guess_score_a, b.guess_score_b, b.guess_winner, b.amount, b.payout, b.placed_at,
+           m.round, m.team_a, m.team_b, m.score_a, m.score_b, m.winner, m.finished, m.kickoff_at
     FROM bets b
-    LEFT JOIN results r ON r.result_date = b.bet_date
+    JOIN matches m ON m.id = b.match_id
     WHERE b.player_id = ?
-    ORDER BY b.bet_date DESC
-    LIMIT 14
+    ORDER BY m.kickoff_at DESC
   `).all(player.id);
 
   const welfare = checkAndApplyWelfare(player.id);
@@ -281,107 +264,140 @@ app.get('/api/me', authPlayer, (req, res) => {
     best_streak: player.best_streak,
     total_wins: player.total_wins,
     rank: Number(rank.cnt) + 1,
-    today_bet: todayBet || null,
     history,
     welfare_received: welfare
   });
 });
 
-// GET /api/today
-app.get('/api/today', (req, res) => {
-  const today = todayWaw();
+// GET /api/matches — publiczna lista meczów (tryb ślepy dopóki mecz nierozliczony)
+app.get('/api/matches', (req, res) => {
+  const token = req.headers['x-token'];
+  const player = token ? db.prepare('SELECT id FROM players WHERE token = ?').get(token) : null;
 
-  const betsPerSlot = db.prepare(`
-    SELECT slot, SUM(amount) as total, COUNT(*) as count
-    FROM bets WHERE bet_date = ?
-    GROUP BY slot
-  `).all(today);
+  const matches = db.prepare('SELECT * FROM matches ORDER BY kickoff_at ASC').all();
 
-  const slotMap = {};
-  betsPerSlot.forEach(b => { slotMap[b.slot] = { total: b.total, count: b.count }; });
+  const result = matches.map(m => {
+    const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(m.id);
+    const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(m.id);
+    const blind = !m.finished;
 
-  const totalPool = betsPerSlot.reduce((sum, b) => sum + Number(b.total), 0);
-  const totalBets = betsPerSlot.reduce((sum, b) => sum + Number(b.count), 0);
+    const scorePool = scoreBets.reduce((s, b) => s + Number(b.amount), 0);
+    const winnerAPool = winnerBets.filter(b => b.guess_winner === 'A').reduce((s, b) => s + Number(b.amount), 0);
+    const winnerBPool = winnerBets.filter(b => b.guess_winner === 'B').reduce((s, b) => s + Number(b.amount), 0);
 
-  const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
+    const myScoreBet = player ? scoreBets.find(b => b.player_id === player.id) : null;
+    const myWinnerBet = player ? winnerBets.find(b => b.player_id === player.id) : null;
 
-  // Przed rozliczeniem — ślepy tryb: ukryj rozkład zakładów per slot
-  const blind = !result;
-
-  // Lista graczy którzy już obstawili dziś (bez slotów — tryb ślepy)
-  const todayBettors = db.prepare(`
-    SELECT p.nickname FROM bets b
-    JOIN players p ON p.id = b.player_id
-    WHERE b.bet_date = ?
-    ORDER BY b.placed_at
-  `).all(today).map(r => r.nickname);
-
-  res.json({
-    date: today,
-    any_slot_available: hasAvailableSlots(),
-    blind,
-    slots: ALL_SLOTS.map(slot => ({
-      slot,
-      total: blind ? 0 : (slotMap[slot] ? Number(slotMap[slot].total) : 0),
-      count: blind ? 0 : (slotMap[slot] ? Number(slotMap[slot].count) : 0),
-      available: isSlotAvailable(slot)
-    })),
-    total_pool: totalPool,
-    total_bets: totalBets,
-    today_bettors: todayBettors,
-    result: result || null,
-    server_time: nowTimeWaw()
+    return {
+      id: m.id,
+      round: m.round,
+      team_a: m.team_a,
+      team_b: m.team_b,
+      placeholder_a: m.placeholder_a,
+      placeholder_b: m.placeholder_b,
+      kickoff_at: m.kickoff_at,
+      available: isMatchAvailable(m),
+      finished: !!m.finished,
+      score_a: m.finished ? m.score_a : null,
+      score_b: m.finished ? m.score_b : null,
+      winner: m.finished ? m.winner : null,
+      score_market: {
+        count: scoreBets.length,
+        total: blind ? null : scorePool
+      },
+      winner_market: {
+        count: winnerBets.length,
+        total_a: blind ? null : winnerAPool,
+        total_b: blind ? null : winnerBPool
+      },
+      my_score_bet: myScoreBet
+        ? { guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout }
+        : null,
+      my_winner_bet: myWinnerBet
+        ? { guess_winner: myWinnerBet.guess_winner, amount: myWinnerBet.amount, payout: myWinnerBet.payout }
+        : null
+    };
   });
+
+  res.json({ matches: result, server_time: nowTimeWaw() });
 });
 
-// POST /api/bet
-app.post('/api/bet', authPlayer, (req, res) => {
-  const { slot, amount } = req.body;
-  const today = todayWaw();
+// POST /api/bet/score
+app.post('/api/bet/score', authPlayer, (req, res) => {
+  const { match_id, guess_score_a, guess_score_b, amount } = req.body;
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(match_id);
+  if (!match) return res.status(400).json({ error: 'Mecz nie istnieje' });
+  if (!isMatchAvailable(match)) return res.status(400).json({ error: matchLockReason(match) });
 
-  if (!ALL_SLOTS.includes(slot)) {
-    return res.status(400).json({ error: 'Nieprawidłowy slot czasu' });
-  }
-
-  if (!isSlotAvailable(slot)) {
-    return res.status(400).json({ error: 'Ten slot już minął — wybierz późniejszą godzinę' });
-  }
-
-  if (!hasAvailableSlots()) {
-    return res.status(400).json({ error: 'Wszystkie sloty na dziś już minęły — jutro spróbuj szczęścia' });
+  const a = parseInt(guess_score_a, 10);
+  const b = parseInt(guess_score_b, 10);
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > 20 || b > 20) {
+    return res.status(400).json({ error: 'Podaj sensowny wynik (0-20)' });
   }
 
   const amountInt = parseInt(amount, 10);
-  if (!amountInt || amountInt < 5) {
-    return res.status(400).json({ error: 'Minimalna stawka to 5 install.sh' });
+  if (!amountInt || amountInt < MIN_BET) {
+    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} VAR` });
   }
 
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
-
   if (amountInt > player.balance) {
-    return res.status(400).json({
-      error: `Za mało install.sh. Obecne saldo: ${player.balance} ish`
-    });
+    return res.status(400).json({ error: `Za mało VARów. Obecne saldo: ${player.balance}` });
   }
 
-  // Idempotentność — sprawdź czy zakład już istnieje
   const existing = db.prepare(
-    'SELECT * FROM bets WHERE player_id = ? AND bet_date = ?'
-  ).get(player.id, today);
-
-  if (existing) {
-    return res.status(400).json({ error: 'Jeden zakład dziennie — to nie kasyno' });
-  }
+    `SELECT id FROM bets WHERE player_id = ? AND match_id = ? AND bet_type = 'score'`
+  ).get(player.id, match.id);
+  if (existing) return res.status(400).json({ error: 'Zakład na wynik tego meczu już postawiony' });
 
   transaction(() => {
-    db.prepare(
-      'INSERT INTO bets (player_id, bet_date, slot, amount) VALUES (?, ?, ?, ?)'
-    ).run(player.id, today, slot, amountInt);
+    db.prepare(`
+      INSERT INTO bets (player_id, match_id, bet_type, guess_score_a, guess_score_b, amount)
+      VALUES (?, ?, 'score', ?, ?, ?)
+    `).run(player.id, match.id, a, b, amountInt);
     db.prepare('UPDATE players SET balance = balance - ? WHERE id = ?').run(amountInt, player.id);
   });
 
-  const newBalance = db.prepare('SELECT balance FROM players WHERE id = ?').get(player.id);
-  res.json({ success: true, new_balance: newBalance.balance, slot, amount: amountInt });
+  const fresh = db.prepare('SELECT balance FROM players WHERE id = ?').get(player.id);
+  res.json({ success: true, new_balance: fresh.balance });
+});
+
+// POST /api/bet/winner
+app.post('/api/bet/winner', authPlayer, (req, res) => {
+  const { match_id, guess_winner, amount } = req.body;
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(match_id);
+  if (!match) return res.status(400).json({ error: 'Mecz nie istnieje' });
+  if (!isMatchAvailable(match)) return res.status(400).json({ error: matchLockReason(match) });
+
+  if (guess_winner !== 'A' && guess_winner !== 'B') {
+    return res.status(400).json({ error: 'Wybierz drużynę A albo B' });
+  }
+
+  const amountInt = parseInt(amount, 10);
+  if (!amountInt || amountInt < MIN_BET) {
+    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} VAR` });
+  }
+
+  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
+  if (amountInt > player.balance) {
+    return res.status(400).json({ error: `Za mało VARów. Obecne saldo: ${player.balance}` });
+  }
+
+  const existing = db.prepare(
+    `SELECT id FROM bets WHERE player_id = ? AND match_id = ? AND bet_type = 'winner'`
+  ).get(player.id, match.id);
+  if (existing) return res.status(400).json({ error: 'Zakład na zwycięzcę tego meczu już postawiony' });
+
+  transaction(() => {
+    db.prepare(`
+      INSERT INTO bets (player_id, match_id, bet_type, guess_winner, amount)
+      VALUES (?, ?, 'winner', ?, ?)
+    `).run(player.id, match.id, guess_winner, amountInt);
+    db.prepare('UPDATE players SET balance = balance - ? WHERE id = ?').run(amountInt, player.id);
+  });
+
+  const fresh = db.prepare('SELECT balance FROM players WHERE id = ?').get(player.id);
+  res.json({ success: true, new_balance: fresh.balance });
 });
 
 // GET /api/leaderboard
@@ -429,123 +445,132 @@ app.get('/api/leaderboard', (req, res) => {
   res.json({ leaderboard: list, total_players: Number(totalPlayers) });
 });
 
-// GET /api/history
-app.get('/api/history', (req, res) => {
-  const results = db.prepare(`
-    SELECT result_date, winning_slot, actual_time, total_pool, winners_count, michal_comment
-    FROM results
-    ORDER BY result_date DESC
-    LIMIT 7
-  `).all();
-
-  res.json({ results });
-});
-
 // GET /api/bank
 app.get('/api/bank', (req, res) => {
   const bank = db.prepare('SELECT balance FROM bank WHERE id = 1').get();
   res.json({ balance: bank.balance });
 });
 
-// POST /api/admin/result
-app.post('/api/admin/result', (req, res) => {
-  const { actual_time, password, preview } = req.body;
+// ──────────────────────────────────────────────
+// ENDPOINTS — ADMIN
+// ──────────────────────────────────────────────
 
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Złe hasło, Michale' });
-  }
+// GET /api/admin/matches — pełny widok meczów + zakładów do panelu admina
+app.get('/api/admin/matches', (req, res) => {
+  const { password } = req.query;
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
 
-  if (!/^\d{2}:\d{2}$/.test(actual_time)) {
-    return res.status(400).json({ error: 'Podaj godzinę w formacie HH:MM' });
-  }
-
-  const [h, m] = actual_time.split(':').map(Number);
-  if (h < 10 || h > 17 || m < 0 || m > 59) {
-    return res.status(400).json({ error: 'Godzina poza sensownym zakresem' });
-  }
-
-  const today = todayWaw();
-
-  const allBets = db.prepare('SELECT * FROM bets WHERE bet_date = ?').all(today);
-  const totalPool = allBets.reduce((s, b) => s + Number(b.amount), 0);
-
-  const { bets: winnerBets, isNearestWin, winningSlot } = findWinningBets(allBets, actual_time);
-  const exactSlot = timeToSlot(actual_time);
-
-  const winnersPool = Math.floor(totalPool * 0.9);
-  const bankCut = totalPool - winnersPool;
-  const winnersSum = winnerBets.reduce((s, b) => s + Number(b.amount), 0);
-
-  const payouts = winnerBets.map(b => {
-    const raw = winnersSum > 0 ? Math.floor((Number(b.amount) / winnersSum) * winnersPool) : 0;
-    const payout = Math.max(raw, Number(b.amount));
-    return { player_id: b.player_id, amount: Number(b.amount), payout };
+  const matches = db.prepare('SELECT * FROM matches ORDER BY kickoff_at ASC').all();
+  const result = matches.map(m => {
+    const scoreBets = db.prepare(`
+      SELECT b.*, p.nickname FROM bets b JOIN players p ON p.id = b.player_id
+      WHERE match_id = ? AND bet_type = 'score' ORDER BY b.placed_at
+    `).all(m.id);
+    const winnerBets = db.prepare(`
+      SELECT b.*, p.nickname FROM bets b JOIN players p ON p.id = b.player_id
+      WHERE match_id = ? AND bet_type = 'winner' ORDER BY b.placed_at
+    `).all(m.id);
+    return { ...m, finished: !!m.finished, available: isMatchAvailable(m), score_bets: scoreBets, winner_bets: winnerBets };
   });
 
-  const actualWinnersPool = payouts.reduce((s, p) => s + p.payout, 0);
-  const roundingRemainder = winnersPool > actualWinnersPool ? winnersPool - actualWinnersPool : 0;
-  // Bank dostaje tylko 10% + reszta z zaokrąglania — nigdy całą pulę
-  const bankTotal = allBets.length === 0 ? 0 : (bankCut + roundingRemainder);
+  res.json({ matches: result, server_time: nowWawStr() });
+});
+
+// POST /api/admin/match/:id/teams — uzupełnij/zmień drużyny w kolejnych rundach drabinki
+app.post('/api/admin/match/:id/teams', (req, res) => {
+  const { password, team_a, team_b } = req.body;
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
+
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(req.params.id);
+  if (!match) return res.status(404).json({ error: 'Mecz nie istnieje' });
+  if (match.finished) return res.status(400).json({ error: 'Mecz już rozliczony — nie można zmienić drużyn' });
+
+  const a = (team_a || '').trim() || null;
+  const b = (team_b || '').trim() || null;
+  db.prepare('UPDATE matches SET team_a = ?, team_b = ? WHERE id = ?').run(a, b, match.id);
+
+  res.json({ success: true });
+});
+
+// POST /api/admin/match/:id/result — wpisz wynik meczu { score_a, score_b, winner, password, preview }
+app.post('/api/admin/match/:id/result', (req, res) => {
+  const { password, score_a, score_b, winner, preview } = req.body;
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
+
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(req.params.id);
+  if (!match) return res.status(404).json({ error: 'Mecz nie istnieje' });
+  if (!match.team_a || !match.team_b) return res.status(400).json({ error: 'Uzupełnij najpierw obie drużyny' });
+  if (match.finished && !preview) return res.status(400).json({ error: 'Wynik już wpisany dla tego meczu' });
+
+  const scoreA = parseInt(score_a, 10);
+  const scoreB = parseInt(score_b, 10);
+  if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB) || scoreA < 0 || scoreB < 0) {
+    return res.status(400).json({ error: 'Podaj poprawny wynik meczu' });
+  }
+  if (winner !== 'A' && winner !== 'B') {
+    return res.status(400).json({ error: 'Wskaż, kto ostatecznie awansuje/wygrywa (np. po karnych)' });
+  }
+
+  const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(match.id);
+  const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(match.id);
+
+  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === scoreA && b.guess_score_b === scoreB);
+  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === winner);
+  const bankTotal = scoreRes.bankCut + winnerRes.bankCut;
+
+  const withNick = payouts => payouts.map(p => {
+    const pl = db.prepare('SELECT nickname FROM players WHERE id = ?').get(p.player_id);
+    return { nickname: pl?.nickname, bet: p.amount, payout: p.payout };
+  });
 
   if (preview) {
     return res.json({
       preview: true,
-      winning_slot: winningSlot || exactSlot,
-      exact_slot: exactSlot,
-      is_nearest_win: isNearestWin,
-      actual_time,
-      total_pool: totalPool,
-      winners_count: winnerBets.length,
-      winners_pool: winnersPool,
-      bank_cut: bankTotal,
-      payouts: payouts.map(p => {
-        const player = db.prepare('SELECT nickname FROM players WHERE id = ?').get(p.player_id);
-        return { nickname: player?.nickname, bet: p.amount, payout: p.payout };
-      }),
-      no_winners: false
+      team_a: match.team_a,
+      team_b: match.team_b,
+      score_a: scoreA,
+      score_b: scoreB,
+      winner,
+      score_market: {
+        total_pool: scoreRes.totalPool,
+        winners_pool: scoreRes.winnersPool,
+        winners_count: scoreRes.winnersCount,
+        bank_cut: scoreRes.bankCut,
+        payouts: withNick(scoreRes.payouts)
+      },
+      winner_market: {
+        total_pool: winnerRes.totalPool,
+        winners_pool: winnerRes.winnersPool,
+        winners_count: winnerRes.winnersCount,
+        bank_cut: winnerRes.bankCut,
+        payouts: withNick(winnerRes.payouts)
+      },
+      bank_total: bankTotal
     });
   }
 
-  const existing = db.prepare('SELECT id FROM results WHERE result_date = ?').get(today);
-  if (existing) {
-    return res.status(400).json({ error: 'Wynik na dziś już wpisany' });
-  }
-
-  const komentarze = [
-    'Michał twierdzi, że miał *pilne sprawy*',
-    'Znowu kolejka w Żabce',
-    'Spotkanie się przeciągnęło',
-    'Michał mówi: "miałem spotkanie", wszyscy wiemy jak to jest',
-    'Krytyczny bug na produkcji — akurat przed obiadem',
-    'Ktoś zajął jego ulubiony stolik',
-    'Teams call bez końca',
-    'Michał był punktualny, jak zawsze (kłamstwo)',
-    'PR do review czekał, obiad poczeka',
-    'Deploy się wysypał, obiad się opóźnił'
-  ];
-  const michalComment = komentarze[Math.floor(Math.random() * komentarze.length)];
-
-  const finalWinningSlot = winningSlot || exactSlot;
-
   transaction(() => {
-    db.prepare(`
-      INSERT INTO results (result_date, winning_slot, actual_time, total_pool, winners_count, michal_comment, nearest_win)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(today, finalWinningSlot, actual_time, totalPool, winnerBets.length, michalComment, isNearestWin ? 1 : 0);
+    db.prepare('UPDATE matches SET score_a = ?, score_b = ?, winner = ?, finished = 1 WHERE id = ?')
+      .run(scoreA, scoreB, winner, match.id);
 
-    const winnerIds = new Set(winnerBets.map(b => b.player_id));
-    payouts.forEach(p => {
+    [...scoreRes.payouts, ...winnerRes.payouts].forEach(p => {
       db.prepare('UPDATE players SET balance = balance + ?, total_wins = total_wins + 1 WHERE id = ?')
         .run(p.payout, p.player_id);
     });
 
+    const payoutByBetId = new Map();
+    [...scoreRes.payouts, ...winnerRes.payouts].forEach(p => payoutByBetId.set(p.bet_id, p.payout));
+
+    const allBets = [...scoreBets, ...winnerBets]
+      .map(b => ({ ...b, won: payoutByBetId.has(b.id) }))
+      .sort((x, y) => String(x.placed_at).localeCompare(String(y.placed_at)));
+
     allBets.forEach(b => {
-      const won = winnerIds.has(b.player_id);
-      if (won) {
+      db.prepare('UPDATE bets SET payout = ? WHERE id = ?').run(payoutByBetId.get(b.id) || 0, b.id);
+      if (b.won) {
         db.prepare(`
-          UPDATE players
-          SET current_streak = current_streak + 1,
-              best_streak = MAX(best_streak, current_streak + 1)
+          UPDATE players SET current_streak = current_streak + 1,
+            best_streak = MAX(best_streak, current_streak + 1)
           WHERE id = ?
         `).run(b.player_id);
       } else {
@@ -561,136 +586,49 @@ app.post('/api/admin/result', (req, res) => {
 
   res.json({
     success: true,
-    winning_slot: finalWinningSlot,
-    exact_slot: exactSlot,
-    is_nearest_win: isNearestWin,
-    actual_time,
-    total_pool: totalPool,
-    winners_count: winnerBets.length,
-    michal_comment: michalComment,
-    payouts: payouts.map(p => {
-      const player = db.prepare('SELECT nickname FROM players WHERE id = ?').get(p.player_id);
-      return { nickname: player?.nickname, bet: p.amount, payout: p.payout };
-    }),
+    team_a: match.team_a,
+    team_b: match.team_b,
+    score_a: scoreA,
+    score_b: scoreB,
+    winner,
+    score_market: { winners_count: scoreRes.winnersCount, payouts: withNick(scoreRes.payouts) },
+    winner_market: { winners_count: winnerRes.winnersCount, payouts: withNick(winnerRes.payouts) },
     bank_cut: bankTotal
   });
 });
 
-// GET /api/admin/today
-app.get('/api/admin/today', (req, res) => {
-  const { password } = req.query;
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Złe hasło' });
-  }
-
-  const today = todayWaw();
-  const bets = db.prepare(`
-    SELECT b.slot, b.amount, b.placed_at, p.nickname
-    FROM bets b
-    JOIN players p ON p.id = b.player_id
-    WHERE b.bet_date = ?
-    ORDER BY b.placed_at
-  `).all(today);
-
-  const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0);
-  const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
-
-  res.json({ bets, total_pool: totalPool, result: result || null, date: today });
-});
-
-// DELETE /api/admin/result — cofnij rozliczenie dnia (odwróć transakcje finansowe)
-app.delete('/api/admin/result', (req, res) => {
+// DELETE /api/admin/match/:id/result — cofnij rozliczenie meczu
+app.delete('/api/admin/match/:id/result', (req, res) => {
   const { password } = req.body;
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Złe hasło' });
-  }
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
 
-  const today = todayWaw();
-  const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(today);
-  if (!result) {
-    return res.status(404).json({ error: 'Brak rozliczenia na dziś — nie ma czego cofać' });
-  }
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(req.params.id);
+  if (!match || !match.finished) return res.status(404).json({ error: 'Brak rozliczenia dla tego meczu — nie ma czego cofać' });
 
-  const allBets = db.prepare('SELECT * FROM bets WHERE bet_date = ?').all(today);
-  const totalPool = allBets.reduce((s, b) => s + Number(b.amount), 0);
-  const winnerBets = allBets.filter(b => b.slot === result.winning_slot);
-  const winnersSum = winnerBets.reduce((s, b) => s + Number(b.amount), 0);
-  const winnersPool = Math.floor(totalPool * 0.9);
+  const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(match.id);
+  const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(match.id);
 
-  // Przelicz oryginalne wypłaty żeby je cofnąć
-  const payouts = winnerBets.map(b => {
-    const raw = winnersSum > 0 ? Math.floor((Number(b.amount) / winnersSum) * winnersPool) : 0;
-    return { player_id: b.player_id, payout: Math.max(raw, Number(b.amount)) };
-  });
-  const loserBets = allBets.filter(b => b.slot !== result.winning_slot);
+  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === match.score_a && b.guess_score_b === match.score_b);
+  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === match.winner);
+  const bankTotal = scoreRes.bankCut + winnerRes.bankCut;
 
   transaction(() => {
-    // Cofnij wypłaty zwycięzcom (odejmij co dostali, ich zakład był już odjęty przy stawianiu)
-    payouts.forEach(p => {
+    [...scoreRes.payouts, ...winnerRes.payouts].forEach(p => {
       db.prepare('UPDATE players SET balance = balance - ?, total_wins = MAX(0, total_wins - 1) WHERE id = ?')
         .run(p.payout, p.player_id);
     });
-    // Zwróć przegrane zakłady przegrywającym
-    loserBets.forEach(b => {
-      db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?')
-        .run(Number(b.amount), b.player_id);
-    });
-    // Odejmij z banku to co do niego trafiło
-    const bankCut = totalPool - winnersPool;
-    const actualWinnersPool = payouts.reduce((s, p) => s + p.payout, 0);
-    const roundingRemainder = winnersPool > actualWinnersPool ? winnersPool - actualWinnersPool : 0;
-    const bankTotal = winnerBets.length === 0 ? totalPool : (bankCut + roundingRemainder);
-    db.prepare('UPDATE bank SET balance = MAX(0, balance - ?), updated_at = CURRENT_TIMESTAMP WHERE id = 1')
-      .run(bankTotal);
-    // Usuń wynik
-    db.prepare('DELETE FROM results WHERE result_date = ?').run(today);
+    db.prepare('UPDATE bank SET balance = MAX(0, balance - ?), updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(bankTotal);
+    db.prepare('UPDATE matches SET score_a = NULL, score_b = NULL, winner = NULL, finished = 0 WHERE id = ?').run(match.id);
+    db.prepare('UPDATE bets SET payout = NULL WHERE match_id = ?').run(match.id);
   });
 
   res.json({ success: true, message: 'Rozliczenie cofnięte — możesz wpisać wynik ponownie' });
 });
 
-// GET /api/day-results — publiczne wyniki dnia z listą wygranych
-app.get('/api/day-results', (req, res) => {
-  const date = req.query.date || todayWaw();
-
-  const result = db.prepare('SELECT * FROM results WHERE result_date = ?').get(date);
-  if (!result) return res.json({ date, result: null, bets: [] });
-
-  const allBets = db.prepare(`
-    SELECT b.player_id, b.slot, b.amount, p.nickname
-    FROM bets b JOIN players p ON p.id = b.player_id
-    WHERE b.bet_date = ?
-    ORDER BY b.amount DESC
-  `).all(date);
-
-  const totalPool = allBets.reduce((s, b) => s + Number(b.amount), 0);
-  const winnerBets = allBets.filter(b => b.slot === result.winning_slot);
-  const winnersSum = winnerBets.reduce((s, b) => s + Number(b.amount), 0);
-  const winnersPool = Math.floor(totalPool * 0.9);
-
-  const payoutMap = {};
-  winnerBets.forEach(b => {
-    const raw = winnersSum > 0 ? Math.floor((Number(b.amount) / winnersSum) * winnersPool) : 0;
-    payoutMap[b.player_id] = Math.max(raw, Number(b.amount));
-  });
-
-  const bets = allBets.map(b => ({
-    nickname: b.nickname,
-    slot: b.slot,
-    amount: Number(b.amount),
-    payout: payoutMap[b.player_id] || 0,
-    won: b.slot === result.winning_slot
-  }));
-
-  res.json({ date, result, bets });
-});
-
 // GET /api/admin/players — lista graczy do zarządzania
 app.get('/api/admin/players', (req, res) => {
   const { password } = req.query;
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Złe hasło' });
-  }
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
 
   const players = db.prepare(`
     SELECT id, nickname, balance, total_wins, current_streak, created_at, last_seen
@@ -704,15 +642,11 @@ app.get('/api/admin/players', (req, res) => {
 // DELETE /api/admin/player/:id — usuń gracza i jego zakłady
 app.delete('/api/admin/player/:id', (req, res) => {
   const { password } = req.body;
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Złe hasło' });
-  }
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
 
   const playerId = parseInt(req.params.id, 10);
   const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) {
-    return res.status(404).json({ error: 'Gracz nie istnieje' });
-  }
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
 
   transaction(() => {
     db.prepare('DELETE FROM bets WHERE player_id = ?').run(playerId);
@@ -728,5 +662,5 @@ app.get('/admin', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Kiedy Michał? Serwer na http://localhost:${PORT}`);
+  console.log(`Mundial Betting — Serwer na http://localhost:${PORT}`);
 });

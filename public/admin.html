@@ -3,23 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel Michała</title>
+  <title>Panel Admina — Mundial Betting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <style>
     body { display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; min-height: 100vh; }
+    .admin-wrap { max-width: 720px; width: 100%; display: flex; flex-direction: column; gap: 20px; }
     .admin-card {
       background: var(--surface);
       border: 1px solid var(--muted);
       border-radius: 16px;
-      padding: 36px 32px;
-      max-width: 460px;
-      width: 100%;
+      padding: 28px 26px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
     }
     .admin-card h1 { font-size: 22px; letter-spacing: 1px; }
     .admin-card h1 span { color: var(--accent); }
@@ -38,146 +37,107 @@
       transition: border-color 0.2s;
     }
     .form-group input:focus { border-color: var(--accent); }
-    .time-row { display: flex; gap: 8px; align-items: center; }
-    .time-row input[type="number"] {
-      background: var(--surface-alt);
-      border: 1px solid var(--muted);
-      border-radius: 8px;
-      color: var(--text-primary);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 28px;
-      padding: 10px 14px;
-      outline: none;
-      width: 80px;
-      text-align: center;
-      transition: border-color 0.2s;
-    }
-    .time-row input[type="number"]:focus { border-color: var(--accent); }
-    .time-sep { font-size: 28px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
-    .info-row {
-      background: var(--surface-alt);
-      border-radius: 8px;
-      padding: 12px 14px;
-      font-size: 13px;
-      color: var(--text-muted);
-      display: flex;
-      justify-content: space-between;
-    }
-    .info-row .mono { color: var(--text-primary); }
-    .preview-box {
-      background: var(--surface-alt);
-      border: 1px solid rgba(200,241,53,0.25);
-      border-radius: 10px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .preview-box h3 { font-size: 13px; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
-    .preview-row { display: flex; justify-content: space-between; font-size: 13px; }
-    .preview-row .label { color: var(--text-muted); }
     .error-msg { color: var(--danger); font-size: 13px; min-height: 18px; }
     .success-msg { color: var(--accent); font-size: 13px; font-family: 'Space Grotesk', sans-serif; font-weight: 600; }
-    #section-logged { display: none; }
-    .warning-box {
-      background: rgba(248,196,0,0.08);
-      border: 1px solid rgba(248,196,0,0.3);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 13px;
-      color: var(--gold);
-    }
-    .btn-row { display: flex; gap: 10px; }
-    .payout-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-    .payout-item { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 8px; background: var(--surface); border-radius: 6px; }
-    .no-winner-msg { color: var(--gold); font-weight: 600; }
-    a.back-link { color: var(--text-muted); font-size: 13px; text-decoration: none; margin-top: 4px; }
+    #section-logged { display: none; flex-direction: column; gap: 20px; }
+    a.back-link { color: var(--text-muted); font-size: 13px; text-decoration: none; }
     a.back-link:hover { color: var(--text-primary); }
+
+    .match-admin-card {
+      background: var(--surface);
+      border: 1px solid var(--muted);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .match-admin-card.done { border-color: rgba(245,200,66,0.35); }
+    .match-admin-head {
+      display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px;
+    }
+    .match-admin-round { font-size: 11px; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; }
+    .match-admin-kickoff { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+    .team-edit-row { display: flex; gap: 8px; align-items: center; }
+    .team-edit-row input[type="text"] {
+      flex: 1; min-width: 0;
+      background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 6px;
+      color: var(--text-primary); font-size: 13px; padding: 7px 10px; outline: none;
+    }
+    .team-edit-row input[type="text"]:focus { border-color: var(--accent); }
+    .team-edit-row .vs { color: var(--text-muted); font-size: 12px; }
+    .btn-small {
+      background: var(--surface-alt); border: 1px solid var(--muted); color: var(--text-primary);
+      border-radius: 6px; padding: 7px 12px; font-size: 12px; cursor: pointer; white-space: nowrap;
+      font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    }
+    .btn-small:hover { border-color: var(--accent); }
+    .result-entry-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .result-entry-row input[type="number"] {
+      width: 50px; background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 6px;
+      color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 16px;
+      padding: 6px; text-align: center; outline: none;
+    }
+    .winner-pick-row { display: flex; gap: 6px; }
+    .winner-pick-btn {
+      background: var(--surface-alt); border: 1px solid var(--muted); color: var(--text-primary);
+      border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+    }
+    .winner-pick-btn.selected { border-color: var(--accent); color: var(--accent); background: rgba(200,241,53,0.08); }
+    .preview-box {
+      background: var(--surface-alt); border: 1px solid rgba(200,241,53,0.25); border-radius: 8px;
+      padding: 12px; display: none; flex-direction: column; gap: 6px; font-size: 12px;
+    }
+    .preview-box.show { display: flex; }
+    .preview-row { display: flex; justify-content: space-between; }
+    .preview-row .label { color: var(--text-muted); }
+    .payout-item { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 6px; background: var(--surface); border-radius: 5px; }
+    .match-finished-info { font-size: 13px; }
+    .match-finished-info .mono { color: var(--gold); }
+    .status-pill {
+      font-size: 10px; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.5px;
+      background: rgba(255,255,255,0.05); border: 1px solid var(--muted); color: var(--text-muted);
+    }
+    .status-pill.ready { color: var(--accent); border-color: rgba(200,241,53,0.3); background: rgba(200,241,53,0.08); }
   </style>
 </head>
 <body>
-  <div class="admin-card">
-    <h1>PANEL <span>MICHAŁA</span></h1>
+  <div class="admin-wrap">
+    <div class="admin-card">
+      <h1>PANEL <span>ADMINA</span></h1>
 
-    <!-- LOGIN SECTION -->
-    <div id="section-login">
-      <div class="form-group">
-        <label>Hasło</label>
-        <input type="password" id="admin-password" placeholder="michal123" autocomplete="current-password" />
+      <div id="section-login">
+        <div class="form-group">
+          <label>Hasło</label>
+          <input type="password" id="admin-password" placeholder="hasło" autocomplete="current-password" />
+        </div>
+        <button class="btn-primary" id="btn-admin-login" style="width:100%;margin-top:8px">Wejdź</button>
+        <div class="error-msg" id="login-err"></div>
       </div>
-      <button class="btn-primary" id="btn-admin-login" style="width:100%;margin-top:8px">Wejdź</button>
-      <div class="error-msg" id="login-err"></div>
+
+      <div id="section-logged">
+        <div class="success-msg" id="global-success" style="display:none"></div>
+        <div class="error-msg" id="global-err"></div>
+        <a href="/" class="back-link">← Wróć do gry</a>
+      </div>
     </div>
 
-    <!-- LOGGED SECTION -->
-    <div id="section-logged">
+    <div id="matches-admin-list"></div>
 
-      <div class="info-row">
-        <span>Zakładów dzisiaj</span>
-        <span class="mono" id="info-bets">–</span>
+    <div class="admin-card" id="section-players" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">GRACZE</h3>
+        <button class="btn-ghost" id="btn-load-players">Załaduj</button>
       </div>
-      <div class="info-row">
-        <span>Łączna pula</span>
-        <span class="mono accent" id="info-pool">–</span>
-      </div>
-      <div class="info-row" id="result-done-row" style="display:none">
-        <span>Wynik już wpisany</span>
-        <span class="mono accent" id="result-done-slot">–</span>
-      </div>
-      <button class="btn-danger" id="btn-unlock" style="display:none;width:100%">
-        🔓 Cofnij rozliczenie i wpisz ponownie
-      </button>
-
-      <div id="section-form">
-        <div class="form-group">
-          <label>O której wyszedłeś?</label>
-          <div class="time-row">
-            <input type="number" id="time-hour" min="10" max="17" value="12" />
-            <span class="time-sep">:</span>
-            <input type="number" id="time-min" min="0" max="59" value="30" />
-          </div>
-        </div>
-
-            <div class="btn-row">
-          <button class="btn-primary" id="btn-preview" style="flex:1">Podgląd wyników</button>
-        </div>
-
-        <div id="preview-section" style="display:none">
-          <div class="preview-box">
-            <h3>Podgląd</h3>
-            <div class="preview-row"><span class="label">Wygrywający slot</span><span class="mono accent" id="prev-slot">–</span></div>
-            <div class="preview-row"><span class="label">Liczba wygranych</span><span class="mono" id="prev-winners">–</span></div>
-            <div class="preview-row"><span class="label">Pula do podziału</span><span class="mono" id="prev-pool">–</span></div>
-            <div class="preview-row"><span class="label">Do banku biurowego</span><span class="mono gold" id="prev-bank">–</span></div>
-            <div class="payout-list" id="prev-payouts"></div>
-            <div id="no-winner-section" style="display:none" class="no-winner-msg">😶 Nikt nie obstawiał dziś</div>
-          </div>
-          <button class="btn-danger" id="btn-confirm" style="width:100%;margin-top:12px">Zatwierdź i rozlicz dzień</button>
-        </div>
-
-        <div class="error-msg" id="result-err"></div>
-      </div>
-
-      <div class="success-msg" id="success-msg" style="display:none"></div>
-
-      <hr class="dim" style="margin:4px 0" />
-
-      <!-- Zarządzanie graczami -->
-      <div id="section-players">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">GRACZE</h3>
-          <button class="btn-ghost" id="btn-load-players">Załaduj</button>
-        </div>
-        <div id="players-list"></div>
-        <div class="error-msg" id="players-err"></div>
-      </div>
-
-      <a href="/" class="back-link">← Wróć do gry</a>
+      <div id="players-list"></div>
+      <div class="error-msg" id="players-err"></div>
     </div>
   </div>
 
   <script>
     let adminPassword = '';
+    let matchesData = [];
+    const winnerPick = {}; // matchId -> 'A' | 'B'
 
     document.getElementById('admin-password').addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('btn-admin-login').click();
@@ -187,129 +147,220 @@
       adminPassword = document.getElementById('admin-password').value;
       const errEl = document.getElementById('login-err');
       errEl.textContent = '';
-
       try {
-        const r = await fetch(`/api/admin/today?password=${encodeURIComponent(adminPassword)}`);
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error);
-
+        await loadMatches();
         document.getElementById('section-login').style.display = 'none';
         document.getElementById('section-logged').style.display = 'flex';
-        document.getElementById('section-logged').style.flexDirection = 'column';
-        document.getElementById('section-logged').style.gap = '16px';
-
-        document.getElementById('info-bets').textContent = d.bets.length;
-        document.getElementById('info-pool').textContent = d.total_pool + ' monet';
-
-        if (d.result) {
-          document.getElementById('result-done-row').style.display = 'flex';
-          document.getElementById('result-done-slot').textContent = d.result.winning_slot;
-          document.getElementById('section-form').style.display = 'none';
-          document.getElementById('btn-unlock').style.display = 'block';
-        }
-
-        checkEarlyWarning();
+        document.getElementById('section-players').style.display = 'block';
       } catch (e) {
         errEl.textContent = e.message;
       }
     });
 
-    document.getElementById('btn-preview').addEventListener('click', async () => {
-      const h = String(document.getElementById('time-hour').value).padStart(2,'0');
-      const m = String(document.getElementById('time-min').value).padStart(2,'0');
-      const actual_time = `${h}:${m}`;
-      const errEl = document.getElementById('result-err');
-      errEl.textContent = '';
+    async function loadMatches() {
+      const r = await fetch(`/api/admin/matches?password=${encodeURIComponent(adminPassword)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      matchesData = d.matches;
+      renderMatches();
+    }
 
+    function teamLabel(m, side) {
+      const team = side === 'A' ? m.team_a : m.team_b;
+      const placeholder = side === 'A' ? m.placeholder_a : m.placeholder_b;
+      return team || placeholder || '???';
+    }
+
+    function renderMatches() {
+      const container = document.getElementById('matches-admin-list');
+      let lastRound = null;
+      let html = '';
+
+      matchesData.forEach(m => {
+        if (m.round !== lastRound) {
+          html += `<div class="round-heading" style="color:var(--text-muted)">${esc(m.round)}</div>`;
+          lastRound = m.round;
+        }
+        html += renderMatchAdminCard(m);
+      });
+
+      container.innerHTML = html;
+    }
+
+    function renderMatchAdminCard(m) {
+      const betsSummary = `${m.score_bets.length} zakł. wynik · ${m.winner_bets.length} zakł. zwycięzca`;
+
+      let body = '';
+
+      if (m.finished) {
+        body = `
+          <div class="match-finished-info">
+            Wynik: <span class="mono">${esc(m.team_a)} ${m.score_a}:${m.score_b} ${esc(m.team_b)}</span>
+            · zwycięzca: <span class="mono">${esc(teamLabel(m, m.winner))}</span>
+          </div>
+          <button class="btn-danger btn-small" onclick="undoResult(${m.id})">🔓 Cofnij rozliczenie</button>
+        `;
+      } else {
+        body += `
+          <div class="team-edit-row">
+            <input type="text" id="team-a-${m.id}" placeholder="${esc(teamLabel(m,'A'))}" value="${esc(m.team_a || '')}" />
+            <span class="vs">vs</span>
+            <input type="text" id="team-b-${m.id}" placeholder="${esc(teamLabel(m,'B'))}" value="${esc(m.team_b || '')}" />
+            <button class="btn-small" onclick="saveTeams(${m.id})">Zapisz drużyny</button>
+          </div>
+        `;
+
+        if (m.team_a && m.team_b) {
+          const sel = winnerPick[m.id];
+          body += `
+            <div class="result-entry-row">
+              <span class="text-muted small">Wynik:</span>
+              <input type="number" id="res-a-${m.id}" min="0" max="20" value="0" oninput="autoSuggestWinner(${m.id})" />
+              <span class="sep">:</span>
+              <input type="number" id="res-b-${m.id}" min="0" max="20" value="0" oninput="autoSuggestWinner(${m.id})" />
+              <div class="winner-pick-row">
+                <button class="winner-pick-btn ${sel === 'A' ? 'selected' : ''}" id="wp-a-${m.id}" onclick="pickWinner(${m.id},'A')">${esc(teamLabel(m,'A'))}</button>
+                <button class="winner-pick-btn ${sel === 'B' ? 'selected' : ''}" id="wp-b-${m.id}" onclick="pickWinner(${m.id},'B')">${esc(teamLabel(m,'B'))}</button>
+              </div>
+              <button class="btn-small" onclick="previewResult(${m.id})">Podgląd</button>
+            </div>
+            <div class="preview-box" id="preview-${m.id}"></div>
+          `;
+        } else {
+          body += `<div class="text-muted small">Uzupełnij obie drużyny, żeby wpisać wynik.</div>`;
+        }
+      }
+
+      return `
+        <div class="match-admin-card ${m.finished ? 'done' : ''}">
+          <div class="match-admin-head">
+            <span class="match-admin-round">${esc(m.round)}</span>
+            <span class="match-admin-kickoff">${m.kickoff_at.replace('T', ' ')}</span>
+            <span class="status-pill ${m.available ? 'ready' : ''}">${betsSummary}</span>
+          </div>
+          ${body}
+        </div>
+      `;
+    }
+
+    function pickWinner(matchId, side) {
+      winnerPick[matchId] = side;
+      document.getElementById(`wp-a-${matchId}`).classList.toggle('selected', side === 'A');
+      document.getElementById(`wp-b-${matchId}`).classList.toggle('selected', side === 'B');
+    }
+
+    function autoSuggestWinner(matchId) {
+      if (winnerPick[matchId]) return; // nie nadpisuj ręcznego wyboru
+      const a = parseInt(document.getElementById(`res-a-${matchId}`).value, 10) || 0;
+      const b = parseInt(document.getElementById(`res-b-${matchId}`).value, 10) || 0;
+      if (a > b) pickWinner(matchId, 'A');
+      else if (b > a) pickWinner(matchId, 'B');
+    }
+
+    async function saveTeams(matchId) {
+      const team_a = document.getElementById(`team-a-${matchId}`).value;
+      const team_b = document.getElementById(`team-b-${matchId}`).value;
+      const errEl = document.getElementById('global-err');
+      errEl.textContent = '';
       try {
-        const r = await fetch('/api/admin/result', {
+        const r = await fetch(`/api/admin/match/${matchId}/teams`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ actual_time, password: adminPassword, preview: true })
+          body: JSON.stringify({ password: adminPassword, team_a, team_b })
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-
-        const slotNote = d.is_nearest_win
-          ? `${d.winning_slot} <span style="color:var(--gold);font-size:11px">(najbliższy — nikt nie trafił ${d.exact_slot})</span>`
-          : d.winning_slot;
-        document.getElementById('prev-slot').innerHTML = slotNote;
-        document.getElementById('prev-winners').textContent = d.winners_count;
-        document.getElementById('prev-pool').textContent = d.winners_pool + ' monet';
-        document.getElementById('prev-bank').textContent = d.bank_cut + ' monet';
-
-        const payoutList = document.getElementById('prev-payouts');
-        document.getElementById('no-winner-section').style.display = 'none';
-        payoutList.innerHTML = d.payouts.map(p =>
-          `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="mono accent">+${p.payout} monet</span></div>`
-        ).join('');
-
-        document.getElementById('preview-section').style.display = 'block';
+        await loadMatches();
       } catch (e) {
         errEl.textContent = e.message;
       }
-    });
+    }
 
-    document.getElementById('btn-confirm').addEventListener('click', async () => {
-      const h = String(document.getElementById('time-hour').value).padStart(2,'0');
-      const m = String(document.getElementById('time-min').value).padStart(2,'0');
-      const actual_time = `${h}:${m}`;
-      const errEl = document.getElementById('result-err');
+    async function previewResult(matchId) {
+      const score_a = document.getElementById(`res-a-${matchId}`).value;
+      const score_b = document.getElementById(`res-b-${matchId}`).value;
+      const winner = winnerPick[matchId];
+      const errEl = document.getElementById('global-err');
       errEl.textContent = '';
 
-      document.getElementById('btn-confirm').disabled = true;
-      document.getElementById('btn-confirm').textContent = 'Rozliczam...';
+      if (!winner) { errEl.textContent = 'Wskaż zwycięzcę meczu'; return; }
 
       try {
-        const r = await fetch('/api/admin/result', {
+        const r = await fetch(`/api/admin/match/${matchId}/result`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ actual_time, password: adminPassword })
+          body: JSON.stringify({ password: adminPassword, score_a, score_b, winner, preview: true })
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-
-        document.getElementById('section-form').style.display = 'none';
-        document.getElementById('preview-section').style.display = 'none';
-        const msg = document.getElementById('success-msg');
-        msg.style.display = 'block';
-        msg.textContent = `✓ Dzień rozliczony! Wygrywający slot: ${d.winning_slot} · ${d.winners_count} wygranych`;
-        if (d.michal_comment) {
-          const q = document.createElement('div');
-          q.style.cssText = 'font-weight:400;color:var(--text-muted);font-style:italic;font-size:13px;margin-top:6px';
-          q.textContent = `"${d.michal_comment}"`;
-          msg.appendChild(q);
-        }
+        renderPreview(matchId, d);
       } catch (e) {
         errEl.textContent = e.message;
-        document.getElementById('btn-confirm').disabled = false;
-        document.getElementById('btn-confirm').textContent = 'Zatwierdź i rozlicz dzień';
       }
-    });
+    }
 
-    document.getElementById('btn-unlock').addEventListener('click', async () => {
-      if (!confirm('Cofnąć rozliczenie dnia? Salda graczy zostaną przywrócone do stanu sprzed rozliczenia.')) return;
-      const errEl = document.getElementById('result-err');
+    function renderPreview(matchId, d) {
+      const box = document.getElementById(`preview-${matchId}`);
+      const payoutHtml = (payouts) => payouts.map(p =>
+        `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="accent mono">+${p.payout} VAR</span></div>`
+      ).join('') || '<div class="text-muted small">brak trafionych — cała pula do banku</div>';
+
+      box.innerHTML = `
+        <div class="preview-row"><span class="label">Wynik do zatwierdzenia</span><span class="mono">${d.team_a} ${d.score_a}:${d.score_b} ${d.team_b} (wygrywa: ${d.winner === 'A' ? d.team_a : d.team_b})</span></div>
+        <div class="preview-row"><span class="label">Pula "wynik"</span><span class="mono">${d.score_market.total_pool} VAR · ${d.score_market.winners_count} traf.</span></div>
+        <div class="payout-list">${payoutHtml(d.score_market.payouts)}</div>
+        <div class="preview-row"><span class="label">Pula "zwycięzca"</span><span class="mono">${d.winner_market.total_pool} VAR · ${d.winner_market.winners_count} traf.</span></div>
+        <div class="payout-list">${payoutHtml(d.winner_market.payouts)}</div>
+        <div class="preview-row"><span class="label">Do banku biurowego</span><span class="mono gold">${d.bank_total} VAR</span></div>
+        <button class="btn-danger btn-small" style="margin-top:6px" onclick="confirmResult(${matchId})">Zatwierdź i rozlicz mecz</button>
+      `;
+      box.classList.add('show');
+    }
+
+    async function confirmResult(matchId) {
+      if (!confirm('Na pewno zatwierdzić ten wynik? Można to później cofnąć przyciskiem "Cofnij rozliczenie".')) return;
+
+      const score_a = document.getElementById(`res-a-${matchId}`).value;
+      const score_b = document.getElementById(`res-b-${matchId}`).value;
+      const winner = winnerPick[matchId];
+      const errEl = document.getElementById('global-err');
+      const successEl = document.getElementById('global-success');
+      errEl.textContent = '';
+
+      try {
+        const r = await fetch(`/api/admin/match/${matchId}/result`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: adminPassword, score_a, score_b, winner })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        successEl.style.display = 'block';
+        successEl.textContent = `✓ Rozliczono: ${d.team_a} ${d.score_a}:${d.score_b} ${d.team_b}`;
+        delete winnerPick[matchId];
+        await loadMatches();
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    }
+
+    async function undoResult(matchId) {
+      if (!confirm('Cofnąć rozliczenie tego meczu? Salda graczy zostaną przywrócone do stanu sprzed rozliczenia.')) return;
+      const errEl = document.getElementById('global-err');
       errEl.textContent = '';
       try {
-        const r = await fetch('/api/admin/result', {
+        const r = await fetch(`/api/admin/match/${matchId}/result`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword })
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-        document.getElementById('result-done-row').style.display = 'none';
-        document.getElementById('btn-unlock').style.display = 'none';
-        document.getElementById('section-form').style.display = 'block';
-        document.getElementById('preview-section').style.display = 'none';
-        document.getElementById('success-msg').style.display = 'none';
-        document.getElementById('btn-confirm').disabled = false;
-        document.getElementById('btn-confirm').textContent = 'Zatwierdź i rozlicz dzień';
+        await loadMatches();
       } catch (e) {
         errEl.textContent = e.message;
       }
-    });
+    }
 
     document.getElementById('btn-load-players').addEventListener('click', loadPlayers);
 
@@ -333,9 +384,9 @@
         return;
       }
       list.innerHTML = players.map(p => `
-        <div class="payout-item" style="align-items:center;gap:8px" id="player-row-${p.id}">
+        <div class="payout-item" style="align-items:center;gap:8px;font-size:12px" id="player-row-${p.id}">
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.nickname)}</span>
-          <span class="mono" style="font-size:11px;color:var(--text-muted)">${p.balance} monet</span>
+          <span class="mono" style="color:var(--text-muted)">${p.balance} VAR</span>
           <button class="btn-ghost" style="font-size:11px;color:var(--danger);border-color:var(--danger);padding:3px 8px"
             onclick="deletePlayer(${p.id}, '${esc(p.nickname)}')">usuń</button>
         </div>

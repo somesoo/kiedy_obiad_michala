@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Obiad Michała</title>
+  <title>Mundial Betting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
@@ -15,8 +15,8 @@
   <header class="site-header">
     <div class="header-inner">
       <div class="header-logo">
-        <span class="logo-text">KIEDY MICHAŁ POSZEDŁ NA OBIAD?</span>
-        <span class="logo-sub">bukmacherka biurowa</span>
+        <span class="logo-text">MUNDIAL BETTING</span>
+        <span class="logo-sub">biurowa bukmacherka pucharowa</span>
       </div>
       <div class="header-user" id="header-user">
         <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">?</button>
@@ -35,7 +35,7 @@
   <div class="overlay" id="login-overlay">
     <div class="login-card">
       <h2>Dołącz do gry</h2>
-      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie jeśli już grasz.</p>
+      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie jeśli już grasz. Startujesz z 1000 VAR.</p>
       <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
       <button class="btn-primary" id="btn-login">Wchodzę w to</button>
       <div class="login-error" id="login-error"></div>
@@ -48,14 +48,14 @@
       <button class="how-close" id="how-close">✕</button>
       <h3>Jak to działa?</h3>
       <ol>
-        <li>Każdego dnia <strong>obstawiasz 15-minutowy slot</strong>, o której Michał pójdzie na obiad (np. 12:15–12:30).</li>
-        <li>Możesz obstawiać <strong>dopóki dany slot jeszcze nie minął</strong> — jeśli jest 12:20, sloty do 12:15 są już zablokowane.</li>
-        <li>Stawiasz dowolną liczbę <strong>monet</strong> ze swojego salda (min. 5).</li>
-        <li>Jeden zakład dziennie na osobę.</li>
-        <li><strong>Michał sam wpisuje</strong> w panelu admina, o której poszedł.</li>
-        <li>Wygrywa ten, kto trafił w odpowiedni slot. Jeśli nikt nie trafił dokładnie — wygrywa <strong>najbliższy slot</strong>.</li>
-        <li>Pula jest dzielona między wygranych proporcjonalnie do stawek (<strong>system parimutuel</strong>). 10% idzie do banku biurowego.</li>
-        <li>Startujesz z <strong>100 monetami</strong>. Jak stracisz wszystko — dostajesz 20 z kasy biurowej.</li>
+        <li>Każdy mecz mundialu obstawiasz <strong>dwoma niezależnymi zakładami</strong>: dokładny <strong>wynik</strong> (np. 2:1) i osobno <strong>kto wygra</strong>.</li>
+        <li>Możesz obstawiać tylko mecze, które mają <strong>wpisane obie drużyny</strong> i jeszcze się nie zaczęły.</li>
+        <li>Gdy drużyny kolejnej rundy nie są jeszcze znane — poczekaj, aż admin je uzupełni po poprzednim meczu.</li>
+        <li>Stawiasz dowolną liczbę <strong>VAR-ów</strong> ze swojego salda (min. 10) na każdy z dwóch zakładów osobno.</li>
+        <li><strong>Admin wpisuje wynik</strong> po zakończeniu meczu (i zwycięzcę — na wypadek karnych).</li>
+        <li>Trafienie dokładnego wyniku wygrywa pulę "wynik". Trafienie zwycięzcy wygrywa pulę "zwycięzca".</li>
+        <li>Pula jest dzielona między trafionych proporcjonalnie do stawek (<strong>system parimutuel</strong>). 10% idzie do banku biurowego.</li>
+        <li>Startujesz z <strong>1000 VAR</strong>. Jak stracisz wszystko — dostajesz zastrzyk z kasy biurowej.</li>
       </ol>
     </div>
   </div>
@@ -70,13 +70,12 @@
           <h3>JAK TO DZIAŁA?</h3>
         </div>
         <ol class="info-list">
-          <li><span>Obstawiasz <strong>15-minutowy slot</strong>, o której Michał pójdzie na obiad.</span></li>
-          <li><span>Możesz stawiać <strong>dopóki slot nie minął</strong> — po jego starcie jest zablokowany.</span></li>
-          <li><span>Minimum <strong>5 monet</strong>, maksimum całe saldo. Jeden zakład dziennie.</span></li>
-          <li><span>Michał wpisuje godzinę w <strong>panelu admina</strong> po powrocie z obiadu.</span></li>
-          <li><span>Wygrywa slot, w który Michał trafił. Jeśli nikt nie trafił dokładnie — wygrywa <strong>najbliższy slot</strong>.</span></li>
-          <li><span>Pula dzielona proporcjonalnie do stawek. <strong>10%</strong> idzie do banku biurowego.</span></li>
-          <li><span>Startujesz z <strong>100 monetami</strong>. Przy zerowym saldzie dostajesz 20 z kasy biurowej.</span></li>
+          <li><span>Każdy mecz ma <strong>dwa niezależne zakłady</strong>: dokładny wynik i zwycięzca.</span></li>
+          <li><span>Obstawiasz tylko mecze z <strong>wpisanymi obiema drużynami</strong>, dopóki się nie zaczęły.</span></li>
+          <li><span>Minimum <strong>10 VAR</strong> na zakład, maksimum całe saldo.</span></li>
+          <li><span>Admin wpisuje wynik po meczu — <strong>zwycięzcę</strong> wskazuje osobno (liczą się karne).</span></li>
+          <li><span>Pula dzielona proporcjonalnie do stawek wśród trafionych. <strong>10%</strong> idzie do banku biurowego.</span></li>
+          <li><span>Startujesz z <strong>1000 VAR</strong>. Przy zerowym saldzie dostajesz zastrzyk z kasy biurowej.</span></li>
         </ol>
       </div>
     </aside>
@@ -85,72 +84,15 @@
     <section class="col-game">
 
       <div class="section-header">
-        <h2 id="today-label">DZISIAJ</h2>
-        <div class="pool-badge">
-          Łączna pula: <span class="mono accent" id="total-pool">0 monet</span>
-        </div>
+        <h2 id="matches-label">DRABINKA MUNDIALU</h2>
       </div>
 
-      <!-- Status: bukmacheria zamknięta / wyniki -->
-      <div class="status-banner" id="status-banner" style="display:none"></div>
-
-      <!-- Sloty -->
-      <div class="slots-section" id="slots-section">
-        <div class="slots-header">
-          <p class="slots-label">Wybierz slot <span class="blind-badge" id="blind-badge" style="display:none">🙈 tryb ślepy</span></p>
-          <button class="slots-toggle" id="slots-toggle" aria-expanded="true">▲ zwiń</button>
-        </div>
-        <div class="slots-body" id="slots-body">
-          <div class="slots-grid" id="slots-grid"></div>
-        </div>
-      </div>
-
-      <!-- Kto już obstawił dziś -->
-      <div class="bettors-today" id="bettors-today" style="display:none"></div>
-
-      <!-- Formularz zakładu -->
-      <div class="bet-form" id="bet-form" style="display:none">
-        <div class="bet-selected">
-          Wybrany slot: <span class="mono accent" id="bet-slot-display">–</span>
-        </div>
-        <div class="bet-amount-row">
-          <label>Stawka:</label>
-          <input type="range" id="bet-slider" min="5" max="100" value="20" />
-          <input type="number" id="bet-amount" min="5" max="100" value="20" />
-          <span class="mono text-muted">monet</span>
-        </div>
-        <button class="btn-primary btn-bet" id="btn-place-bet">
-          Stawiam <span id="btn-bet-label">20 install.sh</span>
-        </button>
-        <div class="bet-error" id="bet-error"></div>
-      </div>
-
-      <!-- Po postawieniu zakładu -->
-      <div class="bet-placed" id="bet-placed" style="display:none">
-        <div class="bet-placed-inner">
-          <span class="bet-placed-emoji">🍽️</span>
-          <div>
-            <strong>Zakład postawiony!</strong><br/>
-            <span id="bet-placed-info" class="text-muted"></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Wyniki dnia -->
-      <div class="results-section" id="results-section" style="display:none">
-        <h3>Wyniki dnia</h3>
-        <div id="results-content"></div>
-      </div>
+      <div id="matches-list"></div>
 
     </section>
 
     <!-- PRAWA KOLUMNA — SIDEBAR -->
     <aside class="col-sidebar">
-
-      <!-- Zdjęcie Michała -->
-      <div class="michal-photo-frame">
-        <img src="michal-obiad.jpg" alt="Michał" class="michal-photo" />
-      </div>
 
       <!-- Leaderboard -->
       <div class="sidebar-card leaderboard-card">
@@ -176,14 +118,14 @@
   <!-- FOOTER -->
   <footer class="site-footer">
     <span class="bank-info" id="bank-info" title="Kliknij po więcej">
-      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 monet</span>
+      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 VAR</span>
     </span>
-    <span class="footer-copy text-muted">made with ❤️ i lekką zazdrością o 12:37</span>
+    <span class="footer-copy text-muted">made with ❤️ i lekką stratą do lat 30.</span>
   </footer>
 
   <!-- WELFARE TOAST -->
   <div class="toast welfare-toast" id="welfare-toast" style="display:none">
-    <span>💸 Dostałeś 20 install.sh z kasy biurowej. Nie trać ich.</span>
+    <span id="welfare-toast-text">💸 Dostałeś zastrzyk VAR-ów z kasy biurowej. Nie trać ich.</span>
   </div>
 
   <!-- CONFETTI -->
