@@ -393,14 +393,8 @@ function renderLeaderboard(data) {
   countEl.textContent = `${data.total_players} graczy w grze`;
 
   let html = '';
-  let prevWasTop = false;
 
   data.leaderboard.forEach((p) => {
-    if (p.outside_top && !prevWasTop) {
-      html += `<div class="lb-separator">···</div>`;
-    }
-    prevWasTop = !p.outside_top;
-
     const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : `${p.rank}.`;
     const streakBadge = p.streak >= 2 ? `<span class="lb-streak">🔥${p.streak}</span>` : '';
     const meClass = p.is_me ? ' is-me' : '';

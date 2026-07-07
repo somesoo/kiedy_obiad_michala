@@ -409,29 +409,15 @@ app.post('/api/bet/winner', authPlayer, (req, res) => {
 app.get('/api/leaderboard', (req, res) => {
   const highlightId = parseInt(req.query.highlight, 10) || null;
 
-  const top10 = db.prepare(`
+  const allPlayers = db.prepare(`
     SELECT id, nickname, balance, current_streak, best_streak, total_wins
     FROM players
     ORDER BY balance DESC, total_wins DESC
-    LIMIT 10
   `).all();
 
-  let myEntry = null;
-  if (highlightId) {
-    const myRank = db.prepare(`
-      SELECT COUNT(*) as rank FROM players
-      WHERE balance > (SELECT balance FROM players WHERE id = ?)
-    `).get(highlightId);
+  const totalPlayers = allPlayers.length;
 
-    const me = db.prepare('SELECT id, nickname, balance, current_streak FROM players WHERE id = ?').get(highlightId);
-    if (me) {
-      myEntry = { ...me, rank: Number(myRank.rank) + 1, is_me: true };
-    }
-  }
-
-  const totalPlayers = db.prepare('SELECT COUNT(*) as cnt FROM players').get().cnt;
-
-  const list = top10.map((p, i) => ({
+  const list = allPlayers.map((p, i) => ({
     rank: i + 1,
     id: p.id,
     nickname: p.nickname,
@@ -441,11 +427,6 @@ app.get('/api/leaderboard', (req, res) => {
     total_wins: p.total_wins,
     is_me: highlightId ? p.id === highlightId : false
   }));
-
-  const inTop10 = highlightId && list.some(p => p.is_me);
-  if (highlightId && !inTop10 && myEntry) {
-    list.push({ ...myEntry, outside_top: true });
-  }
 
   res.json({ leaderboard: list, total_players: Number(totalPlayers) });
 });
