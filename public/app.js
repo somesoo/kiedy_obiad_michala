@@ -127,14 +127,10 @@ function startApp() {
   loadLeaderboard();
   loadBank();
 
-  state.mainInterval = setInterval(() => {
-    loadMatches();
-    loadBank();
-  }, 20000);
-
-  state.leaderboardInterval = setInterval(() => {
-    loadLeaderboard();
-  }, 15000);
+  // Uwaga: celowo brak automatycznego odświeżania meczów/banku/leaderboardu —
+  // podmiana innerHTML w trakcie wpisywania wyniku przez gracza kasowała
+  // wpisywaną wartość (np. 4:0 wracało do domyślnego 1:1). Dane odświeżają
+  // się teraz tylko na starcie i po akcjach (np. po postawieniu zakładu).
 
   setInterval(updateCountdown, 1000);
 }
