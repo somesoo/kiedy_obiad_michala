@@ -14,7 +14,8 @@ const MIN_BET = 10;
 const WELFARE_AMOUNT = 150;
 const ODDS_REF_STAKE = 50;  // zmiękczenie mianownika kursu — pusta strona nie dzieli przez zero, a kurs startowy jest skończony
 const ODDS_MIN = 1.05;      // dolne widełki kursu — trafiony zawsze coś zarabia
-const ODDS_MAX = 5;         // górne widełki — ogranicza obietnice banku (ekspozycja ≤ 5× stawki), rynek się nie zacina
+const ODDS_OPEN_MIN = 1.5;  // kursy otwarcia od banku (zanim spadnie pierwszy zakład) losują się z tego przedziału...
+const ODDS_OPEN_MAX = 5;    // ...i tylko ich dotyczy górny limit — po otwarciu rynku kursy nie mają sufitu
 const BANK_TREASURY = 1000000; // skarbiec banku — przy zamrożonych kursach to bank gwarantuje wypłaty
 
 // Dokładka banku: baza + procent puli (im większa pula, tym bank hojniejszy) + losowy "kaprys".
@@ -24,18 +25,30 @@ const BANK_SEED_BASE = 100;
 const BANK_SEED_POOL_RATE = 0.10;
 const BANK_SEED_WHIM_MAX = 100;
 
-// Kaprys to hash FNV-1a stanu puli zamiast Math.random() — każdy nowy zakład "przelosowuje"
-// humor banku, ale przy niezmienionej puli kwota jest stabilna, więc podgląd rozliczenia,
-// samo rozliczenie i jego cofnięcie widzą dokładnie tę samą dopłatę.
-function bankSeed(matchId, betType, pool) {
-  const s = `${matchId}|${betType}|${pool}`;
+// Hash FNV-1a zamiast Math.random() — "losowość" banku jest deterministyczna dla danego
+// stanu, więc podgląd rozliczenia, samo rozliczenie i jego cofnięcie widzą te same liczby.
+function fnv1a(s) {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619) >>> 0;
   }
-  const whim = h % (BANK_SEED_WHIM_MAX + 1);
+  return h;
+}
+
+// Kaprys banku przelosowuje się z każdym nowym zakładem (pula wchodzi do hasha),
+// ale przy niezmienionej puli kwota jest stabilna.
+function bankSeed(matchId, betType, pool) {
+  const whim = fnv1a(`${matchId}|${betType}|${pool}`) % (BANK_SEED_WHIM_MAX + 1);
   return BANK_SEED_BASE + Math.floor(pool * BANK_SEED_POOL_RATE) + whim;
+}
+
+// Kursy otwarcia — zanim spadnie pierwszy zakład na rynek, linię ustawia sam bank.
+// Każda drużyna losuje własny kurs z przedziału [ODDS_OPEN_MIN, ODDS_OPEN_MAX], więc bank
+// może otworzyć mecz np. x1.80 / x4.20. To jedyny moment z górnym limitem kursu.
+function openingOdds(matchId, side) {
+  const roll = (fnv1a(`${matchId}|open|${side}`) % 1000) / 1000;
+  return Math.round((ODDS_OPEN_MIN + roll * (ODDS_OPEN_MAX - ODDS_OPEN_MIN)) * 100) / 100;
 }
 
 const dbDir = path.join(__dirname, 'db');
@@ -291,14 +304,15 @@ function lockedPayout(bet) {
 // Kurs "z tablicy" dla strony rynku zwycięzcy — balansuje się z napływem zakładów.
 // Licznik: 90% zebranych stawek + dokładka banku (rośnie z pulą, kaprys miesza).
 // Mianownik: stawki na tę stronę — im więcej coins na drużynę, tym niższy jej kurs,
-// a strona przeciwna kusi wyższym i wyrównuje rynek. Widełki trzymają kursy w grywalnym
-// zakresie i ograniczają ekspozycję banku na zamrożone obietnice.
+// a strona przeciwna kusi wyższym i wyrównuje rynek. Po otwarciu rynku kursy nie mają
+// sufitu — pusta strona dużej puli może kusić naprawdę wysoko, bank ma skarbiec.
 function boardWinnerOddsFromBets(matchId, bets, side) {
   const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0);
+  if (totalPool === 0) return openingOdds(matchId, side);
   const sidePool = bets.filter(b => b.guess_winner === side).reduce((s, b) => s + Number(b.amount), 0);
   const pot = Math.floor(totalPool * 0.9) + bankSeed(matchId, 'winner', totalPool);
   const raw = pot / (sidePool + ODDS_REF_STAKE);
-  return Math.round(Math.min(Math.max(raw, ODDS_MIN), ODDS_MAX) * 100) / 100;
+  return Math.round(Math.max(raw, ODDS_MIN) * 100) / 100;
 }
 
 function boardWinnerOdds(matchId, side) {
