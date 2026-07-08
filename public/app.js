@@ -181,6 +181,9 @@ function renderMatches(matches) {
   });
 
   container.innerHTML = html || '<div class="text-muted small">Brak meczów</div>';
+
+  // Po przerysowaniu odtwórz podgląd możliwej wygranej dla meczów z wybraną drużyną
+  Object.keys(state.winnerSelection).forEach(id => updateWinnerQuote(parseInt(id, 10)));
 }
 
 function renderMatchCard(m) {
@@ -207,10 +210,13 @@ function renderMatchCard(m) {
   `;
 }
 
+function poolLabel(total, seed, count) {
+  const seedPart = seed ? ` <span class="pool-seed" title="bonus z banku biurowego — wypłacany, gdy ktoś trafi">+${seed}🏦</span>` : '';
+  return `pula ${total}${seedPart} · ${count} zakł.`;
+}
+
 function renderScoreMarket(m) {
-  const pool = m.score_market.total === null
-    ? `${m.score_market.count} zakł.`
-    : `${m.score_market.total} coins · ${m.score_market.count} zakł.`;
+  const pool = poolLabel(m.score_market.total, m.score_market.bank_seed, m.score_market.count);
 
   let body;
   if (m.my_score_bet) {
@@ -220,6 +226,8 @@ function renderScoreMarket(m) {
     if (m.finished) {
       cls = b.payout > 0 ? 'won' : 'lost';
       payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
+    } else if (b.potential_payout) {
+      payoutNote = `możliwa wygrana ~${b.potential_payout} coins`;
     }
     const withdrawBtn = m.available && !b.withdraw_used
       ? `<button class="withdraw-btn" data-action="withdraw-bet" data-bet="${b.id}">Wycofaj</button>`
@@ -257,11 +265,25 @@ function renderScoreMarket(m) {
   `;
 }
 
+function oddsTag(odds) {
+  return (odds === null || odds === undefined) ? '' : `<span class="odds-tag mono">x${odds.toFixed(2)}</span>`;
+}
+
+function renderPoolSplit(m) {
+  const shareA = m.winner_market.share_a;
+  if (shareA === null || shareA === undefined) return '';
+  const shareB = 100 - shareA;
+  return `
+    <div class="pool-split">
+      <div class="pool-split-bar"><div class="pool-split-a" style="width:${shareA}%"></div></div>
+      <div class="pool-split-labels"><span>${shareA}%</span><span>${shareB}%</span></div>
+    </div>
+  `;
+}
+
 function renderWinnerMarket(m) {
-  const poolTotal = m.winner_market.total_a === null ? null : (m.winner_market.total_a + m.winner_market.total_b);
-  const pool = poolTotal === null
-    ? `${m.winner_market.count} zakł.`
-    : `${poolTotal} coins · ${m.winner_market.count} zakł.`;
+  const poolTotal = m.winner_market.total_a + m.winner_market.total_b;
+  const pool = poolLabel(poolTotal, m.winner_market.bank_seed, m.winner_market.count);
 
   let body;
   if (m.my_winner_bet) {
@@ -272,6 +294,8 @@ function renderWinnerMarket(m) {
     if (m.finished) {
       cls = b.payout > 0 ? 'won' : 'lost';
       payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
+    } else if (b.potential_payout) {
+      payoutNote = `możliwa wygrana ~${b.potential_payout} coins`;
     }
     const withdrawBtn = m.available && !b.withdraw_used
       ? `<button class="withdraw-btn" data-action="withdraw-bet" data-bet="${b.id}">Wycofaj</button>`
@@ -282,19 +306,26 @@ function renderWinnerMarket(m) {
         <span>${payoutNote}</span>
         ${withdrawBtn}
       </div>
+      ${renderPoolSplit(m)}
       <div class="market-error" id="winner-error-${m.id}"></div>
     `;
   } else if (m.available) {
     const sel = state.winnerSelection[m.id];
     body = `
       <div class="winner-buttons">
-        <button class="winner-btn ${sel === 'A' ? 'selected' : ''}" data-action="pick-winner" data-match="${m.id}" data-side="A">${esc(teamLabel(m, 'A'))}</button>
-        <button class="winner-btn ${sel === 'B' ? 'selected' : ''}" data-action="pick-winner" data-match="${m.id}" data-side="B">${esc(teamLabel(m, 'B'))}</button>
+        <button class="winner-btn ${sel === 'A' ? 'selected' : ''}" data-action="pick-winner" data-match="${m.id}" data-side="A">
+          <span class="winner-name">${esc(teamLabel(m, 'A'))}</span>${oddsTag(m.winner_market.odds_a)}
+        </button>
+        <button class="winner-btn ${sel === 'B' ? 'selected' : ''}" data-action="pick-winner" data-match="${m.id}" data-side="B">
+          <span class="winner-name">${esc(teamLabel(m, 'B'))}</span>${oddsTag(m.winner_market.odds_b)}
+        </button>
       </div>
+      ${renderPoolSplit(m)}
       <div class="stake-row">
-        <input type="number" id="winner-amount-${m.id}" min="10" value="50" />
+        <input type="number" id="winner-amount-${m.id}" min="10" value="50" data-quote-match="${m.id}" />
         <button data-action="bet-winner" data-match="${m.id}">Stawiam</button>
       </div>
+      <div class="quote-note" id="winner-quote-${m.id}"></div>
       <div class="market-error" id="winner-error-${m.id}"></div>
     `;
   } else {
@@ -327,12 +358,41 @@ document.getElementById('matches-list').addEventListener('click', e => {
     const card = document.getElementById(`match-${matchId}`);
     card.querySelectorAll('.winner-btn').forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
+    updateWinnerQuote(matchId);
   } else if (action === 'bet-score') {
     placeScoreBet(matchId);
   } else if (action === 'bet-winner') {
     placeWinnerBet(matchId);
   }
 });
+
+// ── LIVE QUOTE (kurs na żywo dla wpisywanej stawki) ──
+const quoteTimers = {};
+
+document.getElementById('matches-list').addEventListener('input', e => {
+  const matchId = parseInt(e.target.dataset.quoteMatch, 10);
+  if (!matchId) return;
+  clearTimeout(quoteTimers[matchId]);
+  quoteTimers[matchId] = setTimeout(() => updateWinnerQuote(matchId), 300);
+});
+
+async function updateWinnerQuote(matchId) {
+  const el = document.getElementById(`winner-quote-${matchId}`);
+  if (!el) return;
+
+  const side = state.winnerSelection[matchId];
+  const amountEl = document.getElementById(`winner-amount-${matchId}`);
+  const amount = amountEl ? parseInt(amountEl.value, 10) : NaN;
+
+  if (!side || !amount || amount < 10) { el.textContent = ''; return; }
+
+  try {
+    const q = await api('GET', `/api/quote/winner?match_id=${matchId}&side=${side}&amount=${amount}`);
+    el.innerHTML = `Możliwa wygrana: <span class="mono accent">~${q.potential_payout} coins</span> <span class="mono">(x${q.multiplier.toFixed(2)})</span>`;
+  } catch {
+    el.textContent = '';
+  }
+}
 
 async function withdrawBet(betId) {
   try {

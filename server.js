@@ -12,6 +12,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 const STARTING_BALANCE = 1000;
 const MIN_BET = 10;
 const WELFARE_AMOUNT = 150;
+const ODDS_REF_STAKE = 50; // referencyjna stawka do wyliczania kursów na kartach meczów (= domyślna stawka w UI)
+const BANK_SEED = 100; // bonus z banku dokładany do puli każdego rynku — wypłacany tylko, gdy ktoś trafił
 
 const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
@@ -206,8 +208,10 @@ function checkAndApplyWelfare(playerId) {
   return WELFARE_AMOUNT;
 }
 
-// System parimutuel — pula wspólna dzielona proporcjonalnie między trafionych, z minimalnym zwrotem stawki
-function settleMarket(bets, isWinner) {
+// System parimutuel — pula wspólna dzielona proporcjonalnie między trafionych, z minimalnym
+// zwrotem stawki. Bank dokłada do puli trafionych bonus (seed) — wypłacany tylko, gdy ktoś trafił.
+// bankCut = ile bank zabiera z rynku netto (ujemne = bank dopłaca, bo seed przewyższył prowizję).
+function settleMarket(bets, isWinner, seed = 0) {
   const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0);
   const winners = bets.filter(isWinner);
 
@@ -215,7 +219,7 @@ function settleMarket(bets, isWinner) {
     return { totalPool, winnersPool: 0, bankCut: totalPool, payouts: [], winnersCount: 0 };
   }
 
-  const winnersPool = Math.floor(totalPool * 0.9);
+  const winnersPool = Math.floor(totalPool * 0.9) + seed;
   const winnersSum = winners.reduce((s, b) => s + Number(b.amount), 0);
 
   const payouts = winners.map(b => {
@@ -225,9 +229,21 @@ function settleMarket(bets, isWinner) {
   });
 
   const actualWinnersPool = payouts.reduce((s, p) => s + p.payout, 0);
-  const bankCut = (totalPool - winnersPool) + Math.max(0, winnersPool - actualWinnersPool);
+  const bankCut = totalPool - actualWinnersPool;
 
   return { totalPool, winnersPool, bankCut, payouts, winnersCount: winners.length };
+}
+
+// Kurs "na żywo" dla rynku zwycięzcy — symuluje dołożenie hipotetycznej stawki do puli
+// i liczy wypłatę tą samą matematyką co settleMarket. W parimutuel kurs zmienia się
+// z każdym nowym zakładem, więc to estymacja stanu obecnego, nie gwarancja.
+function quoteWinner(matchId, side, stake) {
+  const bets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(matchId);
+  const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0) + stake;
+  const sidePool = bets.filter(b => b.guess_winner === side).reduce((s, b) => s + Number(b.amount), 0) + stake;
+  const winnersPool = Math.floor(totalPool * 0.9) + BANK_SEED;
+  const payout = Math.max(Math.floor((stake / sidePool) * winnersPool), stake);
+  return { payout, multiplier: Math.round((payout / stake) * 100) / 100 };
 }
 
 // ──────────────────────────────────────────────
@@ -303,11 +319,12 @@ app.get('/api/matches', (req, res) => {
   const result = matches.map(m => {
     const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(m.id);
     const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(m.id);
-    const blind = !m.finished;
+    const available = isMatchAvailable(m);
 
     const scorePool = scoreBets.reduce((s, b) => s + Number(b.amount), 0);
     const winnerAPool = winnerBets.filter(b => b.guess_winner === 'A').reduce((s, b) => s + Number(b.amount), 0);
     const winnerBPool = winnerBets.filter(b => b.guess_winner === 'B').reduce((s, b) => s + Number(b.amount), 0);
+    const winnerPool = winnerAPool + winnerBPool;
 
     const myScoreBet = player ? scoreBets.find(b => b.player_id === player.id) : null;
     const myWinnerBet = player ? winnerBets.find(b => b.player_id === player.id) : null;
@@ -315,6 +332,13 @@ app.get('/api/matches', (req, res) => {
     const withdrawUsed = type => !!(player && db.prepare(
       'SELECT id FROM bet_withdrawals WHERE player_id = ? AND match_id = ? AND bet_type = ?'
     ).get(player.id, m.id, type));
+
+    // Ile mój postawiony zakład wypłaciłby przy obecnym stanie puli, gdyby mój typ trafił
+    const potentialPayout = (bets, myBet, isWinner) => {
+      if (!myBet || m.finished) return null;
+      const p = settleMarket(bets, isWinner, BANK_SEED).payouts.find(x => x.bet_id === myBet.id);
+      return p ? p.payout : null;
+    };
 
     return {
       id: m.id,
@@ -324,30 +348,55 @@ app.get('/api/matches', (req, res) => {
       placeholder_a: m.placeholder_a,
       placeholder_b: m.placeholder_b,
       kickoff_at: m.kickoff_at,
-      available: isMatchAvailable(m),
+      available,
       finished: !!m.finished,
       score_a: m.finished ? m.score_a : null,
       score_b: m.finished ? m.score_b : null,
       winner: m.finished ? m.winner : null,
       score_market: {
         count: scoreBets.length,
-        total: blind ? null : scorePool
+        total: scorePool,
+        bank_seed: m.finished ? null : BANK_SEED
       },
       winner_market: {
         count: winnerBets.length,
-        total_a: blind ? null : winnerAPool,
-        total_b: blind ? null : winnerBPool
+        total_a: winnerAPool,
+        total_b: winnerBPool,
+        bank_seed: m.finished ? null : BANK_SEED,
+        odds_a: available ? quoteWinner(m.id, 'A', ODDS_REF_STAKE).multiplier : null,
+        odds_b: available ? quoteWinner(m.id, 'B', ODDS_REF_STAKE).multiplier : null,
+        share_a: !m.finished && winnerPool > 0 ? Math.round((winnerAPool / winnerPool) * 100) : null
       },
       my_score_bet: myScoreBet
-        ? { id: myScoreBet.id, guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout, withdraw_used: withdrawUsed('score') }
+        ? { id: myScoreBet.id, guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout, withdraw_used: withdrawUsed('score'),
+            potential_payout: potentialPayout(scoreBets, myScoreBet, b => b.guess_score_a === myScoreBet.guess_score_a && b.guess_score_b === myScoreBet.guess_score_b) }
         : null,
       my_winner_bet: myWinnerBet
-        ? { id: myWinnerBet.id, guess_winner: myWinnerBet.guess_winner, amount: myWinnerBet.amount, payout: myWinnerBet.payout, withdraw_used: withdrawUsed('winner') }
+        ? { id: myWinnerBet.id, guess_winner: myWinnerBet.guess_winner, amount: myWinnerBet.amount, payout: myWinnerBet.payout, withdraw_used: withdrawUsed('winner'),
+            potential_payout: potentialPayout(winnerBets, myWinnerBet, b => b.guess_winner === myWinnerBet.guess_winner) }
         : null
     };
   });
 
   res.json({ matches: result, server_time: nowTimeWaw() });
+});
+
+// GET /api/quote/winner — podgląd możliwej wygranej dla wpisywanej stawki (kurs na żywo)
+app.get('/api/quote/winner', (req, res) => {
+  const matchId = parseInt(req.query.match_id, 10);
+  const side = req.query.side;
+  const amount = parseInt(req.query.amount, 10);
+
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+  if (!match) return res.status(400).json({ error: 'Mecz nie istnieje' });
+  if (!isMatchAvailable(match)) return res.status(400).json({ error: matchLockReason(match) });
+  if (side !== 'A' && side !== 'B') return res.status(400).json({ error: 'Wybierz drużynę A albo B' });
+  if (!Number.isInteger(amount) || amount < MIN_BET) {
+    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} coins` });
+  }
+
+  const q = quoteWinner(matchId, side, amount);
+  res.json({ potential_payout: q.payout, multiplier: q.multiplier });
 });
 
 // POST /api/bet/score
@@ -552,8 +601,8 @@ app.post('/api/admin/match/:id/result', (req, res) => {
   const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(match.id);
   const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(match.id);
 
-  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === scoreA && b.guess_score_b === scoreB);
-  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === winner);
+  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === scoreA && b.guess_score_b === scoreB, BANK_SEED);
+  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === winner, BANK_SEED);
   const bankTotal = scoreRes.bankCut + winnerRes.bankCut;
 
   const withNick = payouts => payouts.map(p => {
@@ -646,8 +695,8 @@ app.delete('/api/admin/match/:id/result', (req, res) => {
   const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(match.id);
   const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(match.id);
 
-  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === match.score_a && b.guess_score_b === match.score_b);
-  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === match.winner);
+  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === match.score_a && b.guess_score_b === match.score_b, BANK_SEED);
+  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === match.winner, BANK_SEED);
   const bankTotal = scoreRes.bankCut + winnerRes.bankCut;
 
   transaction(() => {

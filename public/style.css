@@ -473,6 +473,7 @@ h1, h2, h3, .logo-text {
 
 .winner-btn {
   flex: 1;
+  min-width: 0;
   background: var(--bg);
   border: 1px solid var(--muted);
   color: var(--text-primary);
@@ -482,10 +483,24 @@ h1, h2, h3, .logo-text {
   font-family: 'Inter', sans-serif;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.winner-btn .winner-name {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.odds-tag {
+  font-size: 11px;
+  color: var(--gold);
+}
+.winner-btn.selected .odds-tag { color: var(--accent); }
 .winner-btn:hover { border-color: rgba(200,241,53,0.4); }
 .winner-btn.selected {
   border-color: var(--accent);
@@ -539,6 +554,43 @@ h1, h2, h3, .logo-text {
   color: var(--danger);
   font-size: 11px;
   min-height: 14px;
+}
+
+/* ── PODZIAŁ PULI (jak "sentiment bar" u bukmacherów) ── */
+.pool-split {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pool-split-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(245, 200, 66, 0.3);
+  overflow: hidden;
+}
+
+.pool-split-a {
+  height: 100%;
+  background: var(--accent);
+}
+
+.pool-split-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.pool-seed {
+  color: var(--gold);
+}
+
+.quote-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 16px;
 }
 
 .my-bet-badge {
