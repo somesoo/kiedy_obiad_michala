@@ -210,6 +210,12 @@ function renderMatchCard(m) {
   `;
 }
 
+function pendingPayoutNote(b) {
+  if (!b.potential_payout) return 'oczekuje na wynik';
+  const mult = (b.potential_payout / b.amount).toFixed(2);
+  return `możliwa wygrana ~${b.potential_payout} coins <span class="mono">(x${mult})</span>`;
+}
+
 function poolLabel(total, seed, count) {
   const seedPart = seed ? ` <span class="pool-seed" title="bonus z banku biurowego — wypłacany, gdy ktoś trafi">+${seed}🏦</span>` : '';
   return `pula ${total}${seedPart} · ${count} zakł.`;
@@ -226,8 +232,8 @@ function renderScoreMarket(m) {
     if (m.finished) {
       cls = b.payout > 0 ? 'won' : 'lost';
       payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
-    } else if (b.potential_payout) {
-      payoutNote = `możliwa wygrana ~${b.potential_payout} coins`;
+    } else {
+      payoutNote = pendingPayoutNote(b);
     }
     const withdrawBtn = m.available && !b.withdraw_used
       ? `<button class="withdraw-btn" data-action="withdraw-bet" data-bet="${b.id}">Wycofaj</button>`
@@ -299,8 +305,8 @@ function renderWinnerMarket(m) {
     if (m.finished) {
       cls = b.payout > 0 ? 'won' : 'lost';
       payoutNote = b.payout > 0 ? `✓ +${b.payout} coins` : '✗ przegrany';
-    } else if (b.potential_payout) {
-      payoutNote = `możliwa wygrana ~${b.potential_payout} coins`;
+    } else {
+      payoutNote = pendingPayoutNote(b);
     }
     const withdrawBtn = m.available && !b.withdraw_used
       ? `<button class="withdraw-btn" data-action="withdraw-bet" data-bet="${b.id}">Wycofaj</button>`
