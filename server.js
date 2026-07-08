@@ -186,10 +186,20 @@ function authPlayer(req, res, next) {
   next();
 }
 
-// Welfare — jeśli saldo gracza = 0, daj zastrzyk z banku
+// Welfare — jeśli saldo gracza = 0 i nie ma już żadnych oczekujących zakładów, daj zastrzyk z banku.
+// Dopóki gracz ma zakłady na nierozliczonych meczach, jego pieniądze są wciąż w grze —
+// zapomoga należy się dopiero, gdy po rozliczeniu wszystkiego nadal jest spłukany.
 function checkAndApplyWelfare(playerId) {
   const player = db.prepare('SELECT balance FROM players WHERE id = ?').get(playerId);
   if (player.balance > 0) return null;
+
+  const pending = db.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM bets b
+    JOIN matches m ON m.id = b.match_id
+    WHERE b.player_id = ? AND m.finished = 0
+  `).get(playerId);
+  if (pending.cnt > 0) return null;
 
   db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?').run(WELFARE_AMOUNT, playerId);
   db.prepare('UPDATE bank SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(WELFARE_AMOUNT);
