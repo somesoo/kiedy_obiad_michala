@@ -12,11 +12,15 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 const STARTING_BALANCE = 1000;
 const MIN_BET = 10;
 const WELFARE_AMOUNT = 150;
-const ODDS_REF_STAKE = 50; // referencyjna stawka do wyliczania kursów na kartach meczów (= domyślna stawka w UI)
+const ODDS_REF_STAKE = 50;  // zmiękczenie mianownika kursu — pusta strona nie dzieli przez zero, a kurs startowy jest skończony
+const ODDS_MIN = 1.05;      // dolne widełki kursu — trafiony zawsze coś zarabia
+const ODDS_MAX = 5;         // górne widełki — ogranicza obietnice banku (ekspozycja ≤ 5× stawki), rynek się nie zacina
+const BANK_TREASURY = 1000000; // skarbiec banku — przy zamrożonych kursach to bank gwarantuje wypłaty
 
-// Bonus banku do puli rynku: baza + procent puli (im większa pula, tym bank hojniejszy)
-// + losowy "kaprys" banku. Wypłacany tylko, gdy ktoś trafił.
-const BANK_SEED_BASE = 50;
+// Dokładka banku: baza + procent puli (im większa pula, tym bank hojniejszy) + losowy "kaprys".
+// W rynku "wynik" (parimutuel) to bonus dokładany do puli trafionych; w rynku "zwycięzca"
+// (kursy zamrożone) podbija licznik wzoru na kurs — czyli humor banku miesza w kursach.
+const BANK_SEED_BASE = 100;
 const BANK_SEED_POOL_RATE = 0.10;
 const BANK_SEED_WHIM_MAX = 100;
 
@@ -92,6 +96,7 @@ db.exec(`
     guess_score_b INTEGER,
     guess_winner TEXT,
     amount INTEGER NOT NULL,
+    locked_odds REAL,
     payout INTEGER,
     placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(player_id, match_id, bet_type)
@@ -112,8 +117,32 @@ db.exec(`
     UNIQUE(player_id, match_id, bet_type)
   );
 
-  INSERT OR IGNORE INTO bank VALUES (1, 0, CURRENT_TIMESTAMP);
+  INSERT OR IGNORE INTO bank VALUES (1, ${BANK_TREASURY}, CURRENT_TIMESTAMP);
 `);
+
+// Migracja na zamrożone kursy: starsze bazy nie mają kolumny locked_odds. Dodajemy ją,
+// oczekującym zakładom na zwycięzcę przypisujemy kurs z tablicy z chwili migracji,
+// a bank dostaje skarbiec, bo od teraz gwarantuje wypłaty po stałych kursach.
+const hasLockedOdds = db.prepare(
+  `SELECT COUNT(*) AS c FROM pragma_table_info('bets') WHERE name = 'locked_odds'`
+).get().c > 0;
+if (!hasLockedOdds) {
+  db.exec('ALTER TABLE bets ADD COLUMN locked_odds REAL');
+  db.prepare('UPDATE bank SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(BANK_TREASURY);
+  const pendingMatches = db.prepare(`
+    SELECT DISTINCT m.id FROM matches m
+    JOIN bets b ON b.match_id = m.id AND b.bet_type = 'winner'
+    WHERE m.finished = 0
+  `).all();
+  pendingMatches.forEach(({ id }) => {
+    ['A', 'B'].forEach(side => {
+      const odds = boardWinnerOdds(id, side);
+      db.prepare(
+        `UPDATE bets SET locked_odds = ? WHERE match_id = ? AND bet_type = 'winner' AND guess_winner = ? AND locked_odds IS NULL`
+      ).run(odds, id, side);
+    });
+  });
+}
 
 // Drabinka mundialu — sloty czasowe w strefie Europe/Warsaw ("YYYY-MM-DDTHH:MM")
 const FIXTURES = [
@@ -253,16 +282,41 @@ function settleMarket(bets, isWinner, seed = 0) {
   return { totalPool, winnersPool, bankCut, payouts, winnersCount: winners.length };
 }
 
-// Kurs "na żywo" dla rynku zwycięzcy — symuluje dołożenie hipotetycznej stawki do puli
-// i liczy wypłatę tą samą matematyką co settleMarket. W parimutuel kurs zmienia się
-// z każdym nowym zakładem, więc to estymacja stanu obecnego, nie gwarancja.
-function quoteWinner(matchId, side, stake) {
+// Ile zakład wypłaci przy trafieniu po swoim zamrożonym kursie (minimum: zwrot stawki)
+function lockedPayout(bet) {
+  const amount = Number(bet.amount);
+  return Math.max(Math.floor(amount * (Number(bet.locked_odds) || 1)), amount);
+}
+
+// Kurs "z tablicy" dla strony rynku zwycięzcy — balansuje się z napływem zakładów.
+// Licznik: 90% zebranych stawek + dokładka banku (rośnie z pulą, kaprys miesza).
+// Mianownik: stawki na tę stronę — im więcej coins na drużynę, tym niższy jej kurs,
+// a strona przeciwna kusi wyższym i wyrównuje rynek. Widełki trzymają kursy w grywalnym
+// zakresie i ograniczają ekspozycję banku na zamrożone obietnice.
+function boardWinnerOddsFromBets(matchId, bets, side) {
+  const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0);
+  const sidePool = bets.filter(b => b.guess_winner === side).reduce((s, b) => s + Number(b.amount), 0);
+  const pot = Math.floor(totalPool * 0.9) + bankSeed(matchId, 'winner', totalPool);
+  const raw = pot / (sidePool + ODDS_REF_STAKE);
+  return Math.round(Math.min(Math.max(raw, ODDS_MIN), ODDS_MAX) * 100) / 100;
+}
+
+function boardWinnerOdds(matchId, side) {
   const bets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(matchId);
-  const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0) + stake;
-  const sidePool = bets.filter(b => b.guess_winner === side).reduce((s, b) => s + Number(b.amount), 0) + stake;
-  const winnersPool = Math.floor(totalPool * 0.9) + bankSeed(matchId, 'winner', totalPool);
-  const payout = Math.max(Math.floor((stake / sidePool) * winnersPool), stake);
-  return { payout, multiplier: Math.round((payout / stake) * 100) / 100 };
+  return boardWinnerOddsFromBets(matchId, bets, side);
+}
+
+// Rozliczenie rynku zwycięzcy po kursach zamrożonych — każdy trafiony dostaje wypłatę
+// po SWOIM kursie z chwili postawienia. Stawki wszystkich idą do banku, wygrane płaci
+// bank ze skarbca (bankCut ujemny = bank dopłacił ponad zebrane stawki).
+function settleWinnerFixed(bets, winnerSide) {
+  const totalPool = bets.reduce((s, b) => s + Number(b.amount), 0);
+  const winners = bets.filter(b => b.guess_winner === winnerSide);
+  const payouts = winners.map(b => ({
+    player_id: b.player_id, bet_id: b.id, amount: Number(b.amount), payout: lockedPayout(b)
+  }));
+  const actualWinnersPool = payouts.reduce((s, p) => s + p.payout, 0);
+  return { totalPool, winnersPool: actualWinnersPool, bankCut: totalPool - actualWinnersPool, payouts, winnersCount: winners.length };
 }
 
 // ──────────────────────────────────────────────
@@ -352,7 +406,6 @@ app.get('/api/matches', (req, res) => {
     ).get(player.id, m.id, type));
 
     const scoreSeed = bankSeed(m.id, 'score', scorePool);
-    const winnerSeed = bankSeed(m.id, 'winner', winnerAPool + winnerBPool);
 
     // Ile mój postawiony zakład wypłaciłby przy obecnym stanie puli, gdyby mój typ trafił
     const potentialPayout = (bets, myBet, isWinner, seed) => {
@@ -383,9 +436,8 @@ app.get('/api/matches', (req, res) => {
         count: winnerBets.length,
         total_a: winnerAPool,
         total_b: winnerBPool,
-        bank_seed: m.finished ? null : winnerSeed,
-        odds_a: m.finished ? null : quoteWinner(m.id, 'A', ODDS_REF_STAKE).multiplier,
-        odds_b: m.finished ? null : quoteWinner(m.id, 'B', ODDS_REF_STAKE).multiplier
+        odds_a: m.finished ? null : boardWinnerOddsFromBets(m.id, winnerBets, 'A'),
+        odds_b: m.finished ? null : boardWinnerOddsFromBets(m.id, winnerBets, 'B')
       },
       my_score_bet: myScoreBet
         ? { id: myScoreBet.id, guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout, withdraw_used: withdrawUsed('score'),
@@ -393,30 +445,13 @@ app.get('/api/matches', (req, res) => {
         : null,
       my_winner_bet: myWinnerBet
         ? { id: myWinnerBet.id, guess_winner: myWinnerBet.guess_winner, amount: myWinnerBet.amount, payout: myWinnerBet.payout, withdraw_used: withdrawUsed('winner'),
-            potential_payout: potentialPayout(winnerBets, myWinnerBet, b => b.guess_winner === myWinnerBet.guess_winner, winnerSeed) }
+            locked_odds: myWinnerBet.locked_odds,
+            potential_payout: m.finished ? null : lockedPayout(myWinnerBet) }
         : null
     };
   });
 
   res.json({ matches: result, server_time: nowTimeWaw() });
-});
-
-// GET /api/quote/winner — podgląd możliwej wygranej dla wpisywanej stawki (kurs na żywo)
-app.get('/api/quote/winner', (req, res) => {
-  const matchId = parseInt(req.query.match_id, 10);
-  const side = req.query.side;
-  const amount = parseInt(req.query.amount, 10);
-
-  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
-  if (!match) return res.status(400).json({ error: 'Mecz nie istnieje' });
-  if (!isMatchAvailable(match)) return res.status(400).json({ error: matchLockReason(match) });
-  if (side !== 'A' && side !== 'B') return res.status(400).json({ error: 'Wybierz drużynę A albo B' });
-  if (!Number.isInteger(amount) || amount < MIN_BET) {
-    return res.status(400).json({ error: `Minimalna stawka to ${MIN_BET} coins` });
-  }
-
-  const q = quoteWinner(matchId, side, amount);
-  res.json({ potential_payout: q.payout, multiplier: q.multiplier });
 });
 
 // POST /api/bet/score
@@ -485,16 +520,19 @@ app.post('/api/bet/winner', authPlayer, (req, res) => {
   ).get(player.id, match.id);
   if (existing) return res.status(400).json({ error: 'Zakład na zwycięzcę tego meczu już postawiony' });
 
+  // Zamrożenie kursu: gracz dostaje kurs z tablicy sprzed dołączenia jego zakładu do puli
+  const lockedOdds = boardWinnerOdds(match.id, guess_winner);
+
   transaction(() => {
     db.prepare(`
-      INSERT INTO bets (player_id, match_id, bet_type, guess_winner, amount)
-      VALUES (?, ?, 'winner', ?, ?)
-    `).run(player.id, match.id, guess_winner, amountInt);
+      INSERT INTO bets (player_id, match_id, bet_type, guess_winner, amount, locked_odds)
+      VALUES (?, ?, 'winner', ?, ?, ?)
+    `).run(player.id, match.id, guess_winner, amountInt, lockedOdds);
     db.prepare('UPDATE players SET balance = balance - ? WHERE id = ?').run(amountInt, player.id);
   });
 
   const fresh = db.prepare('SELECT balance FROM players WHERE id = ?').get(player.id);
-  res.json({ success: true, new_balance: fresh.balance });
+  res.json({ success: true, new_balance: fresh.balance, locked_odds: lockedOdds });
 });
 
 // DELETE /api/bet/:id — wycofaj własny zakład, dopóki okno betowania jest otwarte
@@ -621,9 +659,9 @@ app.post('/api/admin/match/:id/result', (req, res) => {
   const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(match.id);
   const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(match.id);
 
-  const marketSeed = (bets, type) => bankSeed(match.id, type, bets.reduce((s, b) => s + Number(b.amount), 0));
-  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === scoreA && b.guess_score_b === scoreB, marketSeed(scoreBets, 'score'));
-  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === winner, marketSeed(winnerBets, 'winner'));
+  const scoreSeed = bankSeed(match.id, 'score', scoreBets.reduce((s, b) => s + Number(b.amount), 0));
+  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === scoreA && b.guess_score_b === scoreB, scoreSeed);
+  const winnerRes = settleWinnerFixed(winnerBets, winner);
   const bankTotal = scoreRes.bankCut + winnerRes.bankCut;
 
   const withNick = payouts => payouts.map(p => {
@@ -716,9 +754,9 @@ app.delete('/api/admin/match/:id/result', (req, res) => {
   const scoreBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'score'`).all(match.id);
   const winnerBets = db.prepare(`SELECT * FROM bets WHERE match_id = ? AND bet_type = 'winner'`).all(match.id);
 
-  const marketSeed = (bets, type) => bankSeed(match.id, type, bets.reduce((s, b) => s + Number(b.amount), 0));
-  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === match.score_a && b.guess_score_b === match.score_b, marketSeed(scoreBets, 'score'));
-  const winnerRes = settleMarket(winnerBets, b => b.guess_winner === match.winner, marketSeed(winnerBets, 'winner'));
+  const scoreSeed = bankSeed(match.id, 'score', scoreBets.reduce((s, b) => s + Number(b.amount), 0));
+  const scoreRes = settleMarket(scoreBets, b => b.guess_score_a === match.score_a && b.guess_score_b === match.score_b, scoreSeed);
+  const winnerRes = settleWinnerFixed(winnerBets, match.winner);
   const bankTotal = scoreRes.bankCut + winnerRes.bankCut;
 
   transaction(() => {
@@ -732,6 +770,32 @@ app.delete('/api/admin/match/:id/result', (req, res) => {
   });
 
   res.json({ success: true, message: 'Rozliczenie cofnięte — możesz wpisać wynik ponownie' });
+});
+
+// POST /api/admin/match/:id/refund — wycofaj i zwróć WSZYSTKIE zakłady z meczu (reset rynku,
+// np. żeby wyrównać szanse po zmianie kursów). Czyści też limity wycofań graczy dla tego meczu.
+app.post('/api/admin/match/:id/refund', (req, res) => {
+  const { password } = req.body;
+  if (password !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Złe hasło' });
+
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(req.params.id);
+  if (!match) return res.status(404).json({ error: 'Mecz nie istnieje' });
+  if (match.finished) return res.status(400).json({ error: 'Mecz już rozliczony — najpierw cofnij rozliczenie' });
+
+  const bets = db.prepare('SELECT * FROM bets WHERE match_id = ?').all(match.id);
+  if (!bets.length) return res.status(400).json({ error: 'Brak zakładów do wycofania' });
+
+  const refundedTotal = bets.reduce((s, b) => s + Number(b.amount), 0);
+
+  transaction(() => {
+    bets.forEach(b => {
+      db.prepare('UPDATE players SET balance = balance + ? WHERE id = ?').run(b.amount, b.player_id);
+    });
+    db.prepare('DELETE FROM bets WHERE match_id = ?').run(match.id);
+    db.prepare('DELETE FROM bet_withdrawals WHERE match_id = ?').run(match.id);
+  });
+
+  res.json({ success: true, refunded_bets: bets.length, refunded_total: refundedTotal });
 });
 
 // GET /api/admin/players — lista graczy do zarządzania

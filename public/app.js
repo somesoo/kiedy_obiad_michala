@@ -212,6 +212,11 @@ function renderMatchCard(m) {
 
 function pendingPayoutNote(b) {
   if (!b.potential_payout) return 'oczekuje na wynik';
+  // Zakład na zwycięzcę ma kurs zamrożony w chwili postawienia — wygrana jest pewna co do coina.
+  // Zakład na wynik gra w puli (parimutuel), więc kwota jest szacunkiem stanu obecnego.
+  if (b.locked_odds) {
+    return `wygrana przy trafieniu: ${b.potential_payout} coins <span class="mono">(x${Number(b.locked_odds).toFixed(2)} 🔒)</span>`;
+  }
   const mult = (b.potential_payout / b.amount).toFixed(2);
   return `możliwa wygrana ~${b.potential_payout} coins <span class="mono">(x${mult})</span>`;
 }
@@ -294,7 +299,7 @@ function renderPoolSplit(m) {
 
 function renderWinnerMarket(m) {
   const poolTotal = m.winner_market.total_a + m.winner_market.total_b;
-  const pool = poolLabel(poolTotal, m.winner_market.bank_seed, m.winner_market.count);
+  const pool = poolLabel(poolTotal, null, m.winner_market.count);
 
   let body;
   if (m.my_winner_bet) {
@@ -380,32 +385,28 @@ document.getElementById('matches-list').addEventListener('click', e => {
   }
 });
 
-// ── LIVE QUOTE (kurs na żywo dla wpisywanej stawki) ──
-const quoteTimers = {};
-
+// ── PODGLĄD WYGRANEJ (stawka × kurs z tablicy) ──
+// Kurs z tablicy zamraża się dla zakładu w chwili postawienia — wpisywana stawka
+// go nie zmienia, a późniejsze zakłady innych ruszają tylko tablicę, nie Twój kurs.
 document.getElementById('matches-list').addEventListener('input', e => {
   const matchId = parseInt(e.target.dataset.quoteMatch, 10);
-  if (!matchId) return;
-  clearTimeout(quoteTimers[matchId]);
-  quoteTimers[matchId] = setTimeout(() => updateWinnerQuote(matchId), 300);
+  if (matchId) updateWinnerQuote(matchId);
 });
 
-async function updateWinnerQuote(matchId) {
+function updateWinnerQuote(matchId) {
   const el = document.getElementById(`winner-quote-${matchId}`);
   if (!el) return;
 
   const side = state.winnerSelection[matchId];
   const amountEl = document.getElementById(`winner-amount-${matchId}`);
   const amount = amountEl ? parseInt(amountEl.value, 10) : NaN;
+  const m = (state.matches || []).find(x => x.id === matchId);
+  const odds = m ? (side === 'A' ? m.winner_market.odds_a : m.winner_market.odds_b) : null;
 
-  if (!side || !amount || amount < 10) { el.textContent = ''; return; }
+  if (!side || !amount || amount < 10 || !odds) { el.textContent = ''; return; }
 
-  try {
-    const q = await api('GET', `/api/quote/winner?match_id=${matchId}&side=${side}&amount=${amount}`);
-    el.innerHTML = `Możliwa wygrana: <span class="mono accent">~${q.potential_payout} coins</span> <span class="mono">(x${q.multiplier.toFixed(2)})</span>`;
-  } catch {
-    el.textContent = '';
-  }
+  const potential = Math.max(Math.floor(amount * odds), amount);
+  el.innerHTML = `Wygrana przy trafieniu: <span class="mono accent">${potential} coins</span> <span class="mono">(x${odds.toFixed(2)} 🔒 przy postawieniu)</span>`;
 }
 
 async function withdrawBet(betId) {
