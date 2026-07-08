@@ -270,13 +270,18 @@ function oddsTag(odds) {
 }
 
 function renderPoolSplit(m) {
-  const shareA = m.winner_market.share_a;
-  if (shareA === null || shareA === undefined) return '';
-  const shareB = 100 - shareA;
+  if (m.finished || !m.team_a || !m.team_b) return '';
+  const a = m.winner_market.total_a;
+  const b = m.winner_market.total_b;
+  const total = a + b;
+  const widthA = total > 0 ? Math.round((a / total) * 100) : 50;
   return `
     <div class="pool-split">
-      <div class="pool-split-bar"><div class="pool-split-a" style="width:${shareA}%"></div></div>
-      <div class="pool-split-labels"><span>${shareA}%</span><span>${shareB}%</span></div>
+      <div class="pool-split-bar"><div class="pool-split-a" style="width:${widthA}%"></div></div>
+      <div class="pool-split-labels">
+        <span>${esc(teamLabel(m, 'A'))} · <span class="mono">${a}</span> ${oddsTag(m.winner_market.odds_a)}</span>
+        <span>${oddsTag(m.winner_market.odds_b)} <span class="mono">${b}</span> · ${esc(teamLabel(m, 'B'))}</span>
+      </div>
     </div>
   `;
 }
@@ -329,7 +334,10 @@ function renderWinnerMarket(m) {
       <div class="market-error" id="winner-error-${m.id}"></div>
     `;
   } else {
-    body = `<div class="market-locked-note">Niedostępny</div>`;
+    body = `
+      ${renderPoolSplit(m)}
+      <div class="market-locked-note">Niedostępny</div>
+    `;
   }
 
   return `

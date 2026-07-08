@@ -578,9 +578,20 @@ h1, h2, h3, .logo-text {
 .pool-split-labels {
   display: flex;
   justify-content: space-between;
-  font-family: 'JetBrains Mono', monospace;
+  gap: 8px;
   font-size: 10px;
   color: var(--text-muted);
+}
+
+.pool-split-labels > span {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pool-split-labels .odds-tag {
+  font-size: 10px;
 }
 
 .pool-seed {

@@ -324,7 +324,6 @@ app.get('/api/matches', (req, res) => {
     const scorePool = scoreBets.reduce((s, b) => s + Number(b.amount), 0);
     const winnerAPool = winnerBets.filter(b => b.guess_winner === 'A').reduce((s, b) => s + Number(b.amount), 0);
     const winnerBPool = winnerBets.filter(b => b.guess_winner === 'B').reduce((s, b) => s + Number(b.amount), 0);
-    const winnerPool = winnerAPool + winnerBPool;
 
     const myScoreBet = player ? scoreBets.find(b => b.player_id === player.id) : null;
     const myWinnerBet = player ? winnerBets.find(b => b.player_id === player.id) : null;
@@ -363,9 +362,8 @@ app.get('/api/matches', (req, res) => {
         total_a: winnerAPool,
         total_b: winnerBPool,
         bank_seed: m.finished ? null : BANK_SEED,
-        odds_a: available ? quoteWinner(m.id, 'A', ODDS_REF_STAKE).multiplier : null,
-        odds_b: available ? quoteWinner(m.id, 'B', ODDS_REF_STAKE).multiplier : null,
-        share_a: !m.finished && winnerPool > 0 ? Math.round((winnerAPool / winnerPool) * 100) : null
+        odds_a: m.finished ? null : quoteWinner(m.id, 'A', ODDS_REF_STAKE).multiplier,
+        odds_b: m.finished ? null : quoteWinner(m.id, 'B', ODDS_REF_STAKE).multiplier
       },
       my_score_bet: myScoreBet
         ? { id: myScoreBet.id, guess_score_a: myScoreBet.guess_score_a, guess_score_b: myScoreBet.guess_score_b, amount: myScoreBet.amount, payout: myScoreBet.payout, withdraw_used: withdrawUsed('score'),
