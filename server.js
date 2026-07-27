@@ -9,9 +9,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 
-// Pierwszy dzień sezonu (hasło o order_index = 1 gra w tym dniu, kolejne w kolejnych dniach).
-// Numer dnia liczymy jako liczbę dni od SEASON_START w strefie Europe/Warsaw + 1.
-const SEASON_START = process.env.WORDLE_SEASON_START || '2026-07-27';
+// Pierwszy dzień gry (hasło o order_index = 1). Hasła lecą tylko w dni robocze (pon–pt),
+// więc numer hasła = ile dni roboczych minęło od WORD_START (włącznie), a weekendy pomijamy.
+// Hasła lecą w sposób ciągły, niezależnie od miesięcznego resetu sezonu.
+const WORD_START = process.env.WORDLE_WORD_START || process.env.WORDLE_SEASON_START || '2026-07-27';
+
+// Sezon = miesiąc kalendarzowy. Leaderboard/streak/punkty liczą się per sezon i zerują 1. dnia
+// miesiąca. Do końca lipca trwa okres testowy; konkurs startuje od tego sezonu:
+const CONTEST_START = process.env.WORDLE_CONTEST_START || '2026-08'; // 'YYYY-MM'
+
+const MONTHS_PL = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec',
+  'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];
 
 // ── PUNKTACJA ──
 const POINTS_PER_ATTEMPT_STEP = 10;   // baza = (max_prób - N + 1) * 10
@@ -91,6 +99,7 @@ function ensureColumn(table, column, definition) {
 }
 ensureColumn('players', 'total_points', 'INTEGER DEFAULT 0');
 ensureColumn('players', 'last_word_index', 'INTEGER DEFAULT 0');
+ensureColumn('players', 'season', 'TEXT'); // sezon (YYYY-MM), w którym gracz ostatnio grał — do resetu streaka
 
 // Zamiana polskich znaków na ASCII — hasła muszą być grywalne na klawiaturze A–Z.
 const PL_ASCII = { Ą: 'A', Ć: 'C', Ę: 'E', Ł: 'L', Ń: 'N', Ó: 'O', Ś: 'S', Ź: 'Z', Ż: 'Z' };
@@ -141,6 +150,52 @@ if (seedCount === 0) {
   shuffle(loadSeedWords()).forEach((w, i) => insertWord.run(w.word, w.hint, i + 1));
 }
 
+// ── WALIDACJA SŁOWNIKOWA (hybryda) ──
+// Zgadywane słowo musi być prawdziwe: albo jest w bundlowanym słowniku polskim (data/pl-words.txt,
+// zwinięty do ASCII), albo — jeśli go tam nie ma (rzadkie/odmienione słowo) — przechodzi test
+// fonotaktyczny. Blokuje to strzelanie samymi samogłoskami i "matematyczne" nie-słowa,
+// nie odrzucając przy tym normalnie zbudowanych, realnych słów. Hasła gry są zawsze dozwolone.
+const VOWELS = new Set(['A', 'E', 'I', 'O', 'U', 'Y']);
+const DICTIONARY = new Set();
+(function loadDictionary() {
+  try {
+    const file = path.join(__dirname, 'data', 'pl-words.txt');
+    if (fs.existsSync(file)) {
+      for (const w of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+        if (w) DICTIONARY.add(w);
+      }
+    } else {
+      console.warn('Brak data/pl-words.txt — walidacja opiera się tylko na heurystyce.');
+    }
+  } catch (e) {
+    console.error('Nie udało się wczytać słownika:', e.message);
+  }
+  for (const r of db.prepare('SELECT word FROM words').all()) DICTIONARY.add(r.word);
+  console.log('Słownik zgadywanej:', DICTIONARY.size, 'słów');
+})();
+
+// Heurystyka fonotaktyczna — odsiewa nie-słowa (same samogłoski, mash spółgłosek, powtórki liter).
+function looksLikeWord(w) {
+  const len = w.length;
+  let vowels = 0;
+  const counts = {};
+  for (const c of w) {
+    if (VOWELS.has(c)) vowels++;
+    counts[c] = (counts[c] || 0) + 1;
+    if (counts[c] > 3) return false;               // ta sama litera 4+ razy
+  }
+  if (vowels === 0) return false;                   // brak samogłoski
+  if (vowels === len) return false;                 // same samogłoski (np. AEIOU)
+  if (/(.)\1\1/.test(w)) return false;              // 3 identyczne litery pod rząd
+  const ratio = vowels / len;
+  if (ratio < 0.15 || ratio > 0.80) return false;   // nienaturalny udział samogłosek
+  return true;
+}
+
+function isAllowedGuess(guess) {
+  return DICTIONARY.has(guess) || looksLikeWord(guess);
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -162,39 +217,144 @@ function todayWaw() {
   return `${p.y}-${p.mo}-${p.d}`;
 }
 
-// Numer dnia sezonu (1-based): ile pełnych dni minęło od SEASON_START + 1.
-// Liczymy na "północach UTC" dat kalendarzowych, więc DST nie przesuwa wyniku.
-function seasonDayNumber() {
-  const today = todayWaw();
-  const start = Date.UTC(...SEASON_START.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v)));
-  const now = Date.UTC(...today.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v)));
-  return Math.floor((now - start) / 86400000) + 1;
+// ── DNI ROBOCZE / NUMER HASŁA ──
+// Weekend rozpoznajemy z daty kalendarzowej (na północach UTC — DST nie ma znaczenia).
+function isWeekendStr(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return dow === 0 || dow === 6; // niedziela / sobota
 }
 
-// Hasło na dziś = to o order_index równym numerowi dnia sezonu
+// Ile dni roboczych (pon–pt) minęło od WORD_START do dateStr włącznie
+function businessDaysElapsed(dateStr) {
+  const [sy, sm, sd] = WORD_START.split('-').map(Number);
+  const [ey, em, ed] = dateStr.split('-').map(Number);
+  let cur = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  if (end < cur) return 0;
+  let n = 0;
+  while (cur <= end) {
+    const dow = new Date(cur).getUTCDay();
+    if (dow !== 0 && dow !== 6) n++;
+    cur += 86400000;
+  }
+  return n;
+}
+
+// Poprzedni dzień roboczy przed dateStr (pon → poprzedni pt)
+function previousBusinessDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  let t = Date.UTC(y, m - 1, d);
+  do { t -= 86400000; } while ([0, 6].includes(new Date(t).getUTCDay()));
+  const dt = new Date(t);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+// Godzina, o której pojawia się nowe hasło (czasu Warszawy). Do tej godziny wisi wczorajsze.
+const NEW_WORD_HOUR = parseInt(process.env.WORDLE_NEW_WORD_HOUR, 10) || 8;
+
+// Które hasło jest teraz aktualne i w jakiej fazie:
+//  - 'live'    : hasło dnia gra się (08:00 → północ) — można wpisywać
+//  - 'expired' : północ → 08:00, wisi jeszcze wczorajsze hasło, ale wpisywanie zamknięte
+//  - 'weekend' : sobota/niedziela — przerwa
+// Zwraca { phase, index, date } (index/date = null poza dniami z hasłem).
+function activePuzzle() {
+  const p = warsawParts();
+  const today = `${p.y}-${p.mo}-${p.d}`;
+  const hour = Number(p.h);
+
+  if (isWeekendStr(today)) {
+    return { phase: 'weekend', index: null, date: null };
+  }
+  if (hour >= NEW_WORD_HOUR) {
+    const n = businessDaysElapsed(today);
+    return { phase: 'live', index: n >= 1 ? n : null, date: today };
+  }
+  // 00:00–08:00 w dzień roboczy: wisi jeszcze hasło poprzedniego dnia roboczego, ale zamknięte
+  const prev = previousBusinessDay(today);
+  const n = businessDaysElapsed(prev);
+  return { phase: 'expired', index: n >= 1 ? n : null, date: prev };
+}
+
+// Numer aktualnie pokazywanego hasła (do rankingu dnia / panelu admina). null gdy brak.
+function currentPuzzleIndex() {
+  return activePuzzle().index;
+}
+
+// Najwyższy zużyty indeks hasła — do liczenia zapasu w puli
+function supplyIndex() {
+  const idx = currentPuzzleIndex();
+  return idx !== null ? idx : businessDaysElapsed(todayWaw());
+}
+
+// Aktualnie pokazywane hasło (żywe LUB wygasłe — do wyświetlenia; null w weekend/przerwie)
 function currentWord() {
-  const day = seasonDayNumber();
-  if (day < 1) return null;
-  return db.prepare('SELECT * FROM words WHERE order_index = ?').get(day) || null;
+  const idx = currentPuzzleIndex();
+  if (!idx) return null;
+  return db.prepare('SELECT * FROM words WHERE order_index = ?').get(idx) || null;
 }
 
-function remainingWordsCount() {
-  const day = seasonDayNumber();
-  return db.prepare('SELECT COUNT(*) AS c FROM words WHERE order_index > ?').get(day).c;
+// ── SEZON (miesiąc kalendarzowy) ──
+function currentSeasonId() {
+  const p = warsawParts();
+  return `${p.y}-${p.mo}`; // 'YYYY-MM'
+}
+function seasonMonthLabel(id) {
+  const [y, m] = id.split('-').map(Number);
+  return `${MONTHS_PL[m - 1]} ${y}`;
+}
+function seasonLabel() {
+  return seasonMonthLabel(currentSeasonId());
+}
+function isTestPeriod() {
+  return currentSeasonId() < CONTEST_START;
+}
+// Granice bieżącego sezonu jako daty 'YYYY-MM-DD' [first, nextFirst)
+function seasonBounds() {
+  const p = warsawParts();
+  const first = `${p.y}-${p.mo}-01`;
+  let y = Number(p.y), m = Number(p.mo) + 1;
+  if (m > 12) { m = 1; y++; }
+  const nextFirst = `${y}-${String(m).padStart(2, '0')}-01`;
+  return { first, nextFirst };
 }
 
 function seasonInfo() {
-  const day = seasonDayNumber();
+  const ap = activePuzzle();
+  const idx = ap.index;
+  const supply = supplyIndex();
   const maxIndex = db.prepare('SELECT MAX(order_index) AS m FROM words').get().m || 0;
-  const word = currentWord();
+  const hasWord = idx !== null && !!db.prepare('SELECT 1 FROM words WHERE order_index = ?').get(idx);
   return {
-    day_number: day,
-    remaining_words: remainingWordsCount(),
+    season_id: currentSeasonId(),
+    season_label: seasonLabel(),
+    is_test: isTestPeriod(),
+    contest_start: CONTEST_START,
+    phase: ap.phase,
+    day_number: idx,
+    is_weekend: ap.phase === 'weekend',
+    new_word_hour: NEW_WORD_HOUR,
+    remaining_words: db.prepare('SELECT COUNT(*) AS c FROM words WHERE order_index > ?').get(supply).c,
     total_words: db.prepare('SELECT COUNT(*) AS c FROM words').get().c,
     max_index: maxIndex,
-    season_over: day > maxIndex && maxIndex > 0,
-    has_word_today: !!word
+    supply_exhausted: idx !== null && idx > maxIndex,
+    has_word_today: hasWord
   };
+}
+
+// Streak/rekord ograniczone do bieżącego sezonu (0, jeśli gracz nie grał jeszcze w tym miesiącu)
+function effectiveStreaks(player) {
+  return player.season === currentSeasonId()
+    ? { current: player.current_streak, best: player.best_streak }
+    : { current: 0, best: 0 };
+}
+
+// Punkty gracza w bieżącym sezonie (suma z gier tego miesiąca)
+function seasonPoints(playerId) {
+  const { first, nextFirst } = seasonBounds();
+  return Number(db.prepare(
+    'SELECT COALESCE(SUM(points), 0) AS p FROM games WHERE player_id = ? AND played_on >= ? AND played_on < ?'
+  ).get(playerId, first, nextFirst).p);
 }
 
 // ── OCENA ZGADYWANIA (standard Wordle, obsługa powtórzeń) ──
@@ -255,15 +415,22 @@ function buildGameState(player) {
   const info = seasonInfo();
   const word = currentWord();
 
+  const eff = effectiveStreaks(player);
   const base = {
+    season_id: info.season_id,
+    season_label: info.season_label,
+    is_test: info.is_test,
+    phase: info.phase,
     day_number: info.day_number,
+    is_weekend: info.is_weekend,
+    supply_exhausted: info.supply_exhausted,
+    new_word_hour: info.new_word_hour,
     remaining_words: info.remaining_words,
     total_words: info.total_words,
-    season_over: info.season_over,
     stats: {
-      current_streak: player.current_streak,
-      best_streak: player.best_streak,
-      total_points: player.total_points
+      current_streak: eff.current,
+      best_streak: eff.best,
+      season_points: seasonPoints(player.id)
     }
   };
 
@@ -271,6 +438,7 @@ function buildGameState(player) {
     return { ...base, has_word: false };
   }
 
+  const live = info.phase === 'live';
   const maxAttempts = maxAttemptsFor(word.word.length);
   const game = db.prepare(
     'SELECT * FROM games WHERE player_id = ? AND word_id = ?'
@@ -281,12 +449,17 @@ function buildGameState(player) {
     guess: g,
     statuses: evaluateGuess(g, word.word)
   }));
-  const status = game ? game.status : 'not_started';
-  const finished = status === 'won' || status === 'lost';
+  const rawStatus = game ? game.status : 'not_started';
+  const finished = rawStatus === 'won' || rawStatus === 'lost';
+  // Po godzinie 00:00 (faza 'expired') wpisywanie jest zamknięte — niedokończoną grę
+  // pokazujemy jako 'expired' i odsłaniamy hasło. Na żywo działa normalnie.
+  const status = (!live && !finished) ? 'expired' : rawStatus;
+  const playable = live && (rawStatus === 'not_started' || rawStatus === 'in_progress');
 
   return {
     ...base,
     has_word: true,
+    playable,
     word_length: word.word.length,
     max_attempts: maxAttempts,
     hint: word.hint,
@@ -295,7 +468,7 @@ function buildGameState(player) {
     status,
     keyboard: keyboardStatuses(guessList, word.word),
     points_today: game ? game.points : 0,
-    answer: finished ? word.word : null
+    answer: (finished || !live) ? word.word : null
   };
 }
 
@@ -333,12 +506,13 @@ app.post('/api/register', (req, res) => {
 
 app.get('/api/me', authPlayer, (req, res) => {
   const { player } = req;
+  const eff = effectiveStreaks(player);
   res.json({
     id: player.id,
     nickname: player.nickname,
-    current_streak: player.current_streak,
-    best_streak: player.best_streak,
-    total_points: player.total_points
+    current_streak: eff.current,
+    best_streak: eff.best,
+    season_points: seasonPoints(player.id)
   });
 });
 
@@ -350,8 +524,15 @@ app.get('/api/wordle/today', authPlayer, (req, res) => {
 
 // POST /api/wordle/guess — dopisz próbę { guess }
 app.post('/api/wordle/guess', authPlayer, (req, res) => {
+  const ap = activePuzzle();
+  if (ap.phase !== 'live') {
+    const msg = ap.phase === 'weekend'
+      ? 'Weekend — hasła gramy od poniedziałku do piątku'
+      : `Wpisywanie zamknięte o północy — nowe hasło o ${NEW_WORD_HOUR}:00`;
+    return res.status(400).json({ error: msg });
+  }
   const word = currentWord();
-  if (!word) return res.status(400).json({ error: 'Dziś nie ma hasła — sezon zakończony lub jeszcze się nie zaczął' });
+  if (!word) return res.status(400).json({ error: 'Brak hasła w puli na dziś' });
 
   const answer = word.word;
   const maxAttempts = maxAttemptsFor(answer.length);
@@ -362,6 +543,10 @@ app.post('/api/wordle/guess', authPlayer, (req, res) => {
   }
   if (!/^[A-Z]+$/.test(guess)) {
     return res.status(400).json({ error: 'Dozwolone są tylko litery A–Z' });
+  }
+  // Nie-słowa odrzucamy zanim policzymy próbę — nieudana walidacja nie zużywa podejścia.
+  if (guess !== answer && !isAllowedGuess(guess)) {
+    return res.status(400).json({ error: 'Nie ma takiego słowa — wpisz istniejące słowo', invalid_word: true });
   }
 
   const result = transaction(() => {
@@ -392,15 +577,21 @@ app.post('/api/wordle/guess', authPlayer, (req, res) => {
     let points = 0;
 
     const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
+    // Streak jest liczony w obrębie sezonu (miesiąca). Jeśli gracz nie grał jeszcze w tym
+    // sezonie, startuje od zera — to daje automatyczny reset 1. dnia miesiąca.
+    const season = currentSeasonId();
+    const sameSeason = player.season === season;
+    const prevStreak = sameSeason ? player.current_streak : 0;
+    const prevBest = sameSeason ? player.best_streak : 0;
+    const prevLastIdx = sameSeason ? player.last_word_index : 0;
 
     if (won || lost) {
       status = won ? 'won' : 'lost';
 
       let newStreak;
       if (won) {
-        newStreak = (player.last_word_index === word.order_index - 1)
-          ? player.current_streak + 1
-          : 1;
+        // Indeksy haseł pomijają weekendy, więc pt→pn to wciąż kolejne numery — seria trwa.
+        newStreak = (prevLastIdx === word.order_index - 1) ? prevStreak + 1 : 1;
         const base = (maxAttempts - attemptsUsed + 1) * POINTS_PER_ATTEMPT_STEP;
         const lengthBonus = LENGTH_BONUS_PER_LETTER * answer.length;
         const streakBonus = Math.min(newStreak * STREAK_BONUS_PER_DAY, STREAK_BONUS_CAP);
@@ -409,13 +600,13 @@ app.post('/api/wordle/guess', authPlayer, (req, res) => {
         newStreak = 0;
       }
 
-      const bestStreak = Math.max(player.best_streak, newStreak);
+      const bestStreak = Math.max(prevBest, newStreak);
       db.prepare(`
         UPDATE players
-        SET current_streak = ?, best_streak = ?, last_word_index = ?,
+        SET current_streak = ?, best_streak = ?, last_word_index = ?, season = ?,
             total_points = total_points + ?, total_wins = total_wins + ?
         WHERE id = ?
-      `).run(newStreak, bestStreak, word.order_index, points, won ? 1 : 0, player.id);
+      `).run(newStreak, bestStreak, word.order_index, season, points, won ? 1 : 0, player.id);
 
       db.prepare(`
         UPDATE games SET guesses = ?, status = ?, attempts_used = ?, points = ?, finished_at = CURRENT_TIMESTAMP
@@ -442,26 +633,38 @@ app.get('/api/season', (req, res) => {
   res.json(seasonInfo());
 });
 
-// GET /api/leaderboard?period=all|week|month
+// GET /api/leaderboard?season=YYYY-MM|all&highlight=ID
+// Domyślnie bieżący sezon (miesiąc). Konkretny 'YYYY-MM' = historyczny leaderboard danego
+// miesiąca; 'all' = wszystkie sezony razem. Zwraca też listę dostępnych miesięcy (do wyboru).
 app.get('/api/leaderboard', (req, res) => {
   const highlightId = parseInt(req.query.highlight, 10) || null;
-  const period = ['all', 'week', 'month'].includes(req.query.period) ? req.query.period : 'all';
+  const curSeason = currentSeasonId();
+  const q = req.query.season;
+  let target;
+  if (q === 'all') target = 'all';
+  else if (/^\d{4}-\d{2}$/.test(q || '')) target = q;
+  else target = curSeason;
 
   let dateFilter = '';
-  if (period === 'week') {
-    // Ostatnie 7 dni (włącznie z dziś), po played_on (data w Warszawie)
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() - 6);
-    const from = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-    dateFilter = `AND g.played_on >= '${from}'`;
-  } else if (period === 'month') {
-    const p = warsawParts();
-    dateFilter = `AND g.played_on >= '${p.y}-${p.mo}-01'`;
+  if (target !== 'all') {
+    const [y, m] = target.split('-').map(Number);
+    let ny = y, nm = m + 1;
+    if (nm > 12) { nm = 1; ny++; }
+    const first = `${target}-01`;
+    const nextFirst = `${ny}-${String(nm).padStart(2, '0')}-01`;
+    dateFilter = `AND g.played_on >= '${first}' AND g.played_on < '${nextFirst}'`;
   }
+
+  // Streak pokazujemy tylko dla bieżącego sezonu (dla miesięcy historycznych go nie
+  // przechowujemy) — w innych widokach kolumna serii jest pusta.
+  const isCurrent = target === curSeason;
+  const streakSelect = isCurrent ? 'CASE WHEN p.season = ? THEN p.current_streak ELSE 0 END' : 'NULL';
+  const params = isCurrent ? [curSeason] : [];
 
   const rows = db.prepare(`
     SELECT
-      p.id, p.nickname, p.current_streak,
+      p.id, p.nickname,
+      ${streakSelect} AS streak,
       COALESCE(SUM(g.points), 0) AS points,
       COUNT(g.id) AS games_played,
       SUM(CASE WHEN g.status = 'won' THEN 1 ELSE 0 END) AS wins,
@@ -469,33 +672,46 @@ app.get('/api/leaderboard', (req, res) => {
     FROM players p
     LEFT JOIN games g ON g.player_id = p.id ${dateFilter}
     GROUP BY p.id
-    HAVING games_played > 0 OR ? = 'all'
+    HAVING games_played > 0
     ORDER BY points DESC, wins DESC, games_played ASC
-  `).all(period);
+  `).all(...params);
 
   const list = rows.map((r, i) => ({
     rank: i + 1,
     id: r.id,
     nickname: r.nickname,
     total_points: Number(r.points),
-    streak: r.current_streak,
+    streak: r.streak === null ? null : Number(r.streak),
     games_played: Number(r.games_played),
     wins: Number(r.wins),
     avg_attempts: r.wins > 0 ? Math.round((Number(r.won_attempts) / Number(r.wins)) * 10) / 10 : null,
     is_me: highlightId ? r.id === highlightId : false
   }));
 
-  res.json({ leaderboard: list, total_players: list.length, period });
+  // Lista miesięcy, w których cokolwiek rozegrano (+ zawsze bieżący sezon), do selektora historii
+  const seasons = db.prepare(`SELECT DISTINCT substr(played_on, 1, 7) AS s FROM games ORDER BY s DESC`).all().map(r => r.s);
+  if (!seasons.includes(curSeason)) seasons.unshift(curSeason);
+  seasons.sort().reverse();
+  const availableSeasons = seasons.map(s => ({ id: s, label: seasonMonthLabel(s), is_current: s === curSeason }));
+
+  res.json({
+    leaderboard: list,
+    total_players: list.length,
+    season: target,
+    season_label: target === 'all' ? 'Wszystkie sezony' : seasonMonthLabel(target),
+    current_season: curSeason,
+    available_seasons: availableSeasons
+  });
 });
 
 // GET /api/wordle/daily — ranking dzisiejszego hasła (kto najlepiej trafił dziś)
 app.get('/api/wordle/daily', (req, res) => {
   const highlightId = parseInt(req.query.highlight, 10) || null;
-  const day = seasonDayNumber();
+  const day = currentPuzzleIndex();
   const word = currentWord();
 
   if (!word) {
-    return res.json({ day_number: day, has_word: false, entries: [], total: 0 });
+    return res.json({ day_number: day, has_word: false, is_weekend: isWeekendStr(todayWaw()), entries: [], total: 0 });
   }
 
   // Zwycięzcy najpierw (mniej prób = wyżej), potem przegrani. Punkty jako rozstrzygnięcie remisu.
@@ -543,19 +759,20 @@ function checkAdmin(req, res) {
 app.get('/api/admin/words', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const words = db.prepare('SELECT * FROM words ORDER BY order_index ASC').all();
-  const day = seasonDayNumber();
+  const idx = currentPuzzleIndex();
+  const pastThreshold = idx !== null ? idx : supplyIndex() + 1;
   const withStatus = words.map(w => {
     const played = db.prepare('SELECT COUNT(*) AS c FROM games WHERE word_id = ?').get(w.id).c;
     return {
       ...w,
       length: w.word.length,
       max_attempts: maxAttemptsFor(w.word.length),
-      is_current: w.order_index === day,
-      is_past: w.order_index < day,
+      is_current: idx !== null && w.order_index === idx,
+      is_past: w.order_index < pastThreshold,
       games_played: Number(played)
     };
   });
-  res.json({ words: withStatus, season: seasonInfo(), season_start: SEASON_START });
+  res.json({ words: withStatus, season: seasonInfo(), word_start: WORD_START });
 });
 
 // POST /api/admin/word — dodaj lub zaktualizuj hasło { id?, word, hint, order_index }
@@ -595,6 +812,7 @@ app.post('/api/admin/word', (req, res) => {
     throw e;
   }
 
+  DICTIONARY.add(word); // nowe hasło ma być zawsze dozwolone jako zgadywane słowo
   res.json({ success: true });
 });
 

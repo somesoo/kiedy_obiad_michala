@@ -5,7 +5,8 @@ let state = {
   nickname: null,
   game: null,        // ostatni stan z /api/wordle/today
   current: '',       // aktualnie wpisywany wiersz
-  period: 'all',     // filtr leaderboardu
+  lbSeason: '',      // wybrany sezon w leaderboardzie ('' = bieżący, 'all', lub 'YYYY-MM')
+  lbSeasonsLoaded: false,
   busy: false,
   shake: false,
 };
@@ -111,7 +112,7 @@ async function loadGame() {
     const game = await api('GET', '/api/wordle/today');
     state.game = game;
     state.current = '';
-    renderPoints(game.stats.total_points);
+    renderPoints(game.stats.season_points);
     renderSeason(game);
     renderGame();
     updateCountdown();
@@ -126,20 +127,24 @@ function renderPoints(pts) {
 }
 
 function renderSeason(g) {
+  // Górna wstęga z informacją o sezonie (miesiąc + reset)
+  const ribbon = document.getElementById('season-ribbon');
+  const testNote = g.is_test ? ' · <strong>okres testowy</strong> (konkurs od sierpnia)' : '';
+  ribbon.innerHTML = `🗓️ Sezon: <strong>${esc(g.season_label)}</strong> — leaderboard i seria zerują się co miesiąc${testNote}`;
+
+  document.getElementById('footer-season').textContent = g.season_label;
+
   document.getElementById('season-remaining').textContent = g.remaining_words;
-  document.getElementById('day-number').textContent = `#${g.day_number}`;
   const total = g.total_words || 1;
   const done = Math.max(0, Math.min(total, total - g.remaining_words));
   const pct = Math.round((done / total) * 100);
   document.getElementById('season-progress-fill').style.width = pct + '%';
-  document.getElementById('season-sub').textContent =
-    g.season_over ? 'Sezon zakończony 🏁' : `Rozegrano ${done} z ${total} haseł`;
+  document.getElementById('season-sub').textContent = `Rozegrano ${done} z ${total} haseł w puli`;
 }
 
 // ── GAME RENDER ──
 function isPlayable(g) {
-  return g && g.has_word && !g.season_over &&
-    (g.status === 'not_started' || g.status === 'in_progress');
+  return !!(g && g.has_word && g.playable);
 }
 
 function renderGame() {
@@ -148,19 +153,33 @@ function renderGame() {
 
   if (!g) { area.innerHTML = ''; return; }
 
-  if (g.season_over) {
-    area.innerHTML = renderSeasonOver(g);
-    return;
-  }
   if (!g.has_word) {
-    area.innerHTML = `<div class="empty-state">Dziś nie ma hasła. Zajrzyj innego dnia! 🗓️</div>`;
+    if (g.is_weekend) {
+      area.innerHTML = `
+        <div class="empty-state">
+          <div class="season-over-emoji">☕</div>
+          <h3>Weekend — odpoczywamy!</h3>
+          <p class="text-muted">Hasła gramy od poniedziałku do piątku. Nowe pojawi się w poniedziałek o ${g.new_word_hour || 8}:00. Twoja seria 🔥 czeka nienaruszona.</p>
+        </div>`;
+    } else if (g.supply_exhausted) {
+      area.innerHTML = `
+        <div class="empty-state">
+          <div class="season-over-emoji">🏁</div>
+          <h3>Pula haseł wyczerpana</h3>
+          <p class="text-muted">Wszystkie hasła zostały rozegrane. Poproś admina o dorzucenie kolejnych!</p>
+        </div>`;
+    } else {
+      area.innerHTML = `<div class="empty-state">Dziś nie ma hasła. Zajrzyj innego dnia! 🗓️</div>`;
+    }
     return;
   }
 
   const finished = g.status === 'won' || g.status === 'lost';
+  const expired = g.status === 'expired';
+  const closed = finished || expired;
   const board = renderBoard(g);
-  const keyboard = finished ? '' : renderKeyboard(g);
-  const review = finished ? renderReview(g) : '';
+  const keyboard = closed ? '' : renderKeyboard(g);
+  const review = finished ? renderReview(g) : (expired ? renderExpired(g) : '');
 
   area.innerHTML = `
     <div class="board-meta">
@@ -175,7 +194,7 @@ function renderGame() {
 function renderBoard(g) {
   const rows = [];
   const guesses = g.guesses || [];
-  const finished = g.status === 'won' || g.status === 'lost';
+  const closed = g.status === 'won' || g.status === 'lost' || g.status === 'expired';
 
   for (let r = 0; r < g.max_attempts; r++) {
     let tiles = '';
@@ -185,7 +204,7 @@ function renderBoard(g) {
       for (let c = 0; c < g.word_length; c++) {
         tiles += `<div class="tile tile-${row.statuses[c]} filled">${esc(row.guess[c])}</div>`;
       }
-    } else if (r === guesses.length && !finished) {
+    } else if (r === guesses.length && !closed) {
       isCurrentRow = true;
       for (let c = 0; c < g.word_length; c++) {
         const ch = state.current[c] || '';
@@ -236,7 +255,7 @@ function renderReview(g) {
       <div class="review-stats">
         <div class="stat"><span class="stat-num">${g.stats.current_streak}</span><span class="stat-lbl">🔥 streak</span></div>
         <div class="stat"><span class="stat-num">${g.stats.best_streak}</span><span class="stat-lbl">rekord serii</span></div>
-        <div class="stat"><span class="stat-num">${g.stats.total_points}</span><span class="stat-lbl">⭐ punkty</span></div>
+        <div class="stat"><span class="stat-num">${g.stats.season_points}</span><span class="stat-lbl">⭐ pkt w sezonie</span></div>
       </div>
       <button class="btn-primary btn-share" id="btn-share">📋 Udostępnij wynik</button>
       <div class="next-word-timer text-muted small">Nowe hasło za <span class="mono" id="next-word-timer">–</span></div>
@@ -244,16 +263,15 @@ function renderReview(g) {
   `;
 }
 
-function renderSeasonOver(g) {
+function renderExpired(g) {
+  const hadGuesses = g.guesses && g.guesses.length;
+  const shareBtn = hadGuesses ? `<button class="btn-primary btn-share" id="btn-share">📋 Udostępnij wynik</button>` : '';
   return `
-    <div class="season-over">
-      <div class="season-over-emoji">🏁</div>
-      <h3>Sezon zakończony!</h3>
-      <p class="text-muted">Wszystkie hasła rozegrane. Sprawdź ostateczny ranking w tabeli liderów.</p>
-      <div class="review-stats">
-        <div class="stat"><span class="stat-num">${g.stats.best_streak}</span><span class="stat-lbl">rekord serii</span></div>
-        <div class="stat"><span class="stat-num">${g.stats.total_points}</span><span class="stat-lbl">⭐ punkty</span></div>
-      </div>
+    <div class="review-panel lose">
+      <div class="review-headline lose">⏳ Czas na to hasło minął o północy. Było to: <span class="mono answer">${esc(g.answer)}</span></div>
+      <div class="review-points muted">Nowe hasło pojawi się o ${g.new_word_hour || 8}:00</div>
+      ${shareBtn}
+      <div class="next-word-timer text-muted small">Nowe hasło za <span class="mono" id="next-word-timer">–</span></div>
     </div>
   `;
 }
@@ -311,7 +329,7 @@ async function submitGuess() {
     const wasFinished = g.status === 'won' || g.status === 'lost';
     state.game = updated;
     state.current = '';
-    renderPoints(updated.stats.total_points);
+    renderPoints(updated.stats.season_points);
     renderSeason(updated);
     renderGame();
     if (!wasFinished && updated.status === 'won') {
@@ -355,21 +373,32 @@ function shareResult() {
 }
 
 // ── LEADERBOARD ──
-document.getElementById('lb-filters').addEventListener('click', e => {
-  const btn = e.target.closest('.lb-filter');
-  if (!btn) return;
-  state.period = btn.dataset.period;
-  document.querySelectorAll('.lb-filter').forEach(b => b.classList.toggle('active', b === btn));
+document.getElementById('lb-season').addEventListener('change', e => {
+  state.lbSeason = e.target.value;
   loadLeaderboard();
 });
 
 async function loadLeaderboard() {
   try {
-    const data = await api('GET', `/api/leaderboard?period=${state.period}&highlight=${state.playerId}`);
+    const q = state.lbSeason ? `&season=${encodeURIComponent(state.lbSeason)}` : '';
+    const data = await api('GET', `/api/leaderboard?highlight=${state.playerId}${q}`);
+    populateSeasonSelect(data);
     renderLeaderboard(data);
   } catch (e) {
     console.error('Leaderboard error:', e);
   }
+}
+
+// Selektor sezonów: bieżący miesiąc + wszystkie miesiące z historią + widok "wszystkie sezony"
+function populateSeasonSelect(data) {
+  const sel = document.getElementById('lb-season');
+  const desired = data.season; // co faktycznie pokazujemy
+  const opts = data.available_seasons.map(s =>
+    `<option value="${s.is_current ? '' : s.id}">${esc(s.label)}${s.is_current ? ' (bieżący)' : ''}</option>`
+  );
+  opts.push(`<option value="all">Wszystkie sezony</option>`);
+  sel.innerHTML = opts.join('');
+  sel.value = desired === data.current_season ? '' : desired;
 }
 
 function renderLeaderboard(data) {
@@ -377,7 +406,7 @@ function renderLeaderboard(data) {
   document.getElementById('players-count').textContent = `${data.total_players} graczy`;
 
   if (!data.leaderboard.length) {
-    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Jeszcze nikt nie zagrał w tym okresie</div>';
+    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie zagrał w tym sezonie</div>';
     return;
   }
 
@@ -385,6 +414,7 @@ function renderLeaderboard(data) {
     const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
     const meClass = p.is_me ? ' is-me' : '';
     const avg = p.avg_attempts != null ? p.avg_attempts.toFixed(1) : '–';
+    const streak = p.streak == null ? '🔥 –' : `🔥 ${p.streak}`;
     return `
       <div class="lb-row${meClass}">
         <span class="lb-rank">${medal}</span>
@@ -394,7 +424,7 @@ function renderLeaderboard(data) {
             <span class="lb-points mono">${p.total_points} <span class="lb-unit">pkt</span></span>
           </div>
           <div class="lb-stats">
-            <span title="Aktualna seria">🔥 ${p.streak}</span>
+            <span title="Seria (tylko bieżący sezon)">${streak}</span>
             <span title="Średnia liczba prób (wygrane)">⌀ ${avg} prób</span>
             <span title="Rozegrane dni">🗓 ${p.games_played}</span>
           </div>
@@ -419,7 +449,10 @@ function renderDaily(data) {
 
   if (!data.has_word) {
     countEl.textContent = '';
-    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Dziś nie ma hasła.</div>';
+    const msg = data.is_weekend
+      ? 'Weekend — ranking wróci w poniedziałek. 💤'
+      : 'Dziś nie ma hasła.';
+    list.innerHTML = `<div class="text-muted small" style="padding:12px 4px">${msg}</div>`;
     return;
   }
 
@@ -453,38 +486,67 @@ function pluralProby(n) {
   return 'prób';
 }
 
-// ── COUNTDOWN (do północy w Warszawie = nowe hasło) ──
+// ── COUNTDOWN (do najbliższego dnia roboczego = nowe hasło) ──
 function warsawNowParts() {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Europe/Warsaw',
+    year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
   }).formatToParts(new Date());
   const get = t => Number(parts.find(p => p.type === t).value);
-  return { h: get('hour'), mi: get('minute'), s: get('second') };
+  return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute'), s: get('second') };
+}
+
+function fmtHMS(secs) {
+  const hh = Math.floor(secs / 3600);
+  const mm = Math.floor((secs % 3600) / 60);
+  const ss = secs % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+// Sekundy do pojawienia się kolejnego hasła = najbliższy dzień roboczy o godzinie NEW_WORD_HOUR
+function secondsUntilNextAppearance(newHour) {
+  const { y, mo, d, h, mi, s } = warsawNowParts();
+  const nowSec = h * 3600 + mi * 60 + s;
+  const todayDow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+  // Dziś dzień roboczy i jeszcze przed godziną otwarcia → dzisiejsze 08:00
+  if (todayDow !== 0 && todayDow !== 6 && nowSec < newHour * 3600) {
+    return newHour * 3600 - nowSec;
+  }
+  // W przeciwnym razie: najbliższy kolejny dzień roboczy o 08:00
+  let secs = 24 * 3600 - nowSec; // do jutra 00:00
+  let dow = new Date(Date.UTC(y, mo - 1, d + 1)).getUTCDay();
+  while (dow === 0 || dow === 6) { secs += 24 * 3600; dow = (dow + 1) % 7; }
+  return secs + newHour * 3600;
+}
+
+function secondsUntilMidnight() {
+  const { h, mi, s } = warsawNowParts();
+  return 24 * 3600 - (h * 3600 + mi * 60 + s);
 }
 
 function updateCountdown() {
-  const { h, mi, s } = warsawNowParts();
-  const secsLeft = 24 * 3600 - (h * 3600 + mi * 60 + s);
-  const hh = Math.floor(secsLeft / 3600);
-  const mm = Math.floor((secsLeft % 3600) / 60);
-  const ss = secsLeft % 60;
-  const fmt = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  const g = state.game;
+  const newHour = (g && g.new_word_hour) || 8;
+  const toNext = secondsUntilNextAppearance(newHour);
 
   const barEl = document.getElementById('countdown-bar');
   const textEl = document.getElementById('countdown-text');
-  const g = state.game;
 
-  if (g && g.season_over) {
-    textEl.textContent = '🏁 Sezon zakończony — dziękujemy za grę!';
-    if (barEl) barEl.style.width = '100%';
+  if (g && g.is_weekend) {
+    textEl.textContent = `💤 Weekend — nowe hasło za ${fmtHMS(toNext)}`;
+  } else if (g && g.phase === 'expired') {
+    textEl.textContent = `🔒 Wpisywanie zamknięte — nowe hasło za ${fmtHMS(toNext)}`;
+  } else if (g && g.phase === 'live') {
+    // W trakcie gry ważny jest deadline wpisywania (północ); nowe hasło i tak o 8:00
+    textEl.textContent = `⏳ Wpisujesz do północy (${fmtHMS(secondsUntilMidnight())}) · nowe hasło o ${newHour}:00`;
   } else {
-    textEl.textContent = `⏳ Nowe hasło za ${fmt}`;
-    if (barEl) barEl.style.width = ((1 - secsLeft / 86400) * 100) + '%';
+    textEl.textContent = `⏳ Nowe hasło za ${fmtHMS(toNext)}`;
   }
+  if (barEl) barEl.style.width = ((1 - (toNext % 86400) / 86400) * 100) + '%';
 
   const timerEl = document.getElementById('next-word-timer');
-  if (timerEl) timerEl.textContent = fmt;
+  if (timerEl) timerEl.textContent = fmtHMS(toNext);
 }
 
 // ── CONFETTI ──

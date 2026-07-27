@@ -181,18 +181,23 @@
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       wordsData = d.words;
-      renderSeason(d.season, d.season_start);
+      renderSeason(d.season, d.word_start);
       renderWords();
     }
 
     function renderSeason(s, start) {
       const el = document.getElementById('season-summary');
+      let statusTxt;
+      if (s.is_weekend) statusTxt = '💤 weekend — brak hasła (gramy pon–pt)';
+      else if (s.supply_exhausted) statusTxt = '⚠ pula haseł wyczerpana — dodaj kolejne';
+      else if (s.has_word_today) statusTxt = `▶ hasło #${s.day_number} na dziś ustawione`;
+      else statusTxt = '⚠ brak hasła na dziś';
       el.innerHTML = `
-        <span>Start sezonu: <b>${esc(start)}</b></span>
-        <span>Dzień sezonu: <b>#${s.day_number}</b></span>
-        <span>Haseł łącznie: <b>${s.total_words}</b></span>
-        <span>Pozostało: <b>${s.remaining_words}</b></span>
-        <span>${s.season_over ? '🏁 sezon zakończony' : (s.has_word_today ? '▶ hasło na dziś ustawione' : '⚠ brak hasła na dziś')}</span>
+        <span>Sezon: <b>${esc(s.season_label)}</b>${s.is_test ? ' <span style="color:var(--gold)">(okres testowy)</span>' : ''}</span>
+        <span>Pierwszy dzień gry: <b>${esc(start)}</b></span>
+        <span>Numer hasła dziś: <b>${s.day_number === null ? '—' : '#' + s.day_number}</b> (dni robocze)</span>
+        <span>Haseł w puli: <b>${s.total_words}</b> · pozostało <b>${s.remaining_words}</b></span>
+        <span>${statusTxt}</span>
       `;
     }
 

@@ -1276,35 +1276,36 @@ hr.dim {
 .how-chip.yellow { background: var(--w-yellow); }
 .how-chip.gray   { background: var(--w-gray); color: var(--text-muted); }
 
+/* ── SEASON RIBBON (górna wstęga) ── */
+.season-ribbon {
+  background: rgba(200, 241, 53, 0.07);
+  border-top: 1px solid var(--muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 6px 16px;
+  letter-spacing: 0.3px;
+}
+.season-ribbon strong { color: var(--accent); }
+
 /* ── LEADERBOARD ── */
-/* Segmentowany przełącznik okresu — jeden pasek, aktywny segment podświetlony */
-.lb-filters {
-  display: flex;
+/* Selektor sezonu (miesiąca) — pełna historia leaderboardów */
+.lb-select {
+  width: 100%;
+  margin-bottom: 14px;
   background: var(--surface-alt);
   border: 1px solid var(--muted);
   border-radius: 8px;
-  padding: 3px;
-  gap: 2px;
-  margin-bottom: 14px;
-}
-.lb-filter {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  border-radius: 6px;
-  padding: 7px 4px;
-  font-size: 12px;
+  color: var(--text-primary);
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 600;
+  font-size: 13px;
+  padding: 8px 10px;
   cursor: pointer;
-  transition: all 0.15s;
+  outline: none;
+  transition: border-color 0.15s;
 }
-.lb-filter:hover { color: var(--text-primary); }
-.lb-filter.active {
-  background: var(--accent);
-  color: #0D0D0D;
-}
+.lb-select:hover, .lb-select:focus { border-color: var(--accent); }
 
 .lb-row {
   display: flex;

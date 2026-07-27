@@ -29,6 +29,7 @@
       <div class="countdown-bar" id="countdown-bar"></div>
       <div class="countdown-text" id="countdown-text">ładowanie...</div>
     </div>
+    <div class="season-ribbon" id="season-ribbon"></div>
   </header>
 
   <!-- REJESTRACJA / LOGOWANIE -->
@@ -50,10 +51,12 @@
       <p class="how-intro">Codziennie jedno <strong>hasło z naszego świata</strong> (bezpieczeństwo, SOC, SIEM, AI, praca zespołu). Twoje zadanie: odgadnąć je w jak najmniejszej liczbie prób — jak w klasycznym Wordle.</p>
       <ol>
         <li><strong>Zgadywanie.</strong> Wpisz całe słowo o długości dzisiejszego hasła i zatwierdź <strong>Enterem</strong> (klawiaturą fizyczną albo ekranową). Liczba pól w rzędzie = długość hasła, a masz <strong>długość + 1</strong> prób (np. hasło 5-literowe → 6 prób, 9-literowe → 10 prób). Plansza dopasowuje się sama.</li>
+        <li><strong>Tylko prawdziwe słowa.</strong> Musisz wpisywać istniejące słowa — same samogłoski czy losowe ciągi liter zostaną odrzucone i <strong>nie zużyją próby</strong>. Chodzi o zgadywanie, nie o matematyczne przeczesywanie liter.</li>
         <li><strong>Podpowiedzi kolorami.</strong> Po każdej próbie każda litera dostaje kolor: <span class="how-chip green">zielony</span> — trafiona litera na właściwym miejscu, <span class="how-chip yellow">żółty</span> — litera jest w haśle, ale na innej pozycji, <span class="how-chip gray">szary</span> — litery w ogóle nie ma. Te same kolory podświetlają się na klawiaturze, żebyś wiedział, czego już próbowałeś.</li>
         <li><strong>Punktacja.</strong> Im szybciej zgadniesz, tym więcej punktów (najwięcej za trafienie w 1. próbie, najmniej za ostatnią). Do tego <strong>bonus za długość</strong> hasła — dłuższe słowa są trudniejsze, więc więcej za nie dostajesz — oraz <strong>bonus za serię</strong>: każdy kolejny dzień z wygraną z rzędu (🔥 streak) dokłada punkty. Nieodgadnięte hasło = 0 pkt i seria wraca do zera.</li>
         <li><strong>Raz dziennie.</strong> Każde hasło grasz tylko jeden raz. Postęp zapisuje się na bieżąco — możesz odświeżyć stronę albo wrócić później i dokończyć próby. Po zakończeniu gry zobaczysz swój wynik, serię i sumę punktów.</li>
-        <li><strong>Nowe hasło o północy.</strong> Codziennie o 00:00 (czasu polskiego) pojawia się kolejne hasło. Licznik na górze pokazuje, ile zostało do zmiany.</li>
+        <li><strong>Gramy w dni robocze.</strong> Nowe hasło pojawia się w każdy dzień roboczy o <strong>8:00</strong> (czasu polskiego) i możesz je odgadywać <strong>do północy</strong> tego dnia. Między północą a 8:00 wisi jeszcze wczorajsze hasło, ale bez możliwości wpisywania. W weekend robimy przerwę — seria (🔥) przechodzi z piątku na poniedziałek bez zerowania.</li>
+        <li><strong>Sezon = miesiąc.</strong> Rywalizacja trwa w obrębie jednego miesiąca. 1. dnia nowego miesiąca <strong>leaderboard, punkty i seria zerują się</strong> — każdy zaczyna od nowa. Wyniki poprzednich miesięcy zostają dostępne jako historia w tabeli liderów. Lipiec to okres testowy, konkurs rusza od sierpnia.</li>
         <li><strong>Rywalizacja.</strong> <strong>Ranking dnia</strong> pokazuje, kto dziś trafił najlepiej (liczy się najmniejsza liczba prób). <strong>Tabela liderów</strong> sumuje punkty — z widokiem All-Time, tygodniowym i miesięcznym.</li>
         <li><strong>Pochwal się wynikiem.</strong> Po grze kliknij „Udostępnij wynik" — do schowka trafi siatka emoji 🟩🟨⬛ (bez zdradzania liter), gotowa do wklejenia na Slacku czy Teams.</li>
       </ol>
@@ -71,7 +74,7 @@
         </div>
         <ol class="info-list">
           <li><span>Odgadnij <strong>hasło dnia</strong> z naszej branży (SOC, SIEM, AI…) w jak najmniejszej liczbie prób.</span></li>
-          <li><span>Wpisz całe słowo i zatwierdź <strong>Enterem</strong>. Prób masz <strong>długość hasła + 1</strong>.</span></li>
+          <li><span>Wpisz całe <strong>prawdziwe słowo</strong> i zatwierdź <strong>Enterem</strong>. Prób masz <strong>długość hasła + 1</strong> (nie-słowa są odrzucane bez straty próby).</span></li>
           <li><span><strong>Zielony</strong> = litera na miejscu, <strong>żółty</strong> = jest w haśle, ale gdzie indziej, <strong>szary</strong> = nie ma jej wcale.</span></li>
           <li><span>Punkty rosną, im szybciej zgadniesz. Bonus za <strong>długie hasła</strong> i za <strong>serię dni 🔥</strong>. Przegrana zeruje serię.</span></li>
           <li><span>Grasz <strong>raz dziennie</strong>, postęp zapisuje się sam. Nowe hasło o <strong>północy</strong>.</span></li>
@@ -122,11 +125,7 @@
           <h3>LEADERBOARD</h3>
           <span class="text-muted small" id="players-count"></span>
         </div>
-        <div class="lb-filters" id="lb-filters">
-          <button class="lb-filter active" data-period="all">All-Time</button>
-          <button class="lb-filter" data-period="week">Tydzień</button>
-          <button class="lb-filter" data-period="month">Miesiąc</button>
-        </div>
+        <select class="lb-select" id="lb-season" title="Wybierz sezon (miesiąc)"></select>
         <div id="leaderboard-list"></div>
       </div>
 
@@ -137,7 +136,7 @@
   <!-- FOOTER -->
   <footer class="site-footer">
     <span class="bank-info" id="season-footer">
-      🗓️ Sezon biurowy — hasło dnia <span class="mono gold" id="day-number">–</span>
+      🗓️ Sezon = miesiąc · <span class="mono gold" id="footer-season">–</span> · leaderboard zeruje się 1. dnia miesiąca
     </span>
     <span class="footer-copy text-muted">made with ❤️ i poranną kawą</span>
   </footer>
