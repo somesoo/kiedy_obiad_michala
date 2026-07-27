@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel Admina — Mundial Betting</title>
+  <title>Panel Admina — Office Wordle</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <style>
     body { display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; min-height: 100vh; }
-    .admin-wrap { max-width: 720px; width: 100%; display: flex; flex-direction: column; gap: 20px; }
+    .admin-wrap { max-width: 760px; width: 100%; display: flex; flex-direction: column; gap: 20px; }
     .admin-card {
       background: var(--surface);
       border: 1px solid var(--muted);
@@ -38,73 +38,60 @@
     }
     .form-group input:focus { border-color: var(--accent); }
     .error-msg { color: var(--danger); font-size: 13px; min-height: 18px; }
-    .success-msg { color: var(--accent); font-size: 13px; font-family: 'Space Grotesk', sans-serif; font-weight: 600; }
+    .success-msg { color: var(--accent); font-size: 13px; font-family: 'Space Grotesk', sans-serif; font-weight: 600; min-height: 18px; }
     #section-logged { display: none; flex-direction: column; gap: 20px; }
     a.back-link { color: var(--text-muted); font-size: 13px; text-decoration: none; }
     a.back-link:hover { color: var(--text-primary); }
 
-    .match-admin-card {
-      background: var(--surface);
-      border: 1px solid var(--muted);
-      border-radius: 12px;
-      padding: 14px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    .season-summary {
+      display: flex; gap: 20px; flex-wrap: wrap;
+      font-size: 13px; color: var(--text-muted);
+      padding: 12px 14px; background: var(--surface-alt); border-radius: 10px;
     }
-    .match-admin-card.done { border-color: rgba(245,200,66,0.35); }
-    .match-admin-head {
-      display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px;
+    .season-summary b { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+
+    .word-form {
+      display: grid;
+      grid-template-columns: 70px 1fr 1.4fr auto;
+      gap: 8px;
+      align-items: end;
     }
-    .match-admin-round { font-size: 11px; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; }
-    .match-admin-kickoff { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
-    .team-edit-row { display: flex; gap: 8px; align-items: center; }
-    .team-edit-row input[type="text"] {
-      flex: 1; min-width: 0;
+    .word-form .form-group { gap: 4px; }
+    .word-form input[type="text"], .word-form input[type="number"] {
       background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 6px;
-      color: var(--text-primary); font-size: 13px; padding: 7px 10px; outline: none;
+      color: var(--text-primary); font-size: 14px; padding: 8px 10px; outline: none; width: 100%;
     }
-    .team-edit-row input[type="text"]:focus { border-color: var(--accent); }
-    .team-edit-row .vs { color: var(--text-muted); font-size: 12px; }
+    .word-form input:focus { border-color: var(--accent); }
+    @media (max-width: 620px) { .word-form { grid-template-columns: 1fr 1fr; } }
+
+    table.words-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .words-table th {
+      text-align: left; color: var(--text-muted); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.5px; padding: 6px 8px; border-bottom: 1px solid var(--muted);
+    }
+    .words-table td { padding: 8px; border-bottom: 1px solid var(--muted); }
+    .words-table tr.current td { background: rgba(200,241,53,0.06); }
+    .words-table tr.past td { opacity: 0.6; }
+    .word-cell { font-family: 'JetBrains Mono', monospace; font-weight: 600; letter-spacing: 1px; }
+    .tag { font-size: 10px; padding: 2px 6px; border-radius: 8px; margin-left: 6px; }
+    .tag.now { background: rgba(200,241,53,0.12); color: var(--accent); border: 1px solid rgba(200,241,53,0.3); }
+    .tag.done { background: rgba(245,200,66,0.1); color: var(--gold); }
+    .row-actions { display: flex; gap: 6px; }
     .btn-small {
       background: var(--surface-alt); border: 1px solid var(--muted); color: var(--text-primary);
-      border-radius: 6px; padding: 7px 12px; font-size: 12px; cursor: pointer; white-space: nowrap;
+      border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
       font-family: 'Space Grotesk', sans-serif; font-weight: 600;
     }
     .btn-small:hover { border-color: var(--accent); }
-    .result-entry-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .result-entry-row input[type="number"] {
-      width: 50px; background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 6px;
-      color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 16px;
-      padding: 6px; text-align: center; outline: none;
-    }
-    .winner-pick-row { display: flex; gap: 6px; }
-    .winner-pick-btn {
-      background: var(--surface-alt); border: 1px solid var(--muted); color: var(--text-primary);
-      border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
-    }
-    .winner-pick-btn.selected { border-color: var(--accent); color: var(--accent); background: rgba(200,241,53,0.08); }
-    .preview-box {
-      background: var(--surface-alt); border: 1px solid rgba(200,241,53,0.25); border-radius: 8px;
-      padding: 12px; display: none; flex-direction: column; gap: 6px; font-size: 12px;
-    }
-    .preview-box.show { display: flex; }
-    .preview-row { display: flex; justify-content: space-between; }
-    .preview-row .label { color: var(--text-muted); }
-    .payout-item { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 6px; background: var(--surface); border-radius: 5px; }
-    .match-finished-info { font-size: 13px; }
-    .match-finished-info .mono { color: var(--gold); }
-    .status-pill {
-      font-size: 10px; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.5px;
-      background: rgba(255,255,255,0.05); border: 1px solid var(--muted); color: var(--text-muted);
-    }
-    .status-pill.ready { color: var(--accent); border-color: rgba(200,241,53,0.3); background: rgba(200,241,53,0.08); }
+    .btn-small.danger { color: var(--danger); }
+    .btn-small.danger:hover { border-color: var(--danger); }
+    .payout-item { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 8px; background: var(--surface-alt); border-radius: 6px; margin-bottom: 4px; align-items: center; gap: 8px; }
   </style>
 </head>
 <body>
   <div class="admin-wrap">
     <div class="admin-card">
-      <h1>PANEL <span>ADMINA</span></h1>
+      <h1>PANEL <span>ADMINA</span> · OFFICE WORDLE</h1>
 
       <div id="section-login">
         <div class="form-group">
@@ -116,14 +103,46 @@
       </div>
 
       <div id="section-logged">
-        <div class="success-msg" id="global-success" style="display:none"></div>
+        <div class="success-msg" id="global-success"></div>
         <div class="error-msg" id="global-err"></div>
+        <div class="season-summary" id="season-summary"></div>
         <a href="/" class="back-link">← Wróć do gry</a>
       </div>
     </div>
 
-    <div id="matches-admin-list"></div>
+    <!-- HASŁA -->
+    <div class="admin-card" id="section-words" style="display:none">
+      <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">DODAJ / EDYTUJ HASŁO</h3>
+      <div class="word-form">
+        <div class="form-group">
+          <label>Dzień #</label>
+          <input type="number" id="w-order" min="1" placeholder="1" />
+        </div>
+        <div class="form-group">
+          <label>Hasło (A–Z)</label>
+          <input type="text" id="w-word" placeholder="BIURO" maxlength="12" />
+        </div>
+        <div class="form-group">
+          <label>Podpowiedź (hint)</label>
+          <input type="text" id="w-hint" placeholder="np. Tu spędzasz 8h" maxlength="80" />
+        </div>
+        <button class="btn-primary" id="btn-save-word" style="padding:9px 16px">Zapisz</button>
+      </div>
+      <input type="hidden" id="w-id" />
+      <div class="error-msg" id="word-err"></div>
 
+      <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-top:8px">LISTA HASEŁ</h3>
+      <div style="overflow-x:auto">
+        <table class="words-table">
+          <thead>
+            <tr><th>#</th><th>Hasło</th><th>Długość / próby</th><th>Podpowiedź</th><th>Gry</th><th></th></tr>
+          </thead>
+          <tbody id="words-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- GRACZE -->
     <div class="admin-card" id="section-players" style="display:none">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">GRACZE</h3>
@@ -136,8 +155,7 @@
 
   <script>
     let adminPassword = '';
-    let matchesData = [];
-    const winnerPick = {}; // matchId -> 'A' | 'B'
+    let wordsData = [];
 
     document.getElementById('admin-password').addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('btn-admin-login').click();
@@ -148,240 +166,113 @@
       const errEl = document.getElementById('login-err');
       errEl.textContent = '';
       try {
-        await loadMatches();
+        await loadWords();
         document.getElementById('section-login').style.display = 'none';
         document.getElementById('section-logged').style.display = 'flex';
-        document.getElementById('section-players').style.display = 'block';
+        document.getElementById('section-words').style.display = 'flex';
+        document.getElementById('section-players').style.display = 'flex';
       } catch (e) {
         errEl.textContent = e.message;
       }
     });
 
-    async function loadMatches() {
-      const r = await fetch(`/api/admin/matches?password=${encodeURIComponent(adminPassword)}`);
+    async function loadWords() {
+      const r = await fetch(`/api/admin/words?password=${encodeURIComponent(adminPassword)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      matchesData = d.matches;
-      renderMatches();
+      wordsData = d.words;
+      renderSeason(d.season, d.season_start);
+      renderWords();
     }
 
-    function teamLabel(m, side) {
-      const team = side === 'A' ? m.team_a : m.team_b;
-      const placeholder = side === 'A' ? m.placeholder_a : m.placeholder_b;
-      return team || placeholder || '???';
+    function renderSeason(s, start) {
+      const el = document.getElementById('season-summary');
+      el.innerHTML = `
+        <span>Start sezonu: <b>${esc(start)}</b></span>
+        <span>Dzień sezonu: <b>#${s.day_number}</b></span>
+        <span>Haseł łącznie: <b>${s.total_words}</b></span>
+        <span>Pozostało: <b>${s.remaining_words}</b></span>
+        <span>${s.season_over ? '🏁 sezon zakończony' : (s.has_word_today ? '▶ hasło na dziś ustawione' : '⚠ brak hasła na dziś')}</span>
+      `;
     }
 
-    function renderMatches() {
-      const container = document.getElementById('matches-admin-list');
-      let lastRound = null;
-      let html = '';
-
-      matchesData.forEach(m => {
-        if (m.round !== lastRound) {
-          html += `<div class="round-heading" style="color:var(--text-muted)">${esc(m.round)}</div>`;
-          lastRound = m.round;
-        }
-        html += renderMatchAdminCard(m);
-      });
-
-      container.innerHTML = html;
-    }
-
-    function renderMatchAdminCard(m) {
-      const betsSummary = `${m.score_bets.length} zakł. wynik · ${m.winner_bets.length} zakł. zwycięzca`;
-
-      let body = '';
-
-      if (m.finished) {
-        body = `
-          <div class="match-finished-info">
-            Wynik: <span class="mono">${esc(m.team_a)} ${m.score_a}:${m.score_b} ${esc(m.team_b)}</span>
-            · zwycięzca: <span class="mono">${esc(teamLabel(m, m.winner))}</span>
-          </div>
-          <button class="btn-danger btn-small" onclick="undoResult(${m.id})">🔓 Cofnij rozliczenie</button>
-        `;
-      } else {
-        body += `
-          <div class="team-edit-row">
-            <input type="text" id="team-a-${m.id}" placeholder="${esc(teamLabel(m,'A'))}" value="${esc(m.team_a || '')}" />
-            <span class="vs">vs</span>
-            <input type="text" id="team-b-${m.id}" placeholder="${esc(teamLabel(m,'B'))}" value="${esc(m.team_b || '')}" />
-            <button class="btn-small" onclick="saveTeams(${m.id})">Zapisz drużyny</button>
-          </div>
-        `;
-
-        if (m.team_a && m.team_b) {
-          const sel = winnerPick[m.id];
-          body += `
-            <div class="result-entry-row">
-              <span class="text-muted small">Wynik:</span>
-              <input type="number" id="res-a-${m.id}" min="0" max="20" value="0" oninput="autoSuggestWinner(${m.id})" />
-              <span class="sep">:</span>
-              <input type="number" id="res-b-${m.id}" min="0" max="20" value="0" oninput="autoSuggestWinner(${m.id})" />
-              <div class="winner-pick-row">
-                <button class="winner-pick-btn ${sel === 'A' ? 'selected' : ''}" id="wp-a-${m.id}" onclick="pickWinner(${m.id},'A')">${esc(teamLabel(m,'A'))}</button>
-                <button class="winner-pick-btn ${sel === 'B' ? 'selected' : ''}" id="wp-b-${m.id}" onclick="pickWinner(${m.id},'B')">${esc(teamLabel(m,'B'))}</button>
+    function renderWords() {
+      const tbody = document.getElementById('words-tbody');
+      if (!wordsData.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted">Brak haseł — dodaj pierwsze powyżej.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = wordsData.map(w => {
+        const rowCls = w.is_current ? 'current' : (w.is_past ? 'past' : '');
+        const tag = w.is_current ? '<span class="tag now">DZIŚ</span>' : (w.is_past ? '<span class="tag done">było</span>' : '');
+        return `
+          <tr class="${rowCls}">
+            <td class="mono">${w.order_index}</td>
+            <td class="word-cell">${esc(w.word)}${tag}</td>
+            <td class="mono">${w.length} / ${w.max_attempts}</td>
+            <td>${esc(w.hint || '')}</td>
+            <td class="mono">${w.games_played}</td>
+            <td>
+              <div class="row-actions">
+                <button class="btn-small" onclick='editWord(${w.id})'>Edytuj</button>
+                <button class="btn-small danger" onclick='deleteWord(${w.id})' ${w.games_played > 0 ? 'disabled title="ma rozegrane gry"' : ''}>Usuń</button>
               </div>
-              <button class="btn-small" onclick="previewResult(${m.id})">Podgląd</button>
-            </div>
-            <div class="preview-box" id="preview-${m.id}"></div>
-          `;
-        } else {
-          body += `<div class="text-muted small">Uzupełnij obie drużyny, żeby wpisać wynik.</div>`;
-        }
-
-        if (m.score_bets.length + m.winner_bets.length > 0) {
-          body += `<button class="btn-danger btn-small" style="align-self:flex-start" onclick="refundAllBets(${m.id})">↩ Wycofaj wszystkie zakłady</button>`;
-        }
-      }
-
-      return `
-        <div class="match-admin-card ${m.finished ? 'done' : ''}">
-          <div class="match-admin-head">
-            <span class="match-admin-round">${esc(m.round)}</span>
-            <span class="match-admin-kickoff">${m.kickoff_at.replace('T', ' ')}</span>
-            <span class="status-pill ${m.available ? 'ready' : ''}">${betsSummary}</span>
-          </div>
-          ${body}
-        </div>
-      `;
+            </td>
+          </tr>`;
+      }).join('');
     }
 
-    function pickWinner(matchId, side) {
-      winnerPick[matchId] = side;
-      document.getElementById(`wp-a-${matchId}`).classList.toggle('selected', side === 'A');
-      document.getElementById(`wp-b-${matchId}`).classList.toggle('selected', side === 'B');
+    function editWord(id) {
+      const w = wordsData.find(x => x.id === id);
+      if (!w) return;
+      document.getElementById('w-id').value = w.id;
+      document.getElementById('w-order').value = w.order_index;
+      document.getElementById('w-word').value = w.word;
+      document.getElementById('w-hint').value = w.hint || '';
+      document.getElementById('w-word').focus();
     }
 
-    function autoSuggestWinner(matchId) {
-      if (winnerPick[matchId]) return; // nie nadpisuj ręcznego wyboru
-      const a = parseInt(document.getElementById(`res-a-${matchId}`).value, 10) || 0;
-      const b = parseInt(document.getElementById(`res-b-${matchId}`).value, 10) || 0;
-      if (a > b) pickWinner(matchId, 'A');
-      else if (b > a) pickWinner(matchId, 'B');
-    }
-
-    async function saveTeams(matchId) {
-      const team_a = document.getElementById(`team-a-${matchId}`).value;
-      const team_b = document.getElementById(`team-b-${matchId}`).value;
-      const errEl = document.getElementById('global-err');
+    document.getElementById('btn-save-word').addEventListener('click', async () => {
+      const id = document.getElementById('w-id').value || null;
+      const order_index = document.getElementById('w-order').value;
+      const word = document.getElementById('w-word').value;
+      const hint = document.getElementById('w-hint').value;
+      const errEl = document.getElementById('word-err');
+      const okEl = document.getElementById('global-success');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/match/${matchId}/teams`, {
+        const r = await fetch('/api/admin/word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: adminPassword, team_a, team_b })
+          body: JSON.stringify({ password: adminPassword, id, word, hint, order_index })
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-        await loadMatches();
+        okEl.textContent = `✓ Zapisano hasło (dzień #${order_index})`;
+        document.getElementById('w-id').value = '';
+        document.getElementById('w-order').value = '';
+        document.getElementById('w-word').value = '';
+        document.getElementById('w-hint').value = '';
+        await loadWords();
       } catch (e) {
         errEl.textContent = e.message;
       }
-    }
+    });
 
-    async function previewResult(matchId) {
-      const score_a = document.getElementById(`res-a-${matchId}`).value;
-      const score_b = document.getElementById(`res-b-${matchId}`).value;
-      const winner = winnerPick[matchId];
-      const errEl = document.getElementById('global-err');
-      errEl.textContent = '';
-
-      if (!winner) { errEl.textContent = 'Wskaż zwycięzcę meczu'; return; }
-
-      try {
-        const r = await fetch(`/api/admin/match/${matchId}/result`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: adminPassword, score_a, score_b, winner, preview: true })
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error);
-        renderPreview(matchId, d);
-      } catch (e) {
-        errEl.textContent = e.message;
-      }
-    }
-
-    function renderPreview(matchId, d) {
-      const box = document.getElementById(`preview-${matchId}`);
-      const payoutHtml = (payouts) => payouts.map(p =>
-        `<div class="payout-item"><span>${esc(p.nickname)}</span><span class="accent mono">+${p.payout} coins</span></div>`
-      ).join('') || '<div class="text-muted small">brak trafionych — cała pula do banku</div>';
-
-      box.innerHTML = `
-        <div class="preview-row"><span class="label">Wynik do zatwierdzenia</span><span class="mono">${d.team_a} ${d.score_a}:${d.score_b} ${d.team_b} (wygrywa: ${d.winner === 'A' ? d.team_a : d.team_b})</span></div>
-        <div class="preview-row"><span class="label">Pula "wynik"</span><span class="mono">${d.score_market.total_pool} coins · ${d.score_market.winners_count} traf.</span></div>
-        <div class="payout-list">${payoutHtml(d.score_market.payouts)}</div>
-        <div class="preview-row"><span class="label">Pula "zwycięzca"</span><span class="mono">${d.winner_market.total_pool} coins · ${d.winner_market.winners_count} traf.</span></div>
-        <div class="payout-list">${payoutHtml(d.winner_market.payouts)}</div>
-        <div class="preview-row"><span class="label">Do banku biurowego</span><span class="mono gold">${d.bank_total} coins</span></div>
-        <button class="btn-danger btn-small" style="margin-top:6px" onclick="confirmResult(${matchId})">Zatwierdź i rozlicz mecz</button>
-      `;
-      box.classList.add('show');
-    }
-
-    async function confirmResult(matchId) {
-      if (!confirm('Na pewno zatwierdzić ten wynik? Można to później cofnąć przyciskiem "Cofnij rozliczenie".')) return;
-
-      const score_a = document.getElementById(`res-a-${matchId}`).value;
-      const score_b = document.getElementById(`res-b-${matchId}`).value;
-      const winner = winnerPick[matchId];
-      const errEl = document.getElementById('global-err');
-      const successEl = document.getElementById('global-success');
-      errEl.textContent = '';
-
-      try {
-        const r = await fetch(`/api/admin/match/${matchId}/result`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: adminPassword, score_a, score_b, winner })
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error);
-        successEl.style.display = 'block';
-        successEl.textContent = `✓ Rozliczono: ${d.team_a} ${d.score_a}:${d.score_b} ${d.team_b}`;
-        delete winnerPick[matchId];
-        await loadMatches();
-      } catch (e) {
-        errEl.textContent = e.message;
-      }
-    }
-
-    async function refundAllBets(matchId) {
-      if (!confirm('Wycofać WSZYSTKIE zakłady z tego meczu? Każdy gracz dostanie zwrot stawki, zamrożone kursy przepadają, a rynek startuje od zera.')) return;
-      const errEl = document.getElementById('global-err');
-      const successEl = document.getElementById('global-success');
+    async function deleteWord(id) {
+      const w = wordsData.find(x => x.id === id);
+      if (!confirm(`Usunąć hasło "${w ? w.word : ''}" (dzień #${w ? w.order_index : ''})?`)) return;
+      const errEl = document.getElementById('word-err');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/match/${matchId}/refund`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: adminPassword })
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error);
-        successEl.style.display = 'block';
-        successEl.textContent = `✓ Zwrócono ${d.refunded_bets} zakładów, łącznie ${d.refunded_total} coins`;
-        await loadMatches();
-      } catch (e) {
-        errEl.textContent = e.message;
-      }
-    }
-
-    async function undoResult(matchId) {
-      if (!confirm('Cofnąć rozliczenie tego meczu? Salda graczy zostaną przywrócone do stanu sprzed rozliczenia.')) return;
-      const errEl = document.getElementById('global-err');
-      errEl.textContent = '';
-      try {
-        const r = await fetch(`/api/admin/match/${matchId}/result`, {
+        const r = await fetch(`/api/admin/word/${id}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword })
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-        await loadMatches();
+        await loadWords();
       } catch (e) {
         errEl.textContent = e.message;
       }
@@ -409,17 +300,17 @@
         return;
       }
       list.innerHTML = players.map(p => `
-        <div class="payout-item" style="align-items:center;gap:8px;font-size:12px" id="player-row-${p.id}">
+        <div class="payout-item" id="player-row-${p.id}">
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.nickname)}</span>
-          <span class="mono" style="color:var(--text-muted)">${p.balance} coins</span>
-          <button class="btn-ghost" style="font-size:11px;color:var(--danger);border-color:var(--danger);padding:3px 8px"
-            onclick="deletePlayer(${p.id}, '${esc(p.nickname)}')">usuń</button>
+          <span class="mono accent">${p.total_points} pkt</span>
+          <span class="mono" style="color:var(--text-muted)">🔥${p.current_streak} · rekord ${p.best_streak}</span>
+          <button class="btn-small danger" onclick="deletePlayer(${p.id}, '${esc(p.nickname)}')">usuń</button>
         </div>
       `).join('');
     }
 
     async function deletePlayer(id, nickname) {
-      if (!confirm(`Usunąć gracza "${nickname}" wraz ze wszystkimi zakładami?`)) return;
+      if (!confirm(`Usunąć gracza "${nickname}" wraz z historią gier?`)) return;
       const errEl = document.getElementById('players-err');
       errEl.textContent = '';
       try {

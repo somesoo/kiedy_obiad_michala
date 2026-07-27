@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mundial Betting</title>
+  <title>Office Wordle</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
@@ -15,14 +15,14 @@
   <header class="site-header">
     <div class="header-inner">
       <div class="header-logo">
-        <span class="logo-text">MUNDIAL BETTING</span>
-        <span class="logo-sub">biurowa bukmacherka pucharowa</span>
+        <span class="logo-text">OFFICE WORDLE</span>
+        <span class="logo-sub">biurowa gra w hasło dnia</span>
       </div>
       <div class="header-user" id="header-user">
         <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">?</button>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
         <span class="user-nick" id="user-nick-display"></span>
-        <span class="user-balance" id="user-balance-display"></span>
+        <span class="user-balance" id="user-points-display"></span>
       </div>
     </div>
     <div class="countdown-bar-wrap">
@@ -35,7 +35,7 @@
   <div class="overlay" id="login-overlay">
     <div class="login-card">
       <h2>Dołącz do gry</h2>
-      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie jeśli już grasz. Startujesz z 1000 coins.</p>
+      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie, jeśli już grasz. Codziennie nowe biurowe hasło do odgadnięcia.</p>
       <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
       <button class="btn-primary" id="btn-login">Wchodzę w to</button>
       <div class="login-error" id="login-error"></div>
@@ -48,15 +48,12 @@
       <button class="how-close" id="how-close">✕</button>
       <h3>Jak to działa?</h3>
       <ol>
-        <li>Każdy mecz mundialu obstawiasz <strong>dwoma niezależnymi zakładami</strong>: dokładny <strong>wynik</strong> (np. 2:1) i osobno <strong>kto wygra</strong>.</li>
-        <li>Możesz obstawiać tylko mecze, które mają <strong>wpisane obie drużyny</strong> i jeszcze się nie zaczęły.</li>
-        <li>Gdy drużyny kolejnej rundy nie są jeszcze znane — poczekaj, aż admin je uzupełni po poprzednim meczu.</li>
-        <li>Stawiasz dowolną liczbę <strong>coins</strong> ze swojego salda (min. 10) na każdy z dwóch zakładów osobno.</li>
-        <li><strong>Admin wpisuje wynik</strong> po zakończeniu meczu (i zwycięzcę — na wypadek karnych).</li>
-        <li>Rynek <strong>WYNIK</strong>: pula dzielona między trafionych proporcjonalnie do stawek (<strong>parimutuel</strong>). 10% idzie do banku, a bank dokłada bonus (<strong>+X🏦</strong>) — im większa pula, tym hojniejszy, i ma swoje humory. Bonus wypłacany tylko, gdy ktoś trafi.</li>
-        <li>Rynek <strong>ZWYCIĘZCA</strong>: gra po kursach. Kurs z tablicy (np. x2.40) <strong>zamraża się dla Twojego zakładu</strong> w chwili postawienia — wygrana = stawka × Twój kurs, gwarantuje ją bank ze swojego skarbca.</li>
-        <li>Przed pierwszym zakładem <strong>linię otwiera bank</strong> — każda drużyna może dostać inny kurs (od x1.50 do x5.00). Potem kursy <strong>balansują się na żywo bez górnego limitu</strong>: im więcej coins na drużynę, tym niższy jej kurs, a druga strona kusi wyższym. Twojego zamrożonego kursu to już nie rusza.</li>
-        <li>Startujesz z <strong>1000 coins</strong>. Jak stracisz wszystko — dostajesz zastrzyk z kasy biurowej.</li>
+        <li>Codziennie jedno <strong>biurowe hasło</strong> do odgadnięcia. Hasła mają <strong>różną długość</strong> (od 4 do 8 liter).</li>
+        <li>Masz <strong>długość hasła + 1</strong> prób (np. hasło 5-literowe = 6 prób).</li>
+        <li>Po każdej próbie litery pokazują kolor: <span class="how-chip green">zielony</span> = dobra litera na właściwym miejscu, <span class="how-chip yellow">żółty</span> = litera jest w haśle, ale gdzie indziej, <span class="how-chip gray">szary</span> = litery nie ma.</li>
+        <li>Za odgadnięcie: punkty tym większe, im szybciej zgadniesz. Bonus za długość hasła i za <strong>serię dni z rzędu</strong> (🔥 streak).</li>
+        <li>Grasz <strong>raz dziennie</strong>. Wynik zapisuje się automatycznie — odświeżenie strony nie kasuje postępu.</li>
+        <li>O północy (czasu polskiego) pojawia się nowe hasło. Rywalizuj w <strong>tabeli liderów</strong>!</li>
       </ol>
     </div>
   </div>
@@ -71,14 +68,23 @@
           <h3>JAK TO DZIAŁA?</h3>
         </div>
         <ol class="info-list">
-          <li><span>Każdy mecz ma <strong>dwa niezależne zakłady</strong>: dokładny wynik i zwycięzca.</span></li>
-          <li><span>Obstawiasz tylko mecze z <strong>wpisanymi obiema drużynami</strong>, dopóki się nie zaczęły.</span></li>
-          <li><span>Minimum <strong>10 coins</strong> na zakład, maksimum całe saldo.</span></li>
-          <li><span>Admin wpisuje wynik po meczu — <strong>zwycięzcę</strong> wskazuje osobno (liczą się karne).</span></li>
-          <li><span>Rynek <strong>WYNIK</strong>: pula dzielona wśród trafionych proporcjonalnie do stawek, 10% do banku, bank dokłada bonus (+X🏦).</span></li>
-          <li><span>Rynek <strong>ZWYCIĘZCA</strong>: kurs z tablicy <strong>zamraża się przy postawieniu</strong> — wygrana = stawka × Twój kurs, płaci bank. Tablica balansuje się z każdym zakładem.</span></li>
-          <li><span>Startujesz z <strong>1000 coins</strong>. Przy zerowym saldzie dostajesz zastrzyk z kasy biurowej.</span></li>
+          <li><span>Codziennie jedno <strong>biurowe hasło</strong> o długości 4–8 liter.</span></li>
+          <li><span>Prób masz <strong>długość hasła + 1</strong>.</span></li>
+          <li><span><strong>Zielony</strong> = litera na miejscu, <strong>żółty</strong> = jest, ale gdzie indziej, <strong>szary</strong> = nie ma.</span></li>
+          <li><span>Punkty rosną, im szybciej zgadniesz. Bonus za długie hasła i <strong>serię 🔥</strong>.</span></li>
+          <li><span>Grasz <strong>raz dziennie</strong>. Postęp zapisuje się sam.</span></li>
         </ol>
+      </div>
+
+      <div class="sidebar-card season-card">
+        <div class="sidebar-card-header">
+          <h3>SEZON</h3>
+        </div>
+        <div class="season-remaining">
+          Pozostało haseł: <span class="mono accent" id="season-remaining">–</span>
+        </div>
+        <div class="season-progress-bar"><div class="season-progress-fill" id="season-progress-fill"></div></div>
+        <div class="season-sub text-muted small" id="season-sub"></div>
       </div>
     </aside>
 
@@ -86,10 +92,11 @@
     <section class="col-game">
 
       <div class="section-header">
-        <h2 id="matches-label">DRABINKA MUNDIALU</h2>
+        <h2 id="game-label">HASŁO DNIA</h2>
+        <span class="pool-badge mono" id="hint-badge"></span>
       </div>
 
-      <div id="matches-list"></div>
+      <div id="game-area"></div>
 
     </section>
 
@@ -102,15 +109,12 @@
           <h3>LEADERBOARD</h3>
           <span class="text-muted small" id="players-count"></span>
         </div>
-        <div id="leaderboard-list"></div>
-      </div>
-
-      <!-- Ostatnie wyniki -->
-      <div class="sidebar-card history-card">
-        <div class="sidebar-card-header">
-          <h3>OSTATNIE WYNIKI</h3>
+        <div class="lb-filters" id="lb-filters">
+          <button class="lb-filter active" data-period="all">All-Time</button>
+          <button class="lb-filter" data-period="week">Tydzień</button>
+          <button class="lb-filter" data-period="month">Miesiąc</button>
         </div>
-        <div id="history-list"></div>
+        <div id="leaderboard-list"></div>
       </div>
 
     </aside>
@@ -119,15 +123,15 @@
 
   <!-- FOOTER -->
   <footer class="site-footer">
-    <span class="bank-info" id="bank-info" title="Kliknij po więcej">
-      🏦 Bank biurowy: <span class="mono gold" id="bank-balance">0 coins</span>
+    <span class="bank-info" id="season-footer">
+      🗓️ Sezon biurowy — hasło dnia <span class="mono gold" id="day-number">–</span>
     </span>
-    <span class="footer-copy text-muted">made with ❤️ i lekką stratą do lat 30.</span>
+    <span class="footer-copy text-muted">made with ❤️ i poranną kawą</span>
   </footer>
 
-  <!-- WELFARE TOAST -->
-  <div class="toast welfare-toast" id="welfare-toast" style="display:none">
-    <span id="welfare-toast-text">💸 Dostałeś zastrzyk coins z kasy biurowej. Nie trać ich.</span>
+  <!-- TOAST -->
+  <div class="toast" id="toast" style="display:none">
+    <span id="toast-text"></span>
   </div>
 
   <!-- CONFETTI -->
