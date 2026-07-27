@@ -199,9 +199,9 @@ function renderBoard(g) {
       for (let c = 0; c < g.word_length; c++) tiles += `<div class="tile"></div>`;
     }
     const shakeCls = (isCurrentRow && state.shake) ? ' shake' : '';
-    rows.push(`<div class="tile-row${shakeCls}" style="grid-template-columns:repeat(${g.word_length},1fr)">${tiles}</div>`);
+    rows.push(`<div class="tile-row${shakeCls}">${tiles}</div>`);
   }
-  return `<div class="board">${rows.join('')}</div>`;
+  return `<div class="board" style="--cols:${g.word_length}">${rows.join('')}</div>`;
 }
 
 const KEYBOARD_ROWS = [
@@ -383,33 +383,26 @@ function renderLeaderboard(data) {
     return;
   }
 
-  const header = `
-    <div class="lb-head">
-      <span class="lb-rank">#</span>
-      <span class="lb-nick">gracz</span>
-      <span class="lb-col" title="Punkty">pkt</span>
-      <span class="lb-col" title="Seria">🔥</span>
-      <span class="lb-col" title="Średnia liczba prób (wygrane)">avg</span>
-      <span class="lb-col" title="Rozegrane dni">dni</span>
-    </div>`;
-
-  const rows = data.leaderboard.map(p => {
-    const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : `${p.rank}.`;
+  list.innerHTML = data.leaderboard.map(p => {
+    const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
     const meClass = p.is_me ? ' is-me' : '';
     const avg = p.avg_attempts != null ? p.avg_attempts.toFixed(1) : '–';
-    const streak = p.streak > 0 ? `🔥${p.streak}` : '–';
     return `
       <div class="lb-row${meClass}">
         <span class="lb-rank">${medal}</span>
-        <span class="lb-nick">${esc(p.nickname)}</span>
-        <span class="lb-col mono accent">${p.total_points}</span>
-        <span class="lb-col mono">${streak}</span>
-        <span class="lb-col mono">${avg}</span>
-        <span class="lb-col mono">${p.games_played}</span>
+        <div class="lb-main">
+          <div class="lb-top">
+            <span class="lb-nick">${esc(p.nickname)}</span>
+            <span class="lb-points mono">${p.total_points} <span class="lb-unit">pkt</span></span>
+          </div>
+          <div class="lb-stats">
+            <span title="Aktualna seria">🔥 ${p.streak}</span>
+            <span title="Średnia liczba prób (wygrane)">⌀ ${avg} prób</span>
+            <span title="Rozegrane dni">🗓 ${p.games_played}</span>
+          </div>
+        </div>
       </div>`;
   }).join('');
-
-  list.innerHTML = header + rows;
 }
 
 // ── COUNTDOWN (do północy w Warszawie = nowe hasło) ──
