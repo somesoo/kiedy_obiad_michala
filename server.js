@@ -488,6 +488,44 @@ app.get('/api/leaderboard', (req, res) => {
   res.json({ leaderboard: list, total_players: list.length, period });
 });
 
+// GET /api/wordle/daily — ranking dzisiejszego hasła (kto najlepiej trafił dziś)
+app.get('/api/wordle/daily', (req, res) => {
+  const highlightId = parseInt(req.query.highlight, 10) || null;
+  const day = seasonDayNumber();
+  const word = currentWord();
+
+  if (!word) {
+    return res.json({ day_number: day, has_word: false, entries: [], total: 0 });
+  }
+
+  // Zwycięzcy najpierw (mniej prób = wyżej), potem przegrani. Punkty jako rozstrzygnięcie remisu.
+  const rows = db.prepare(`
+    SELECT g.status, g.attempts_used, g.points, p.id AS player_id, p.nickname
+    FROM games g
+    JOIN players p ON p.id = g.player_id
+    WHERE g.word_index = ? AND g.status IN ('won', 'lost')
+    ORDER BY
+      (g.status = 'won') DESC,
+      CASE WHEN g.status = 'won' THEN g.attempts_used ELSE 999 END ASC,
+      g.points DESC
+  `).all(word.order_index);
+
+  const entries = rows.map((r, i) => ({
+    rank: i + 1,
+    nickname: r.nickname,
+    status: r.status,
+    attempts_used: Number(r.attempts_used),
+    points: Number(r.points),
+    is_me: highlightId ? r.player_id === highlightId : false
+  }));
+
+  const inProgress = db.prepare(`
+    SELECT COUNT(*) AS c FROM games WHERE word_index = ? AND status = 'in_progress'
+  `).get(word.order_index).c;
+
+  res.json({ day_number: day, has_word: true, entries, total: entries.length, in_progress: Number(inProgress) });
+});
+
 // ──────────────────────────────────────────────
 // ENDPOINTS — ADMIN
 // ──────────────────────────────────────────────

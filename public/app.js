@@ -102,6 +102,7 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 function startApp() {
   loadGame();
   loadLeaderboard();
+  loadDaily();
   setInterval(updateCountdown, 1000);
 }
 
@@ -144,22 +145,17 @@ function isPlayable(g) {
 function renderGame() {
   const area = document.getElementById('game-area');
   const g = state.game;
-  const hintBadge = document.getElementById('hint-badge');
 
   if (!g) { area.innerHTML = ''; return; }
 
   if (g.season_over) {
-    hintBadge.textContent = '';
     area.innerHTML = renderSeasonOver(g);
     return;
   }
   if (!g.has_word) {
-    hintBadge.textContent = '';
     area.innerHTML = `<div class="empty-state">Dziś nie ma hasła. Zajrzyj innego dnia! 🗓️</div>`;
     return;
   }
-
-  hintBadge.textContent = g.hint ? `💡 ${g.hint}` : '';
 
   const finished = g.status === 'won' || g.status === 'lost';
   const board = renderBoard(g);
@@ -322,9 +318,11 @@ async function submitGuess() {
       showConfetti();
       showToast(`🎉 Brawo! +${updated.points_today} pkt`);
       loadLeaderboard();
+      loadDaily();
     } else if (!wasFinished && updated.status === 'lost') {
       showToast(`Koniec prób — hasło to ${updated.answer}`);
       loadLeaderboard();
+      loadDaily();
     }
   } catch (e) {
     showToast(e.message);
@@ -405,6 +403,56 @@ function renderLeaderboard(data) {
   }).join('');
 }
 
+// ── RANKING DNIA ──
+async function loadDaily() {
+  try {
+    const data = await api('GET', `/api/wordle/daily?highlight=${state.playerId}`);
+    renderDaily(data);
+  } catch (e) {
+    console.error('Daily ranking error:', e);
+  }
+}
+
+function renderDaily(data) {
+  const list = document.getElementById('daily-list');
+  const countEl = document.getElementById('daily-count');
+
+  if (!data.has_word) {
+    countEl.textContent = '';
+    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Dziś nie ma hasła.</div>';
+    return;
+  }
+
+  const playing = data.in_progress ? ` · ${data.in_progress} w trakcie` : '';
+  countEl.textContent = `${data.total} ukończonych${playing}`;
+
+  if (!data.entries.length) {
+    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie skończył dziś gry — bądź pierwszy! ⚡</div>';
+    return;
+  }
+
+  list.innerHTML = data.entries.map(e => {
+    const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : e.rank;
+    const meClass = e.is_me ? ' is-me' : '';
+    const detail = e.status === 'won'
+      ? `<span class="daily-attempts">${e.attempts_used} ${pluralProby(e.attempts_used)}</span><span class="daily-pts mono">+${e.points}</span>`
+      : `<span class="daily-attempts lost">✗ nie trafił</span><span class="daily-pts mono">0</span>`;
+    return `
+      <div class="lb-row${meClass}">
+        <span class="lb-rank">${medal}</span>
+        <span class="daily-nick">${esc(e.nickname)}</span>
+        <span class="daily-detail">${detail}</span>
+      </div>`;
+  }).join('');
+}
+
+function pluralProby(n) {
+  if (n === 1) return 'próba';
+  const last = n % 10, teen = n % 100;
+  if (last >= 2 && last <= 4 && !(teen >= 12 && teen <= 14)) return 'próby';
+  return 'prób';
+}
+
 // ── COUNTDOWN (do północy w Warszawie = nowe hasło) ──
 function warsawNowParts() {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -471,6 +519,9 @@ function showToast(msg) {
 
 // ── HOW IT WORKS MODAL ──
 document.getElementById('btn-how').addEventListener('click', () => {
+  document.getElementById('how-it-works').style.display = 'flex';
+});
+document.getElementById('btn-how-desktop').addEventListener('click', () => {
   document.getElementById('how-it-works').style.display = 'flex';
 });
 document.getElementById('how-close').addEventListener('click', () => {
