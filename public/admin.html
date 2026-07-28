@@ -52,7 +52,7 @@
 
     .word-form {
       display: grid;
-      grid-template-columns: 70px 1fr 1.4fr auto;
+      grid-template-columns: 70px 1fr auto;
       gap: 8px;
       align-items: end;
     }
@@ -86,6 +86,20 @@
     .btn-small.danger { color: var(--danger); }
     .btn-small.danger:hover { border-color: var(--danger); }
     .payout-item { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 8px; background: var(--surface-alt); border-radius: 6px; margin-bottom: 4px; align-items: center; gap: 8px; }
+
+    .masked { color: var(--text-muted); letter-spacing: 3px; }
+    .note {
+      font-size: 12px; color: var(--text-muted); line-height: 1.5;
+      background: var(--surface-alt); border-radius: 8px; padding: 10px 12px;
+    }
+    .set-item {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      background: var(--surface-alt); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px;
+    }
+    .set-item .set-main { flex: 1; min-width: 180px; }
+    .set-item .set-title { font-size: 14px; font-weight: 600; }
+    .set-item .set-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .set-item .tag.loaded { background: rgba(200,241,53,0.12); color: var(--accent); border: 1px solid rgba(200,241,53,0.3); margin: 0; }
   </style>
 </head>
 <body>
@@ -110,6 +124,17 @@
       </div>
     </div>
 
+    <!-- ZESTAWY -->
+    <div class="admin-card" id="section-sets" style="display:none">
+      <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">ZESTAWY HASEŁ</h3>
+      <div class="note">
+        Zestaw wchodzi do puli od pierwszego dnia roboczego swojego miesiąca, w losowej kolejności.
+        Nadpisuje wszystkie hasła od tego dnia w górę — wcześniejsze, rozegrane dni zostają nietknięte.
+      </div>
+      <div id="sets-list"></div>
+      <div class="error-msg" id="sets-err"></div>
+    </div>
+
     <!-- HASŁA -->
     <div class="admin-card" id="section-words" style="display:none">
       <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">DODAJ / EDYTUJ HASŁO</h3>
@@ -122,20 +147,20 @@
           <label>Hasło (A–Z)</label>
           <input type="text" id="w-word" placeholder="BIURO" maxlength="12" />
         </div>
-        <div class="form-group">
-          <label>Podpowiedź (hint)</label>
-          <input type="text" id="w-hint" placeholder="np. Tu spędzasz 8h" maxlength="80" />
-        </div>
         <button class="btn-primary" id="btn-save-word" style="padding:9px 16px">Zapisz</button>
       </div>
       <input type="hidden" id="w-id" />
       <div class="error-msg" id="word-err"></div>
 
       <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-top:8px">LISTA HASEŁ</h3>
+      <div class="note">
+        Nierozegrane hasła są ukryte, żebyś mógł grać na równi z resztą. Serwer wysyła treść
+        dopiero po kliknięciu <b>pokaż</b> — do tego czasu nie ma jej nawet w devtools.
+      </div>
       <div style="overflow-x:auto">
         <table class="words-table">
           <thead>
-            <tr><th>#</th><th>Hasło</th><th>Długość / próby</th><th>Podpowiedź</th><th>Gry</th><th></th></tr>
+            <tr><th>#</th><th>Data</th><th>Hasło</th><th>Długość / próby</th><th>Gry</th><th></th></tr>
           </thead>
           <tbody id="words-tbody"></tbody>
         </table>
@@ -156,6 +181,8 @@
   <script>
     let adminPassword = '';
     let wordsData = [];
+    // Hasła odsłonięte ręcznie w tej sesji (id → treść). Reset przy każdym przeładowaniu listy.
+    let revealed = {};
 
     document.getElementById('admin-password').addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('btn-admin-login').click();
@@ -169,8 +196,10 @@
         await loadWords();
         document.getElementById('section-login').style.display = 'none';
         document.getElementById('section-logged').style.display = 'flex';
+        document.getElementById('section-sets').style.display = 'flex';
         document.getElementById('section-words').style.display = 'flex';
         document.getElementById('section-players').style.display = 'flex';
+        loadSets();
       } catch (e) {
         errEl.textContent = e.message;
       }
@@ -181,8 +210,67 @@
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       wordsData = d.words;
+      revealed = {};
       renderSeason(d.season, d.word_start);
       renderWords();
+    }
+
+    // ── ZESTAWY ──
+    async function loadSets() {
+      const errEl = document.getElementById('sets-err');
+      errEl.textContent = '';
+      try {
+        const r = await fetch(`/api/admin/sets?password=${encodeURIComponent(adminPassword)}`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        renderSets(d.sets);
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    }
+
+    function renderSets(sets) {
+      const el = document.getElementById('sets-list');
+      if (!sets.length) {
+        el.innerHTML = '<div style="color:var(--text-muted);font-size:12px">Brak zestawów w katalogu sets/</div>';
+        return;
+      }
+      el.innerHTML = sets.map(s => `
+        <div class="set-item">
+          <div class="set-main">
+            <div class="set-title">${esc(s.label)}</div>
+            <div class="set-meta">
+              ${s.word_count} haseł · dni #${s.from_index}–#${s.to_index}
+              · ${esc(s.from_date)} → ${esc(s.to_date)}
+            </div>
+          </div>
+          ${s.is_loaded ? '<span class="tag loaded">wczytany</span>' : ''}
+          <button class="btn-small" onclick="loadSet('${esc(s.id)}')">
+            ${s.is_loaded ? 'Wczytaj ponownie' : 'Wczytaj zestaw'}
+          </button>
+        </div>
+      `).join('');
+    }
+
+    async function loadSet(id) {
+      if (!confirm(`Wczytać zestaw "${id}"?\n\nHasła od pierwszego dnia roboczego tego miesiąca zostaną zastąpione i potasowane.`)) return;
+      const errEl = document.getElementById('sets-err');
+      const okEl = document.getElementById('global-success');
+      errEl.textContent = '';
+      try {
+        const r = await fetch(`/api/admin/sets/${encodeURIComponent(id)}/load`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: adminPassword })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        okEl.textContent = `✓ Wczytano ${d.loaded} haseł: dni #${d.from_index}–#${d.to_index} (${d.from_date} → ${d.to_date})`;
+        await loadWords();
+        await loadSets();
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
     }
 
     function renderSeason(s, start) {
@@ -210,15 +298,20 @@
       tbody.innerHTML = wordsData.map(w => {
         const rowCls = w.is_current ? 'current' : (w.is_past ? 'past' : '');
         const tag = w.is_current ? '<span class="tag now">DZIŚ</span>' : (w.is_past ? '<span class="tag done">było</span>' : '');
+        const known = wordText(w);
+        const cell = known !== null
+          ? `${esc(known)}${tag}`
+          : `<span class="masked">${'●'.repeat(w.length)}</span>${tag}`;
         return `
           <tr class="${rowCls}">
             <td class="mono">${w.order_index}</td>
-            <td class="word-cell">${esc(w.word)}${tag}</td>
+            <td class="mono" style="color:var(--text-muted)">${esc(w.date || '')}</td>
+            <td class="word-cell">${cell}</td>
             <td class="mono">${w.length} / ${w.max_attempts}</td>
-            <td>${esc(w.hint || '')}</td>
             <td class="mono">${w.games_played}</td>
             <td>
               <div class="row-actions">
+                ${known === null ? `<button class="btn-small" onclick='revealWord(${w.id})'>Pokaż</button>` : ''}
                 <button class="btn-small" onclick='editWord(${w.id})'>Edytuj</button>
                 <button class="btn-small danger" onclick='deleteWord(${w.id})' ${w.games_played > 0 ? 'disabled title="ma rozegrane gry"' : ''}>Usuń</button>
               </div>
@@ -227,13 +320,39 @@
       }).join('');
     }
 
+    // Treść hasła, jeśli w ogóle ją znamy: rozegrane są jawne, ukryte tylko po kliknięciu "Pokaż".
+    function wordText(w) {
+      if (w.word !== null && w.word !== undefined) return w.word;
+      return revealed[w.id] !== undefined ? revealed[w.id] : null;
+    }
+
+    async function revealWord(id) {
+      const w = wordsData.find(x => x.id === id);
+      if (!confirm(`Odsłonić hasło na dzień #${w ? w.order_index : ''} (${w ? w.date : ''})?\n\nPotem nie zagrasz już tego dnia uczciwie.`)) return;
+      const errEl = document.getElementById('word-err');
+      errEl.textContent = '';
+      try {
+        const r = await fetch(`/api/admin/word/${id}/reveal?password=${encodeURIComponent(adminPassword)}`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        revealed[id] = d.word;
+        renderWords();
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    }
+
     function editWord(id) {
       const w = wordsData.find(x => x.id === id);
       if (!w) return;
+      const known = wordText(w);
+      const errEl = document.getElementById('word-err');
+      errEl.textContent = known === null
+        ? 'Hasło jest ukryte — wpisz nowe albo najpierw kliknij "Pokaż".'
+        : '';
       document.getElementById('w-id').value = w.id;
       document.getElementById('w-order').value = w.order_index;
-      document.getElementById('w-word').value = w.word;
-      document.getElementById('w-hint').value = w.hint || '';
+      document.getElementById('w-word').value = known === null ? '' : known;
       document.getElementById('w-word').focus();
     }
 
@@ -241,7 +360,6 @@
       const id = document.getElementById('w-id').value || null;
       const order_index = document.getElementById('w-order').value;
       const word = document.getElementById('w-word').value;
-      const hint = document.getElementById('w-hint').value;
       const errEl = document.getElementById('word-err');
       const okEl = document.getElementById('global-success');
       errEl.textContent = '';
@@ -249,7 +367,7 @@
         const r = await fetch('/api/admin/word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: adminPassword, id, word, hint, order_index })
+          body: JSON.stringify({ password: adminPassword, id, word, order_index })
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
@@ -257,8 +375,8 @@
         document.getElementById('w-id').value = '';
         document.getElementById('w-order').value = '';
         document.getElementById('w-word').value = '';
-        document.getElementById('w-hint').value = '';
         await loadWords();
+        await loadSets();
       } catch (e) {
         errEl.textContent = e.message;
       }
@@ -266,7 +384,9 @@
 
     async function deleteWord(id) {
       const w = wordsData.find(x => x.id === id);
-      if (!confirm(`Usunąć hasło "${w ? w.word : ''}" (dzień #${w ? w.order_index : ''})?`)) return;
+      const known = w ? wordText(w) : null;
+      const what = known !== null ? `"${known}"` : `(ukryte, ${w ? w.length : '?'} liter)`;
+      if (!confirm(`Usunąć hasło ${what} z dnia #${w ? w.order_index : ''} (${w ? w.date : ''})?`)) return;
       const errEl = document.getElementById('word-err');
       errEl.textContent = '';
       try {
@@ -278,6 +398,7 @@
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         await loadWords();
+        await loadSets();
       } catch (e) {
         errEl.textContent = e.message;
       }

@@ -70,7 +70,6 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS words (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     word TEXT NOT NULL,
-    hint TEXT,
     order_index INTEGER UNIQUE NOT NULL
   );
 
@@ -117,37 +116,41 @@ function shuffle(arr) {
   return a;
 }
 
+// Normalizacja hasła do postaci grywalnej (A–Z). Zwraca '' gdy nic nie zostaje.
+function normalizeWord(raw) {
+  return toAsciiUpper(raw == null ? '' : raw).replace(/[^A-Z]/g, '');
+}
+
 // ── SEED HASEŁ ──
 // Hasła wczytujemy z slowa.json (jeśli istnieje), zamieniamy polskie znaki na ASCII
 // i TASUJEMY — order_index przydzielany losowo, więc hasła dnia lecą w losowej kolejności.
-const FALLBACK_WORDS = [
-  { word: 'KAWA', hint: 'Poranny rytuał w kuchni' },
-  { word: 'BIURO', hint: 'Tu spędzasz 8 godzin dziennie' },
-  { word: 'LAPTOP', hint: 'Twoje główne narzędzie pracy' },
-  { word: 'PROJEKT', hint: 'Deadline już goni' },
-  { word: 'ZEBRANIE', hint: 'Mogło być mailem' }
-];
+const FALLBACK_WORDS = ['KAWA', 'BIURO', 'LAPTOP', 'PROJEKT', 'ZEBRANIE'];
+
+// Akceptuje zarówno listę stringów, jak i listę obiektów { word: ... } (stary format).
+function parseWordList(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(w => normalizeWord(typeof w === 'string' ? w : w && w.word))
+    .filter(w => w.length >= 3 && w.length <= 12);
+}
 
 function loadSeedWords() {
   const file = path.join(__dirname, 'slowa.json');
   if (fs.existsSync(file)) {
     try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const words = raw
-        .map(w => ({ word: toAsciiUpper(w.word).replace(/[^A-Z]/g, ''), hint: w.hint || null }))
-        .filter(w => w.word.length >= 3);
+      const words = parseWordList(JSON.parse(fs.readFileSync(file, 'utf8')));
       if (words.length) return words;
     } catch (e) {
       console.error('Nie udało się wczytać slowa.json:', e.message);
     }
   }
-  return FALLBACK_WORDS.map(w => ({ word: toAsciiUpper(w.word), hint: w.hint }));
+  return FALLBACK_WORDS.map(normalizeWord);
 }
 
 const seedCount = db.prepare('SELECT COUNT(*) AS c FROM words').get().c;
 if (seedCount === 0) {
-  const insertWord = db.prepare('INSERT INTO words (word, hint, order_index) VALUES (?, ?, ?)');
-  shuffle(loadSeedWords()).forEach((w, i) => insertWord.run(w.word, w.hint, i + 1));
+  const insertWord = db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)');
+  shuffle(loadSeedWords()).forEach((w, i) => insertWord.run(w, i + 1));
 }
 
 // ── WALIDACJA SŁOWNIKOWA (hybryda) ──
@@ -196,6 +199,71 @@ function isAllowedGuess(guess) {
   return DICTIONARY.has(guess) || looksLikeWord(guess);
 }
 
+// ── ZESTAWY HASEŁ ──
+// Gotowe paczki haseł na dany miesiąc leżą w sets/*.json:
+//   { "id": "2026-08", "label": "Sierpień 2026", "starts_on": "2026-08-01", "words": ["ALERT", ...] }
+// Admin ładuje taki zestaw jednym przyciskiem — hasła trafiają do puli od pierwszego dnia
+// roboczego miesiąca, w losowej kolejności, a wcześniejsze (rozegrane) dni zostają nietknięte.
+const SETS_DIR = path.join(__dirname, 'sets');
+
+function loadWordSets() {
+  if (!fs.existsSync(SETS_DIR)) return [];
+  return fs.readdirSync(SETS_DIR)
+    .filter(f => f.endsWith('.json'))
+    .map(f => {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(SETS_DIR, f), 'utf8'));
+        const words = parseWordList(raw.words);
+        if (!words.length) return null;
+        const startsOn = /^\d{4}-\d{2}-\d{2}$/.test(raw.starts_on || '') ? raw.starts_on : null;
+        if (!startsOn) return null;
+        return {
+          id: raw.id || path.basename(f, '.json'),
+          label: raw.label || path.basename(f, '.json'),
+          starts_on: startsOn,
+          words: [...new Set(words)]
+        };
+      } catch (e) {
+        console.error(`Nie udało się wczytać zestawu ${f}:`, e.message);
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.starts_on.localeCompare(b.starts_on));
+}
+
+// Numer hasła, od którego zestaw wchodzi do puli
+function setStartIndex(set) {
+  return businessDaysElapsed(firstBusinessDayOnOrAfter(set.starts_on));
+}
+
+// Zestaw uznajemy za wczytany, gdy w puli na jego zakresie indeksów siedzą dokładnie jego hasła.
+function isSetLoaded(set) {
+  const from = setStartIndex(set);
+  const rows = db.prepare(
+    'SELECT word FROM words WHERE order_index >= ? AND order_index <= ?'
+  ).all(from, from + set.words.length - 1);
+  if (rows.length !== set.words.length) return false;
+  const inDb = new Set(rows.map(r => r.word));
+  return set.words.every(w => inDb.has(w));
+}
+
+function setSummary(set) {
+  const from = setStartIndex(set);
+  const to = from + set.words.length - 1;
+  return {
+    id: set.id,
+    label: set.label,
+    starts_on: set.starts_on,
+    word_count: set.words.length,
+    from_index: from,
+    to_index: to,
+    from_date: dateForIndex(from),
+    to_date: dateForIndex(to),
+    is_loaded: isSetLoaded(set)
+  };
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -241,13 +309,42 @@ function businessDaysElapsed(dateStr) {
   return n;
 }
 
+function isoFromUTC(t) {
+  const dt = new Date(t);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
 // Poprzedni dzień roboczy przed dateStr (pon → poprzedni pt)
 function previousBusinessDay(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   let t = Date.UTC(y, m - 1, d);
   do { t -= 86400000; } while ([0, 6].includes(new Date(t).getUTCDay()));
-  const dt = new Date(t);
-  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+  return isoFromUTC(t);
+}
+
+// Pierwszy dzień roboczy w dniu dateStr lub po nim
+function firstBusinessDayOnOrAfter(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  let t = Date.UTC(y, m - 1, d);
+  while ([0, 6].includes(new Date(t).getUTCDay())) t += 86400000;
+  return isoFromUTC(t);
+}
+
+// Data (YYYY-MM-DD), w którą wypadnie hasło o danym numerze — odwrotność businessDaysElapsed.
+function dateForIndex(n) {
+  if (!Number.isInteger(n) || n < 1) return null;
+  const [y, m, d] = WORD_START.split('-').map(Number);
+  let t = Date.UTC(y, m - 1, d);
+  let count = 0;
+  for (let i = 0; i < 20000; i++) {
+    const dow = new Date(t).getUTCDay();
+    if (dow !== 0 && dow !== 6) {
+      count++;
+      if (count === n) return isoFromUTC(t);
+    }
+    t += 86400000;
+  }
+  return null;
 }
 
 // Godzina, o której pojawia się nowe hasło (czasu Warszawy). Do tej godziny wisi wczorajsze.
@@ -462,7 +559,6 @@ function buildGameState(player) {
     playable,
     word_length: word.word.length,
     max_attempts: maxAttempts,
-    hint: word.hint,
     guesses: rows,
     attempts_used: guessList.length,
     status,
@@ -755,32 +851,49 @@ function checkAdmin(req, res) {
   return true;
 }
 
-// GET /api/admin/words — lista haseł + status sezonu
+// GET /api/admin/words — lista haseł + status sezonu.
+// UWAGA: treść przyszłych i dzisiejszego hasła NIE jest wysyłana — admin też gra, więc
+// nie może ich przypadkiem zobaczyć (ani w tabeli, ani w devtools). Odsłonić można
+// pojedyncze hasło świadomie: GET /api/admin/word/:id/reveal.
 app.get('/api/admin/words', (req, res) => {
   if (!checkAdmin(req, res)) return;
-  const words = db.prepare('SELECT * FROM words ORDER BY order_index ASC').all();
-  const idx = currentPuzzleIndex();
-  const pastThreshold = idx !== null ? idx : supplyIndex() + 1;
+  const words = db.prepare('SELECT id, word, order_index FROM words ORDER BY order_index ASC').all();
+  const ap = activePuzzle();
+  const idx = ap.index;
+  // W fazie 'expired' (po północy) hasło dnia jest już odsłonięte graczom, więc i tu jest jawne.
+  const pastThreshold = idx === null ? supplyIndex() + 1 : (ap.phase === 'expired' ? idx + 1 : idx);
   const withStatus = words.map(w => {
     const played = db.prepare('SELECT COUNT(*) AS c FROM games WHERE word_id = ?').get(w.id).c;
+    const isPast = w.order_index < pastThreshold;
     return {
-      ...w,
+      id: w.id,
+      order_index: w.order_index,
+      date: dateForIndex(w.order_index),
+      word: isPast ? w.word : null, // rozegrane hasła są już jawne
+      hidden: !isPast,
       length: w.word.length,
       max_attempts: maxAttemptsFor(w.word.length),
       is_current: idx !== null && w.order_index === idx,
-      is_past: w.order_index < pastThreshold,
+      is_past: isPast,
       games_played: Number(played)
     };
   });
   res.json({ words: withStatus, season: seasonInfo(), word_start: WORD_START });
 });
 
-// POST /api/admin/word — dodaj lub zaktualizuj hasło { id?, word, hint, order_index }
+// GET /api/admin/word/:id/reveal — świadome odsłonięcie jednego ukrytego hasła
+app.get('/api/admin/word/:id/reveal', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const word = db.prepare('SELECT word FROM words WHERE id = ?').get(parseInt(req.params.id, 10));
+  if (!word) return res.status(404).json({ error: 'Hasło nie istnieje' });
+  res.json({ word: word.word });
+});
+
+// POST /api/admin/word — dodaj lub zaktualizuj hasło { id?, word, order_index }
 app.post('/api/admin/word', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const { id } = req.body;
   const word = toAsciiUpper(String(req.body.word || '').trim());
-  const hint = String(req.body.hint || '').trim() || null;
   const orderIndex = parseInt(req.body.order_index, 10);
 
   if (!/^[A-Z]{3,12}$/.test(word)) {
@@ -799,11 +912,11 @@ app.post('/api/admin/word', (req, res) => {
     if (id) {
       const existing = db.prepare('SELECT * FROM words WHERE id = ?').get(id);
       if (!existing) return res.status(404).json({ error: 'Hasło nie istnieje' });
-      db.prepare('UPDATE words SET word = ?, hint = ?, order_index = ? WHERE id = ?')
-        .run(word, hint, orderIndex, id);
+      db.prepare('UPDATE words SET word = ?, order_index = ? WHERE id = ?')
+        .run(word, orderIndex, id);
     } else {
-      db.prepare('INSERT INTO words (word, hint, order_index) VALUES (?, ?, ?)')
-        .run(word, hint, orderIndex);
+      db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)')
+        .run(word, orderIndex);
     }
   } catch (e) {
     if (e.message && e.message.includes('UNIQUE')) {
@@ -830,6 +943,49 @@ app.delete('/api/admin/word/:id', (req, res) => {
 
   db.prepare('DELETE FROM words WHERE id = ?').run(wordId);
   res.json({ success: true });
+});
+
+// GET /api/admin/sets — gotowe zestawy haseł do wczytania jednym kliknięciem
+app.get('/api/admin/sets', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  res.json({ sets: loadWordSets().map(setSummary) });
+});
+
+// POST /api/admin/sets/:id/load — wczytaj zestaw do puli od jego pierwszego dnia roboczego.
+// Nadpisuje tylko hasła od tego numeru w górę i tylko takie, których nikt jeszcze nie grał.
+app.post('/api/admin/sets/:id/load', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const set = loadWordSets().find(s => s.id === req.params.id);
+  if (!set) return res.status(404).json({ error: 'Nie ma takiego zestawu' });
+
+  const from = setStartIndex(set);
+  const played = db.prepare(`
+    SELECT COUNT(*) AS c FROM games g JOIN words w ON w.id = g.word_id WHERE w.order_index >= ?
+  `).get(from).c;
+  if (played > 0) {
+    return res.status(400).json({
+      error: `Nie można wczytać — hasła od dnia #${from} mają już rozegrane gry`
+    });
+  }
+
+  const replaced = transaction(() => {
+    const removed = db.prepare('DELETE FROM words WHERE order_index >= ?').run(from).changes;
+    const insert = db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)');
+    shuffle(set.words).forEach((w, i) => insert.run(w, from + i));
+    return Number(removed);
+  });
+
+  for (const w of set.words) DICTIONARY.add(w); // hasła zawsze dozwolone jako zgadywane słowa
+
+  res.json({
+    success: true,
+    loaded: set.words.length,
+    replaced,
+    from_index: from,
+    to_index: from + set.words.length - 1,
+    from_date: dateForIndex(from),
+    to_date: dateForIndex(from + set.words.length - 1)
+  });
 });
 
 // GET /api/admin/players
