@@ -1018,6 +1018,81 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
+// ── CODZIENNE POWIADOMIENIE NA DISCORDA ──
+// O NOTIFY_HOUR (domyślnie 8:00 czasu Warszawy) leci webhook z linkiem do gry.
+// Weekendy pomijamy — wtedy nie ma hasła. Webhook trzymamy w .env (repo jest publiczne).
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
+const APP_URL = process.env.APP_URL || 'https://frog03-21535.wykr.es/';
+const NOTIFY_HOUR = parseInt(process.env.DISCORD_NOTIFY_HOUR, 10) || NEW_WORD_HOUR;
+
+// Ostatni dzień (YYYY-MM-DD), za który powiadomienie już poszło — chroni przed dublem
+// przy restarcie serwera w ciągu dnia.
+let lastNotifiedDate = null;
+
+async function sendDiscordNotification() {
+  if (!DISCORD_WEBHOOK_URL) return { skipped: 'brak DISCORD_WEBHOOK_URL' };
+
+  const idx = businessDaysElapsed(todayWaw());
+  const payload = {
+    content: '🟩 **Office Wordle** — nowe hasło dnia jest już dostępne!',
+    embeds: [{
+      title: idx >= 1 ? `Hasło #${idx}` : 'Zagraj teraz',
+      url: APP_URL,
+      description: `Masz czas do północy. Powodzenia!\n${APP_URL}`,
+      color: 0x6aaa64,
+      footer: { text: `Sezon: ${seasonLabel()}` }
+    }]
+  };
+
+  const res = await fetch(DISCORD_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`Discord ${res.status}: ${await res.text()}`);
+  return { sent: true, index: idx };
+}
+
+// Tykamy co minutę zamiast liczyć setTimeout do 8:00 — odporne na DST i na drift.
+function startDiscordScheduler() {
+  if (!DISCORD_WEBHOOK_URL) {
+    console.log('Discord: brak DISCORD_WEBHOOK_URL — powiadomienia wyłączone');
+    return;
+  }
+
+  // Start po godzinie powiadomienia = dzisiejsze uznajemy za wysłane (nie spamujemy przy restarcie).
+  if (Number(warsawParts().h) >= NOTIFY_HOUR) lastNotifiedDate = todayWaw();
+
+  setInterval(async () => {
+    const today = todayWaw();
+    if (today === lastNotifiedDate) return;
+    if (Number(warsawParts().h) < NOTIFY_HOUR) return;
+    if (isWeekendStr(today)) { lastNotifiedDate = today; return; }
+
+    lastNotifiedDate = today; // ustawiamy przed wysyłką — błąd sieci nie ma powtarzać się co minutę
+    try {
+      await sendDiscordNotification();
+      console.log(`Discord: powiadomienie wysłane (${today})`);
+    } catch (err) {
+      console.error('Discord: nie udało się wysłać powiadomienia —', err.message);
+    }
+  }, 60_000);
+
+  console.log(`Discord: powiadomienia włączone, codziennie o ${String(NOTIFY_HOUR).padStart(2, '0')}:00 (pon–pt, Europe/Warsaw)`);
+}
+
+// POST /api/admin/discord-test — ręczne wysłanie powiadomienia (do sprawdzenia webhooka)
+app.post('/api/admin/discord-test', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  try {
+    const result = await sendDiscordNotification();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
+  startDiscordScheduler();
 });
