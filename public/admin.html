@@ -129,7 +129,8 @@
       <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">ZESTAWY HASEŁ</h3>
       <div class="note">
         Zestaw wchodzi do puli od pierwszego dnia roboczego swojego miesiąca, w losowej kolejności.
-        Nadpisuje wszystkie hasła od tego dnia w górę — wcześniejsze, rozegrane dni zostają nietknięte.
+        Podmiana w trakcie miesiąca jest bezpieczna: dni już rozegrane i hasło dnia bieżącego
+        zostają nietknięte, nadpisywane są tylko przyszłe dni.
       </div>
       <div id="sets-list"></div>
       <div class="error-msg" id="sets-err"></div>
@@ -242,18 +243,26 @@
             <div class="set-meta">
               ${s.word_count} haseł · dni #${s.from_index}–#${s.to_index}
               · ${esc(s.from_date)} → ${esc(s.to_date)}
+              ${s.frozen_days > 0
+                ? `<br>🔒 ${s.frozen_days} dni rozegranych zostaje bez zmian —
+                   podmiana od #${s.write_from_index} (${esc(s.write_from_date)}),
+                   ${s.replaceable_days} dni`
+                : ''}
             </div>
           </div>
           ${s.is_loaded ? '<span class="tag loaded">wczytany</span>' : ''}
-          <button class="btn-small" onclick="loadSet('${esc(s.id)}')">
+          <button class="btn-small" onclick="loadSet('${esc(s.id)}', ${s.frozen_days}, ${s.replaceable_days})">
             ${s.is_loaded ? 'Wczytaj ponownie' : 'Wczytaj zestaw'}
           </button>
         </div>
       `).join('');
     }
 
-    async function loadSet(id) {
-      if (!confirm(`Wczytać zestaw "${id}"?\n\nHasła od pierwszego dnia roboczego tego miesiąca zostaną zastąpione i potasowane.`)) return;
+    async function loadSet(id, frozenDays, replaceableDays) {
+      const msg = frozenDays > 0
+        ? `Wczytać zestaw "${id}"?\n\n${frozenDays} rozegranych dni (plus hasło dnia bieżącego) zostaje bez zmian.\nPodmienione zostanie ${replaceableDays} przyszłych dni — nowe hasła, potasowane.`
+        : `Wczytać zestaw "${id}"?\n\nHasła od pierwszego dnia roboczego tego miesiąca zostaną zastąpione i potasowane.`;
+      if (!confirm(msg)) return;
       const errEl = document.getElementById('sets-err');
       const okEl = document.getElementById('global-success');
       errEl.textContent = '';
@@ -265,7 +274,9 @@
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-        okEl.textContent = `✓ Wczytano ${d.loaded} haseł: dni #${d.from_index}–#${d.to_index} (${d.from_date} → ${d.to_date})`;
+        okEl.textContent = `✓ Wczytano ${d.loaded} haseł: dni #${d.from_index}–#${d.to_index} (${d.from_date} → ${d.to_date})`
+          + (d.kept ? ` · 🔒 bez zmian ${d.kept} dni #${d.kept_from_index}–#${d.kept_to_index} (${d.kept_from_date} → ${d.kept_to_date})` : '')
+          + (d.unused ? ` · ${d.unused} haseł z zestawu niewykorzystanych` : '');
         await loadWords();
         await loadSets();
       } catch (e) {

@@ -237,20 +237,39 @@ function setStartIndex(set) {
   return businessDaysElapsed(firstBusinessDayOnOrAfter(set.starts_on));
 }
 
-// Zestaw uznajemy za wczytany, gdy w puli na jego zakresie indeksów siedzą dokładnie jego hasła.
-function isSetLoaded(set) {
+// Granica nietykalna: do tego numeru hasła włącznie nie ruszamy niczego — to dni, które
+// ktoś już rozegrał, plus hasło aktualnie wiszące (ktoś może być w trakcie zgadywania).
+function frozenThroughIndex() {
+  const lastPlayed = db.prepare(`
+    SELECT MAX(w.order_index) AS n FROM words w JOIN games g ON g.word_id = w.id
+  `).get().n || 0;
+  return Math.max(Number(lastPlayed), supplyIndex());
+}
+
+// Plan podmiany zestawu: [from..to] to jego zakres dni, ale nadpisujemy dopiero od write_from.
+function setPlan(set) {
   const from = setStartIndex(set);
+  const to = from + set.words.length - 1;
+  const writeFrom = Math.max(from, frozenThroughIndex() + 1);
+  return { from, to, writeFrom, slots: to - writeFrom + 1 };
+}
+
+// Zestaw uznajemy za wczytany, gdy w podmienialnej części zakresu siedzą wyłącznie jego hasła.
+// Dni zamrożone (rozegrane) celowo pomijamy — po podmianie w trakcie miesiąca zostają tam
+// hasła z poprzedniej wersji zestawu i to jest w porządku.
+function isSetLoaded(set) {
+  const { to, writeFrom, slots } = setPlan(set);
+  if (slots <= 0) return true; // cały zakres już rozegrany — nie ma czego wczytywać
   const rows = db.prepare(
     'SELECT word FROM words WHERE order_index >= ? AND order_index <= ?'
-  ).all(from, from + set.words.length - 1);
-  if (rows.length !== set.words.length) return false;
-  const inDb = new Set(rows.map(r => r.word));
-  return set.words.every(w => inDb.has(w));
+  ).all(writeFrom, to);
+  if (rows.length !== slots) return false;
+  const inSet = new Set(set.words);
+  return rows.every(r => inSet.has(r.word));
 }
 
 function setSummary(set) {
-  const from = setStartIndex(set);
-  const to = from + set.words.length - 1;
+  const { from, to, writeFrom, slots } = setPlan(set);
   return {
     id: set.id,
     label: set.label,
@@ -260,6 +279,10 @@ function setSummary(set) {
     to_index: to,
     from_date: dateForIndex(from),
     to_date: dateForIndex(to),
+    write_from_index: writeFrom,
+    write_from_date: dateForIndex(writeFrom),
+    frozen_days: Math.max(0, writeFrom - from),
+    replaceable_days: Math.max(0, slots),
     is_loaded: isSetLoaded(set)
   };
 }
@@ -952,26 +975,44 @@ app.get('/api/admin/sets', (req, res) => {
 });
 
 // POST /api/admin/sets/:id/load — wczytaj zestaw do puli od jego pierwszego dnia roboczego.
-// Nadpisuje tylko hasła od tego numeru w górę i tylko takie, których nikt jeszcze nie grał.
+// Podmiana jest bezpieczna także w trakcie miesiąca: dni już rozegrane oraz hasło dnia
+// bieżącego zostają nietknięte, nadpisywane są wyłącznie przyszłe, jeszcze niezagrane sloty.
+// Dzięki temu można poprawić zestaw po starcie sezonu, nie psując wyników z rozegranych dni.
 app.post('/api/admin/sets/:id/load', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const set = loadWordSets().find(s => s.id === req.params.id);
   if (!set) return res.status(404).json({ error: 'Nie ma takiego zestawu' });
 
-  const from = setStartIndex(set);
-  const played = db.prepare(`
-    SELECT COUNT(*) AS c FROM games g JOIN words w ON w.id = g.word_id WHERE w.order_index >= ?
-  `).get(from).c;
-  if (played > 0) {
+  const { from, to, writeFrom, slots } = setPlan(set);
+  if (slots <= 0) {
     return res.status(400).json({
-      error: `Nie można wczytać — hasła od dnia #${from} mają już rozegrane gry`
+      error: `Nie ma czego podmieniać — cały zestaw (dni #${from}–#${to}) jest już rozegrany`
     });
   }
 
+  // Hasła, które zostają na zamrożonych dniach — nie chcemy ich powtórzyć w nowej części.
+  const kept = db.prepare(
+    'SELECT word FROM words WHERE order_index >= ? AND order_index < ?'
+  ).all(from, writeFrom).map(r => r.word);
+  const keptSet = new Set(kept);
+
+  const candidates = set.words.filter(w => !keptSet.has(w));
+  if (candidates.length < slots) {
+    return res.status(400).json({
+      error: `Za mało nowych haseł — ${candidates.length} do obsadzenia ${slots} dni`
+    });
+  }
+  const chosen = shuffle(candidates).slice(0, slots);
+
   const replaced = transaction(() => {
-    const removed = db.prepare('DELETE FROM words WHERE order_index >= ?').run(from).changes;
+    // Kasujemy tylko to, czego nikt nie tknął — gry trzymają referencję do words.id.
+    const removed = db.prepare(`
+      DELETE FROM words
+      WHERE order_index >= ?
+        AND id NOT IN (SELECT word_id FROM games WHERE word_id IS NOT NULL)
+    `).run(writeFrom).changes;
     const insert = db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)');
-    shuffle(set.words).forEach((w, i) => insert.run(w, from + i));
+    chosen.forEach((w, i) => insert.run(w, writeFrom + i));
     return Number(removed);
   });
 
@@ -979,12 +1020,18 @@ app.post('/api/admin/sets/:id/load', (req, res) => {
 
   res.json({
     success: true,
-    loaded: set.words.length,
+    loaded: chosen.length,
+    unused: set.words.length - chosen.length,
     replaced,
-    from_index: from,
-    to_index: from + set.words.length - 1,
-    from_date: dateForIndex(from),
-    to_date: dateForIndex(from + set.words.length - 1)
+    kept: kept.length,
+    kept_from_index: kept.length ? from : null,
+    kept_to_index: kept.length ? writeFrom - 1 : null,
+    kept_from_date: kept.length ? dateForIndex(from) : null,
+    kept_to_date: kept.length ? dateForIndex(writeFrom - 1) : null,
+    from_index: writeFrom,
+    to_index: to,
+    from_date: dateForIndex(writeFrom),
+    to_date: dateForIndex(to)
   });
 });
 
