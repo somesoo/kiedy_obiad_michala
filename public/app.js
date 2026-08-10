@@ -247,11 +247,15 @@ function renderReview(g) {
   const pointsLine = won
     ? `<div class="review-points">+${g.points_today} pkt dzisiaj</div>`
     : `<div class="review-points muted">0 pkt — seria wyzerowana</div>`;
+  const speedLine = won && g.speed_bonus > 0
+    ? `<div class="review-speed">⚡ ${g.win_place}. osoba dzisiaj — bonus +${g.speed_bonus} pkt</div>`
+    : (won && g.win_place ? `<div class="review-speed muted">${g.win_place}. odgadnięcie dzisiaj — bonus za szybkość już rozdany</div>` : '');
 
   return `
     <div class="review-panel ${won ? 'win' : 'lose'}">
       ${answerLine}
       ${pointsLine}
+      ${speedLine}
       <div class="review-stats">
         <div class="stat"><span class="stat-num">${g.stats.current_streak}</span><span class="stat-lbl">🔥 streak</span></div>
         <div class="stat"><span class="stat-num">${g.stats.best_streak}</span><span class="stat-lbl">rekord serii</span></div>
@@ -334,7 +338,10 @@ async function submitGuess() {
     renderGame();
     if (!wasFinished && updated.status === 'won') {
       showConfetti();
-      showToast(`🎉 Brawo! +${updated.points_today} pkt`);
+      const speedTxt = updated.speed_bonus > 0
+        ? ` (⚡ ${updated.win_place}. dzisiaj, w tym +${updated.speed_bonus} za szybkość)`
+        : '';
+      showToast(`🎉 Brawo! +${updated.points_today} pkt${speedTxt}`);
       loadLeaderboard();
       loadDaily();
     } else if (!wasFinished && updated.status === 'lost') {
@@ -457,18 +464,24 @@ function renderDaily(data) {
   }
 
   const playing = data.in_progress ? ` · ${data.in_progress} w trakcie` : '';
-  countEl.textContent = `${data.total} ukończonych${playing}`;
+  const spots = data.speed_spots_left
+    ? ` · ⚡ ${data.speed_spots_left} ${pluralMiejsca(data.speed_spots_left)} z bonusem`
+    : '';
+  countEl.textContent = `${data.total} ukończonych${playing}${spots}`;
 
   if (!data.entries.length) {
-    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie skończył dziś gry — bądź pierwszy! ⚡</div>';
+    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie skończył dziś gry — bądź pierwszy i zgarnij ⚡ +5 pkt!</div>';
     return;
   }
 
   list.innerHTML = data.entries.map(e => {
     const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : e.rank;
     const meClass = e.is_me ? ' is-me' : '';
+    const speed = e.speed_bonus > 0
+      ? `<span class="daily-speed" title="${e.win_place}. odgadnięcie dzisiaj">⚡+${e.speed_bonus}</span>`
+      : '';
     const detail = e.status === 'won'
-      ? `<span class="daily-attempts">${e.attempts_used} ${pluralProby(e.attempts_used)}</span><span class="daily-pts mono">+${e.points}</span>`
+      ? `<span class="daily-attempts">${e.attempts_used} ${pluralProby(e.attempts_used)}</span>${speed}<span class="daily-pts mono">+${e.points}</span>`
       : `<span class="daily-attempts lost">✗ nie trafił</span><span class="daily-pts mono">0</span>`;
     return `
       <div class="lb-row${meClass}">
@@ -477,6 +490,13 @@ function renderDaily(data) {
         <span class="daily-detail">${detail}</span>
       </div>`;
   }).join('');
+}
+
+function pluralMiejsca(n) {
+  if (n === 1) return 'miejsce';
+  const last = n % 10, teen = n % 100;
+  if (last >= 2 && last <= 4 && !(teen >= 12 && teen <= 14)) return 'miejsca';
+  return 'miejsc';
 }
 
 function pluralProby(n) {

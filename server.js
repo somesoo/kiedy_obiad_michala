@@ -26,6 +26,12 @@ const POINTS_PER_ATTEMPT_STEP = 10;   // baza = (max_prób - N + 1) * 10
 const LENGTH_BONUS_PER_LETTER = 2;    // +2 * długość hasła za trafienie
 const STREAK_BONUS_PER_DAY = 5;       // +5 * streak
 const STREAK_BONUS_CAP = 25;          // ...ale nie więcej niż +25
+const SPEED_BONUS_PLACES = 5;         // bonus za szybkość dla pierwszych 5 osób dnia: +5/+4/+3/+2/+1
+
+// Miejsce liczymy w kolejności ukończenia (kto pierwszy trafił hasło dnia), nie po liczbie prób.
+function speedBonusFor(place) {
+  return place >= 1 && place <= SPEED_BONUS_PLACES ? SPEED_BONUS_PLACES - place + 1 : 0;
+}
 
 // Liczba prób na hasło = długość + 1
 function maxAttemptsFor(wordLength) {
@@ -82,6 +88,8 @@ db.exec(`
     status TEXT DEFAULT 'in_progress',
     attempts_used INTEGER DEFAULT 0,
     points INTEGER DEFAULT 0,
+    win_place INTEGER,
+    speed_bonus INTEGER DEFAULT 0,
     played_on TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME,
@@ -99,6 +107,9 @@ function ensureColumn(table, column, definition) {
 ensureColumn('players', 'total_points', 'INTEGER DEFAULT 0');
 ensureColumn('players', 'last_word_index', 'INTEGER DEFAULT 0');
 ensureColumn('players', 'season', 'TEXT'); // sezon (YYYY-MM), w którym gracz ostatnio grał — do resetu streaka
+// Bonus za szybkość doszedł później niż tabela games — dokładamy kolumny do istniejącej bazy.
+ensureColumn('games', 'win_place', 'INTEGER');      // które to było trafienie danego dnia (1, 2, 3…)
+ensureColumn('games', 'speed_bonus', 'INTEGER DEFAULT 0');
 
 // Zamiana polskich znaków na ASCII — hasła muszą być grywalne na klawiaturze A–Z.
 const PL_ASCII = { Ą: 'A', Ć: 'C', Ę: 'E', Ł: 'L', Ń: 'N', Ó: 'O', Ś: 'S', Ź: 'Z', Ż: 'Z' };
@@ -477,6 +488,13 @@ function seasonPoints(playerId) {
   ).get(playerId, first, nextFirst).p);
 }
 
+// Ilu graczy odgadło już dzisiejsze hasło (do liczenia wolnych miejsc premiowanych)
+function winnersToday(wordId) {
+  return Number(db.prepare(
+    `SELECT COUNT(*) AS c FROM games WHERE word_id = ? AND status = 'won'`
+  ).get(wordId).c);
+}
+
 // ── OCENA ZGADYWANIA (standard Wordle, obsługa powtórzeń) ──
 function evaluateGuess(guess, answer) {
   const n = answer.length;
@@ -587,6 +605,11 @@ function buildGameState(player) {
     status,
     keyboard: keyboardStatuses(guessList, word.word),
     points_today: game ? game.points : 0,
+    // Bonus za szybkość: moje miejsce (jeśli wygrałem) i ile premiowanych miejsc jeszcze wolnych.
+    win_place: game && game.status === 'won' ? game.win_place : null,
+    speed_bonus: game ? Number(game.speed_bonus || 0) : 0,
+    speed_bonus_places: SPEED_BONUS_PLACES,
+    speed_spots_left: Math.max(0, SPEED_BONUS_PLACES - winnersToday(word.id)),
     answer: (finished || !live) ? word.word : null
   };
 }
@@ -694,6 +717,8 @@ app.post('/api/wordle/guess', authPlayer, (req, res) => {
     const lost = !won && attemptsUsed >= maxAttempts;
     let status = 'in_progress';
     let points = 0;
+    let winPlace = null;
+    let speedBonus = 0;
 
     const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
     // Streak jest liczony w obrębie sezonu (miesiąca). Jeśli gracz nie grał jeszcze w tym
@@ -714,7 +739,14 @@ app.post('/api/wordle/guess', authPlayer, (req, res) => {
         const base = (maxAttempts - attemptsUsed + 1) * POINTS_PER_ATTEMPT_STEP;
         const lengthBonus = LENGTH_BONUS_PER_LETTER * answer.length;
         const streakBonus = Math.min(newStreak * STREAK_BONUS_PER_DAY, STREAK_BONUS_CAP);
-        points = base + lengthBonus + streakBonus;
+        // Bonus za szybkość — liczymy, ilu graczy trafiło hasło przede mną (jesteśmy
+        // w transakcji, a baza jest jednowątkowa, więc miejsca nie zdublują się).
+        const winnersBefore = db.prepare(
+          `SELECT COUNT(*) AS c FROM games WHERE word_id = ? AND status = 'won'`
+        ).get(word.id).c;
+        winPlace = Number(winnersBefore) + 1;
+        speedBonus = speedBonusFor(winPlace);
+        points = base + lengthBonus + streakBonus + speedBonus;
       } else {
         newStreak = 0;
       }
@@ -728,9 +760,10 @@ app.post('/api/wordle/guess', authPlayer, (req, res) => {
       `).run(newStreak, bestStreak, word.order_index, season, points, won ? 1 : 0, player.id);
 
       db.prepare(`
-        UPDATE games SET guesses = ?, status = ?, attempts_used = ?, points = ?, finished_at = CURRENT_TIMESTAMP
+        UPDATE games SET guesses = ?, status = ?, attempts_used = ?, points = ?,
+               win_place = ?, speed_bonus = ?, finished_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(JSON.stringify(guesses), status, attemptsUsed, points, game.id);
+      `).run(JSON.stringify(guesses), status, attemptsUsed, points, winPlace, speedBonus, game.id);
     } else {
       db.prepare('UPDATE games SET guesses = ?, attempts_used = ? WHERE id = ?')
         .run(JSON.stringify(guesses), attemptsUsed, game.id);
@@ -835,7 +868,7 @@ app.get('/api/wordle/daily', (req, res) => {
 
   // Zwycięzcy najpierw (mniej prób = wyżej), potem przegrani. Punkty jako rozstrzygnięcie remisu.
   const rows = db.prepare(`
-    SELECT g.status, g.attempts_used, g.points, p.id AS player_id, p.nickname
+    SELECT g.status, g.attempts_used, g.points, g.win_place, g.speed_bonus, p.id AS player_id, p.nickname
     FROM games g
     JOIN players p ON p.id = g.player_id
     WHERE g.word_index = ? AND g.status IN ('won', 'lost')
@@ -851,6 +884,8 @@ app.get('/api/wordle/daily', (req, res) => {
     status: r.status,
     attempts_used: Number(r.attempts_used),
     points: Number(r.points),
+    win_place: r.status === 'won' && r.win_place ? Number(r.win_place) : null,
+    speed_bonus: Number(r.speed_bonus || 0),
     is_me: highlightId ? r.player_id === highlightId : false
   }));
 
@@ -858,7 +893,15 @@ app.get('/api/wordle/daily', (req, res) => {
     SELECT COUNT(*) AS c FROM games WHERE word_index = ? AND status = 'in_progress'
   `).get(word.order_index).c;
 
-  res.json({ day_number: day, has_word: true, entries, total: entries.length, in_progress: Number(inProgress) });
+  res.json({
+    day_number: day,
+    has_word: true,
+    entries,
+    total: entries.length,
+    in_progress: Number(inProgress),
+    speed_bonus_places: SPEED_BONUS_PLACES,
+    speed_spots_left: Math.max(0, SPEED_BONUS_PLACES - winnersToday(word.id))
+  });
 });
 
 // ──────────────────────────────────────────────
@@ -1085,7 +1128,7 @@ async function sendDiscordNotification() {
     embeds: [{
       title: idx >= 1 ? `Hasło #${idx}` : 'Zagraj teraz',
       url: APP_URL,
-      description: `Masz czas do północy. Powodzenia!\n${APP_URL}`,
+      description: `Masz czas do północy. ⚡ Pierwsze ${SPEED_BONUS_PLACES} osób, które dziś trafią, dostaje bonus (+${SPEED_BONUS_PLACES}…+1 pkt). Powodzenia!\n${APP_URL}`,
       color: 0x6aaa64,
       footer: { text: `Sezon: ${seasonLabel()}` }
     }]
