@@ -469,7 +469,8 @@ function seasonInfo() {
     total_words: db.prepare('SELECT COUNT(*) AS c FROM words').get().c,
     max_index: maxIndex,
     supply_exhausted: idx !== null && idx > maxIndex,
-    has_word_today: hasWord
+    has_word_today: hasWord,
+    speed_bonus_places: SPEED_BONUS_PLACES // publiczny znacznik: brak pola = działa stara wersja serwera
   };
 }
 
@@ -1184,5 +1185,7 @@ app.post('/api/admin/discord-test', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
+  // Znacznik wersji w logach — po deployu widać w `pm2 logs`, czy wstał nowy kod.
+  console.log(`Bonus za szybkość: pierwsze ${SPEED_BONUS_PLACES} osób dnia (+${SPEED_BONUS_PLACES}…+1 pkt)`);
   startDiscordScheduler();
 });
