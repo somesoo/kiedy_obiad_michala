@@ -21,7 +21,7 @@ npm install --production
 if [ ! -f ".env" ]; then
   RANDOM_PASS=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16 2>/dev/null || echo "michal$(date +%s)")
   echo "ADMIN_PASSWORD=${RANDOM_PASS}" > .env
-  echo "PORT=3000" >> .env
+  echo "PORT=21535" >> .env
   echo "✓ Plik .env utworzony (hasło admina: ${RANDOM_PASS})"
 else
   echo "✓ Plik .env już istnieje"
@@ -39,8 +39,8 @@ fi
 echo "✓ PM2 $(pm2 -v)"
 
 # Zatrzymaj poprzednią instancję jeśli działa
-pm2 stop michal-obiad 2>/dev/null || true
-pm2 delete michal-obiad 2>/dev/null || true
+pm2 stop kiedy-obiad 2>/dev/null || true
+pm2 delete kiedy-obiad 2>/dev/null || true
 
 # Uruchom aplikację
 pm2 start ecosystem.config.js
@@ -48,8 +48,8 @@ pm2 save
 
 echo ""
 echo "============================================"
-echo "  ✓ Aplikacja działa na http://localhost:3000"
-echo "  ✓ Panel admina: http://localhost:3000/admin"
+echo "  ✓ Aplikacja działa na http://localhost:21535"
+echo "  ✓ Panel admina: http://localhost:21535/admin"
 echo "============================================"
 echo ""
 echo "Aby aplikacja startowała po restarcie serwera, uruchom:"
