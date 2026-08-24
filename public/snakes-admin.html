@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Snakes — panel admina</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="snakes.css" />
+  <style>
+    .adm-wrap { max-width: 720px; margin: 24px auto; padding: 0 16px; }
+    .adm-card { background: var(--surface); border: 1px solid var(--muted); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .adm-card h3 { font-size: 15px; letter-spacing: 1px; margin-bottom: 12px; }
+    .adm-login { display: flex; gap: 8px; }
+    .adm-login input { flex: 1; background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 8px; color: var(--text-primary); padding: 10px 12px; }
+    .ev-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 8px; background: var(--surface-alt); border: 1px solid var(--muted); margin-bottom: 8px; }
+    .ev-name { font-size: 13px; }
+    .ev-key { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); display: block; }
+    .ev-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+    .adm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .adm-note { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+    .adm-warn { color: var(--gold); }
+    .adm-stat { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <span class="logo-text">SNAKES — ADMIN</span>
+        <span class="logo-sub">zdarzenia Discord · co-op</span>
+      </div>
+      <div class="header-user">
+        <a class="btn-ghost" href="/snakes">↩ do gry</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="adm-wrap">
+    <!-- LOGOWANIE -->
+    <div class="adm-card" id="login-card">
+      <h3>HASŁO ADMINA</h3>
+      <div class="adm-login">
+        <input type="password" id="adm-pass" placeholder="hasło" autocomplete="current-password" />
+        <button class="btn-primary" id="btn-adm-login">Wejdź</button>
+      </div>
+      <div class="login-error" id="adm-error"></div>
+    </div>
+
+    <!-- PANEL -->
+    <div id="adm-panel" style="display:none">
+      <div class="adm-card">
+        <h3>🔔 ZDARZENIA WYSYŁANE NA DISCORDA</h3>
+        <div class="adm-note" id="webhook-note"></div>
+        <div id="events-list"></div>
+        <div class="adm-actions">
+          <button class="btn-primary" id="btn-save">Zapisz ustawienia</button>
+          <button class="btn-ghost" id="btn-test">Testuj webhook</button>
+        </div>
+      </div>
+
+      <div class="adm-card">
+        <h3>🤝 WYDARZENIE KOOPERACYJNE</h3>
+        <div class="adm-stat" id="coop-info">–</div>
+        <div class="adm-note" style="margin-top:8px">
+          Mechanika bossa jest na razie zaślepką (stuby <code>startCoopBossEvent</code> /
+          <code>resolveCoopBossEvent</code> w server.js). Przycisk niżej domyka trwające
+          wydarzenie i wypłaca nagrody kontrybutorom wg skonfigurowanego podziału.
+        </div>
+        <div class="adm-actions">
+          <button class="btn-ghost" id="btn-coop-complete">Zamknij wydarzenie i wypłać nagrody</button>
+        </div>
+      </div>
+
+      <div class="adm-card">
+        <h3>⚙️ KONFIGURACJA</h3>
+        <div class="adm-stat" id="cfg-info">–</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" style="display:none"><span id="toast-text"></span></div>
+
+  <script>
+    let pass = '';
+    let cfg = null;
+
+    async function api(method, path, body) {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const r = await fetch(path, opts);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Błąd serwera');
+      return data;
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      document.getElementById('toast-text').textContent = msg;
+      t.style.display = 'block';
+      requestAnimationFrame(() => t.classList.add('show'));
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        t.classList.remove('show');
+        setTimeout(() => { t.style.display = 'none'; }, 300);
+      }, 3500);
+    }
+
+    document.getElementById('adm-pass').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('btn-adm-login').click();
+    });
+
+    document.getElementById('btn-adm-login').addEventListener('click', async () => {
+      pass = document.getElementById('adm-pass').value;
+      const err = document.getElementById('adm-error');
+      err.textContent = '';
+      try {
+        await loadSettings();
+        document.getElementById('login-card').style.display = 'none';
+        document.getElementById('adm-panel').style.display = 'block';
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    });
+
+    async function loadSettings() {
+      cfg = await api('GET', `/api/snakes/admin/settings?password=${encodeURIComponent(pass)}`);
+      renderEvents();
+      renderInfo();
+    }
+
+    function renderEvents() {
+      const list = document.getElementById('events-list');
+      list.innerHTML = Object.keys(cfg.events).map(key => `
+        <label class="ev-row">
+          <span class="ev-name">
+            ${esc(cfg.labels[key] || key)}
+            <span class="ev-key">${esc(key)}${cfg.defaults[key] ? ' · domyślnie ON' : ' · domyślnie OFF'}</span>
+          </span>
+          <input type="checkbox" data-key="${esc(key)}" ${cfg.events[key] ? 'checked' : ''} />
+        </label>`).join('');
+
+      const note = document.getElementById('webhook-note');
+      note.innerHTML = cfg.webhook_configured
+        ? `Webhook skonfigurowany ✓ · dzienne podsumowanie o <strong>${cfg.summary_hour}:00</strong> (Europe/Warsaw)`
+        : `<span class="adm-warn">⚠️ Brak webhooka — ustaw <code>SNAKES_DISCORD_WEBHOOK_URL</code> (albo <code>DISCORD_WEBHOOK_URL</code>) w .env. Przełączniki zapiszą się, ale nic nie poleci.</span>`;
+    }
+
+    function renderInfo() {
+      const c = cfg.coop;
+      document.getElementById('coop-info').innerHTML =
+        `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong> · pula: ${c.total}/${c.threshold} (${c.percent}%)<br>` +
+        `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}`;
+      document.getElementById('cfg-info').innerHTML =
+        `Plansza: ${cfg.board.cols}×${cfg.board.rows} = ${cfg.board.size} pól<br>` +
+        `Koszty power-upów: ` + Object.entries(cfg.powerup_costs).map(([k, v]) => `${esc(k)} ${v}`).join(' · ');
+    }
+
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      const events = {};
+      document.querySelectorAll('#events-list input[type=checkbox]').forEach(cb => {
+        events[cb.dataset.key] = cb.checked;
+      });
+      try {
+        const res = await api('POST', '/api/snakes/admin/settings', { password: pass, events });
+        cfg.events = res.events;
+        showToast('✅ Ustawienia zapisane');
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-test').addEventListener('click', async () => {
+      try {
+        await api('POST', '/api/snakes/admin/discord-test', { password: pass });
+        showToast('📨 Wysłano testową wiadomość');
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-coop-complete').addEventListener('click', async () => {
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass });
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — wypłacono ${res.reward_pool} pkt`);
+        await loadSettings();
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+  </script>
+</body>
+</html>

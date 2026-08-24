@@ -12,6 +12,7 @@ const POWERUP_META = {
   freeze:      { icon: '❄️', name: 'Freeze',      desc: 'Zatrzymuje wybranego gracza w jego następnej turze.', targeted: true },
   curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 3 losowych wariantów (efekty w przygotowaniu).', targeted: true },
   double_move: { icon: '⏩', name: 'Double Move',  desc: 'Twój następny ruch to dwa rzuty naraz.', targeted: false },
+  shield:      { icon: '🛡️', name: 'Shield',       desc: 'Obrona: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika.', targeted: false },
 };
 
 const TILE_ICON = { ladder: '🪜', snake: '🐍', bonus: '⭐' };
@@ -128,6 +129,7 @@ function renderAll() {
   renderLeaderboard(g);
   renderRollButton(g);
   renderEffectsHint(g);
+  renderCoop(g);
 }
 
 // ── STATY ──
@@ -137,14 +139,22 @@ function renderStats(g) {
   document.getElementById('stat-balance').textContent = g.me.balance;
   document.getElementById('stat-tile').textContent = g.me.tile;
   document.getElementById('stat-laps').textContent = g.me.laps;
+  const shieldEl = document.getElementById('shield-status');
+  if (shieldEl) {
+    shieldEl.innerHTML = g.me.has_shield
+      ? '🛡️ <strong>Tarcza aktywna</strong> — zablokuje najbliższy Freeze/Curse'
+      : '';
+  }
 }
 
-// ── PLANSZA (serpentyna 10×10, pętla) ──
+// ── PLANSZA (serpentyna 7×7, pętla) ──
+// Wymiary bierzemy z serwera (board.cols/rows), więc zmiana rozmiaru planszy
+// po stronie backendu nie wymaga ruszania frontu.
 function renderBoard(g) {
   const area = document.getElementById('board-area');
   const size = g.board.size;
-  const cols = 10;
-  const rows = Math.ceil(size / cols);
+  const cols = g.board.cols || 7;
+  const rows = g.board.rows || Math.ceil(size / cols);
 
   // mapy: pole -> kafel specjalny, pole -> gracze
   const special = {};
@@ -152,7 +162,7 @@ function renderBoard(g) {
   const pawns = {};
   g.players.forEach(p => { (pawns[p.tile] = pawns[p.tile] || []).push(p); });
 
-  let html = `<div class="sl-board" style="--cols:${cols}">`;
+  let cells = '';
   // Wiersze od góry: najwyższy indeks u góry, serpentyna jak w klasycznej planszy.
   for (let rowFromTop = 0; rowFromTop < rows; rowFromTop++) {
     const boardRow = rows - 1 - rowFromTop;
@@ -160,16 +170,71 @@ function renderBoard(g) {
     for (let c = 0; c < cols; c++) {
       const col = leftToRight ? c : (cols - 1 - c);
       const idx = boardRow * cols + col;
-      if (idx >= size) { html += `<div class="sl-cell sl-cell-empty"></div>`; continue; }
-      html += renderCell(idx, special[idx], pawns[idx], g);
+      if (idx >= size) { cells += `<div class="sl-cell sl-cell-empty"></div>`; continue; }
+      cells += renderCell(idx, special[idx], pawns[idx]);
     }
   }
-  html += `</div>`;
-  html += renderLegend();
-  area.innerHTML = html;
+
+  area.innerHTML = `
+    <div class="sl-board-wrap">
+      <div class="sl-board" style="--cols:${cols};--rows:${rows}">${cells}</div>
+      ${renderConnectors(g, cols, rows)}
+    </div>
+    ${renderLegend()}`;
 }
 
-function renderCell(idx, sp, players, g) {
+// Środek pola w procentach szerokości/wysokości planszy (serpentyna jak w renderBoard).
+function tileCenter(idx, cols, rows) {
+  const boardRow = Math.floor(idx / cols);
+  const posInRow = idx % cols;
+  const col = boardRow % 2 === 0 ? posInRow : (cols - 1 - posInRow);
+  const rowFromTop = rows - 1 - boardRow;
+  return {
+    x: ((col + 0.5) / cols) * 100,
+    y: ((rowFromTop + 0.5) / rows) * 100
+  };
+}
+
+// Widoczne połączenia start→koniec dla KAŻDEGO węża i KAŻDEJ drabiny.
+// Drabina: prosta, jasnozielona linia ze szczeblami (dasharray) i grotem u góry.
+// Wąż: czerwona, wygięta krzywa z „głową" (kółkiem) na polu docelowym.
+// Dzięki temu od razu widać, dokąd prowadzi każde pole — bez najeżdżania myszą.
+function renderConnectors(g, cols, rows) {
+  const links = g.board.tiles.filter(t => t.kind === 'ladder' || t.kind === 'snake');
+  if (!links.length) return '';
+
+  const parts = links.map(t => {
+    const a = tileCenter(t.position, cols, rows);
+    const b = tileCenter(t.target, cols, rows);
+    const cls = t.kind === 'ladder' ? 'sl-link-ladder' : 'sl-link-snake';
+    const title = t.kind === 'ladder'
+      ? `Drabina: ${t.position} → ${t.target}`
+      : `Wąż: ${t.position} → ${t.target}`;
+
+    let path;
+    if (t.kind === 'ladder') {
+      path = `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+    } else {
+      // Wygięcie prostopadłe do odcinka — wąż ma się „wić", a nie iść prosto.
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const k = 12; // siła wygięcia
+      path = `M ${a.x} ${a.y} Q ${mx + (-dy / len) * k} ${my + (dx / len) * k} ${b.x} ${b.y}`;
+    }
+    return `
+      <g class="${cls}">
+        <title>${title}</title>
+        <path d="${path}" />
+        <circle class="sl-link-start" cx="${a.x}" cy="${a.y}" r="1.6" />
+        <circle class="sl-link-end" cx="${b.x}" cy="${b.y}" r="2.4" />
+      </g>`;
+  }).join('');
+
+  return `<svg class="sl-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${parts}</svg>`;
+}
+
+function renderCell(idx, sp, players) {
   let cls = 'sl-cell';
   let mark = '';
   if (sp) {
@@ -180,8 +245,11 @@ function renderCell(idx, sp, players, g) {
   }
   const pawnsHtml = (players || []).map(p => {
     const meCls = p.is_me ? ' sl-pawn-me' : '';
+    const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
+    const shieldBadge = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
     const initials = esc(p.nickname.slice(0, 2).toUpperCase());
-    return `<span class="sl-pawn${meCls}" title="${esc(p.nickname)} (okr. ${p.laps})">${initials}</span>`;
+    const tip = `${esc(p.nickname)} (okr. ${p.laps})${p.has_shield ? ' — chroniony tarczą' : ''}`;
+    return `<span class="sl-pawn${meCls}${shieldCls}" title="${tip}">${initials}${shieldBadge}</span>`;
   }).join('');
   return `
     <div class="${cls}">
@@ -194,9 +262,10 @@ function renderCell(idx, sp, players, g) {
 function renderLegend() {
   return `
     <div class="sl-legend">
-      <span>🪜 drabina — w górę</span>
-      <span>🐍 wąż — w dół</span>
+      <span class="sl-legend-ladder">━ 🪜 drabina — w górę</span>
+      <span class="sl-legend-snake">〜 🐍 wąż — w dół</span>
       <span>⭐ bonus — punkty</span>
+      <span>🛡️ gracz z tarczą</span>
       <span class="sl-legend-me">■ Twój pionek</span>
     </div>`;
 }
@@ -327,7 +396,9 @@ async function doUse(type, targetId) {
     state.game = res.state;
     renderAll();
     const meta = POWERUP_META[type];
-    if (type === 'curse') {
+    if (res.blocked) {
+      showToast(`🛡️ Cel miał tarczę — atak zablokowany! Power-up przepadł.`);
+    } else if (type === 'curse') {
       showToast(`💀 Klątwa (wariant ${res.curse_variant}) rzucona!`);
     } else {
       showToast(`${meta.icon} ${meta.name} użyty!`);
@@ -388,6 +459,83 @@ function renderEffectsHint(g) {
     return `${meta.icon} ${meta.name}${from}`;
   }).join(', ');
   el.innerHTML = `⚠️ Czeka Cię w następnej turze: ${txt}`;
+}
+
+// ── WYDARZENIE KOOPERACYJNE ──
+// Wspólna pula widoczna dla wszystkich: pasek postępu, lista kontrybutorów
+// i pole do dorzucenia własnych punktów. Po przekroczeniu progu rusza event bossowy.
+function renderCoop(g) {
+  const c = g.coop;
+  if (!c) return;
+  const el = document.getElementById('coop-panel');
+  if (!el) return;
+
+  const splitLabel = c.reward_split === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu';
+  const chips = c.contributors.length
+    ? `<div class="coop-chips">` + c.contributors.map(x =>
+        `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}">${esc(x.nickname)}<span class="coop-amt mono">${x.amount}</span></span>`
+      ).join('') + `</div>`
+    : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nic nie dorzucił — bądź pierwszy!</span></div>`;
+
+  let action;
+  if (c.status === 'collecting') {
+    action = `
+      <div class="coop-form">
+        <input type="number" id="coop-amount" min="1" step="1" placeholder="ile pkt?" />
+        <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>
+      </div>`;
+  } else if (c.status === 'event_active') {
+    action = `<div class="coop-event">👹 <strong>Boss się obudził!</strong> Wydarzenie trwa — zbiórka zamknięta.</div>`;
+  } else {
+    action = `<div class="coop-event">🏆 Wydarzenie ukończone. Nowa zbiórka wkrótce.</div>`;
+  }
+
+  el.innerHTML = `
+    <div class="coop-head">
+      <span class="coop-title">🤝 WSPÓLNA PULA <span class="coop-cycle text-muted">· edycja #${c.cycle}</span></span>
+      <span class="coop-total mono">${c.total} / ${c.threshold} (${c.percent}%)</span>
+    </div>
+    <div class="coop-bar"><div class="coop-bar-fill" style="width:${c.percent}%"></div></div>
+    <div class="coop-body">
+      <div class="coop-sub text-muted small">
+        Nagrody: <strong>${c.reward_pool} pkt</strong> · podział ${splitLabel} · Twój wkład: <strong>${c.my_contribution}</strong>
+      </div>
+      ${action}
+    </div>
+    ${chips}`;
+}
+
+document.getElementById('coop-panel').addEventListener('click', e => {
+  if (e.target.closest('#btn-coop-give')) contributeCoop();
+});
+document.getElementById('coop-panel').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'coop-amount') contributeCoop();
+});
+
+async function contributeCoop() {
+  if (state.busy) return;
+  const input = document.getElementById('coop-amount');
+  const amount = parseInt(input && input.value, 10);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    showToast('Podaj dodatnią liczbę punktów.');
+    return;
+  }
+  state.busy = true;
+  try {
+    const res = await api('POST', '/api/snakes/coop/contribute', { amount });
+    state.game = res.state;
+    renderAll();
+    if (res.triggered) {
+      showConfetti();
+      showToast('👹 Próg osiągnięty — boss się budzi! Wydarzenie wystartowało.');
+    } else {
+      showToast(`🤝 Dorzucono ${amount} pkt do wspólnej puli.`);
+    }
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    state.busy = false;
+  }
 }
 
 // ── LEADERBOARD ──

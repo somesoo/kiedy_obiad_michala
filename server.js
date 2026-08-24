@@ -1190,7 +1190,7 @@ app.post('/api/admin/discord-test', async (req, res) => {
 // (logowanie tokenem X-Token), ale trzyma swój stan w tabelach `sl_*`.
 //
 // Zasady w skrócie:
-//  • Jedna WSPÓLNA plansza dla wszystkich (100 pól, indeks 0..99), zapętlona —
+//  • Jedna WSPÓLNA plansza dla wszystkich (49 pól = 7×7, indeks 0..48), zapętlona —
 //    po ostatnim polu wraca się na start i liczy kolejne okrążenie (brak „mety").
 //  • Każdy gracz ma DOKŁADNIE JEDEN ruch dziennie (blokada jak w Wordle: unikalny
 //    wpis (player_id, move_date) w `sl_moves`; doba wg strefy Europe/Warsaw).
@@ -1198,17 +1198,33 @@ app.post('/api/admin/discord-test', async (req, res) => {
 //  • Punkty = wartość rzutu + pola bonusowe + postęp po planszy (przebyty dystans
 //    i ukończone okrążenia). Punkty się kumulują (leaderboard) i są walutą sklepu.
 //  • Power-upy kupowane za punkty (NIE losowe dropy): Freeze, Curse (3 warianty),
-//    Double Move. Freeze/Curse wymagają wskazania celu.
+//    Double Move oraz Shield (obrona — blokuje najbliższy Freeze/Curse).
+//  • Wydarzenie kooperacyjne: gracze dorzucają punkty do wspólnej puli; po przekroczeniu
+//    progu rusza event „bossowy", a po jego ukończeniu kontrybutorzy dostają nagrody.
 
-const SL_BOARD_SIZE = 100;             // pól na planszy (indeks 0..99), potem pętla
+const SL_BOARD_COLS = 7;                     // szerokość planszy w polach
+const SL_BOARD_ROWS = 7;                     // wysokość planszy w polach
+const SL_BOARD_SIZE = SL_BOARD_COLS * SL_BOARD_ROWS;  // 49 pól (indeks 0..48), potem pętla
 const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
 const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
 const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
 
-// Koszty power-upów (w punktach). Domyślne, rozsądne wartości — łatwo zmienić.
-const SL_POWERUP_COSTS = { freeze: 30, curse: 50, double_move: 40 };
+// Koszty power-upów (w punktach). Shield jest droższy od Freeze/Curse — to kontra
+// na cudzy atak, więc ma kosztować więcej niż sam atak, ale zostaje w zasięgu
+// kilku dni zbierania (dzienny ruch to ~10–30 pkt).
+const SL_POWERUP_COSTS = { freeze: 30, curse: 50, double_move: 40, shield: 70 };
 const SL_POWERUP_TYPES = Object.keys(SL_POWERUP_COSTS);
 const SL_CURSE_VARIANTS = 3;           // liczba losowych wariantów klątwy (efekty TBD)
+// Typy ataków, które Shield potrafi zablokować (zużywa się przy pierwszym z nich).
+const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
+
+// ── WYDARZENIE KOOPERACYJNE (co-op) ──
+const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 300;
+// Pula nagród = próg × mnożnik. >1 oznacza, że wspólny wysiłek zwraca się z nawiązką.
+const SL_COOP_REWARD_MULTIPLIER = Number(process.env.SNAKES_COOP_REWARD_MULTIPLIER || 1.5);
+// 'proportional' = proporcjonalnie do wkładu (domyślnie — kto dołożył więcej, dostaje więcej),
+// 'flat' = po równo między wszystkich kontrybutorów.
+const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportional').toLowerCase();
 
 // ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
 db.exec(`
@@ -1248,52 +1264,126 @@ db.exec(`
   -- Ekwipunek power-upów (ile sztuk danego typu ma gracz).
   CREATE TABLE IF NOT EXISTS sl_inventory (
     player_id INTEGER REFERENCES players(id),
-    type      TEXT NOT NULL,            -- 'freeze' | 'curse' | 'double_move'
+    type      TEXT NOT NULL,            -- 'freeze' | 'curse' | 'double_move' | 'shield'
     qty       INTEGER DEFAULT 0,
     PRIMARY KEY (player_id, type)
   );
 
   -- Aktywne efekty power-upów oczekujące na „następną turę" celu.
+  -- Shield leży tu jako 'pending' aż do momentu, w którym zablokuje cudzy atak.
   CREATE TABLE IF NOT EXISTS sl_effects (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     target_player_id INTEGER REFERENCES players(id),
     source_player_id INTEGER REFERENCES players(id),
-    type             TEXT NOT NULL,     -- 'freeze' | 'curse' | 'double_move'
+    type             TEXT NOT NULL,     -- 'freeze' | 'curse' | 'double_move' | 'shield'
     variant          INTEGER,           -- dla 'curse': 1..3 (który wariant); inaczej NULL
-    status           TEXT DEFAULT 'pending',  -- 'pending' | 'consumed'
+    status           TEXT DEFAULT 'pending',  -- 'pending' | 'consumed' | 'blocked'
     created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     consumed_at      DATETIME
   );
+
+  -- Klucz-wartość na ustawienia trybu (rozmiar planszy do migracji, przełączniki Discorda…)
+  CREATE TABLE IF NOT EXISTS sl_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
+
+  -- Wydarzenie kooperacyjne: jedna aktywna „edycja" (cykl) zbiórki naraz.
+  CREATE TABLE IF NOT EXISTS sl_coop (
+    cycle        INTEGER PRIMARY KEY,
+    threshold    INTEGER NOT NULL,
+    total        INTEGER DEFAULT 0,
+    status       TEXT DEFAULT 'collecting', -- 'collecting' | 'event_active' | 'completed'
+    reward_pool  INTEGER DEFAULT 0,
+    started_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    triggered_at DATETIME,
+    completed_at DATETIME
+  );
+
+  -- Wkłady graczy do puli (per cykl) — na ich podstawie liczymy nagrody.
+  CREATE TABLE IF NOT EXISTS sl_coop_contributions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle      INTEGER NOT NULL,
+    player_id  INTEGER REFERENCES players(id),
+    amount     INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
-// ── SEED PLANSZY ──
-// Wspólna, deterministyczna plansza (indeks 0..99). Drabiny w górę, węże w dół,
-// pola bonusowe dają punkty bez ruchu. Zaszczepiana raz; admin może ją wyczyścić
-// i przeseedować przez endpoint, jeśli zajdzie potrzeba.
+// ── META (klucz-wartość) ──
+function slMetaGet(key) {
+  const row = db.prepare('SELECT value FROM sl_meta WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+function slMetaSet(key, value) {
+  db.prepare(`
+    INSERT INTO sl_meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(key, String(value));
+}
+
+// ── UKŁAD PLANSZY 7×7 ──
+// Drabiny ciągną w górę, węże w dół, pola bonusowe dają punkty bez przesunięcia.
+// Rozkład dobrany pod 49 pól: 5 drabin / 5 węży / 5 bonusów (~31% pól to pola specjalne),
+// z lekką przewagą drabin nad wężami, żeby pętla realnie posuwała się do przodu.
+// Żaden cel skoku nie ląduje na innym polu specjalnym (brak reakcji łańcuchowych).
 const SL_LADDERS = [               // [from, to] — to > from
-  [2, 21], [7, 29], [16, 41], [27, 48], [35, 56],
-  [50, 71], [61, 80], [70, 89], [78, 97]
+  [3, 17], [8, 24], [14, 31], [21, 39], [28, 44]
 ];
 const SL_SNAKES = [                // [from, to] — to < from
-  [24, 3], [33, 11], [46, 25], [54, 37], [64, 47],
-  [73, 52], [87, 66], [94, 74], [98, 77]
+  [12, 2], [19, 7], [27, 13], [36, 20], [45, 29]
 ];
 const SL_BONUSES = [               // [position, points]
-  [9, 15], [19, 20], [39, 25], [59, 30], [84, 40]
+  [5, 15], [11, 20], [23, 25], [34, 30], [41, 35]
 ];
 
-function seedSnakesBoard() {
-  const count = db.prepare('SELECT COUNT(*) AS c FROM sl_board').get().c;
-  if (count > 0) return;
+function slSeedBoardRows() {
   const insert = db.prepare('INSERT INTO sl_board (position, kind, target, value) VALUES (?, ?, ?, ?)');
-  transaction(() => {
-    for (const [from, to] of SL_LADDERS) insert.run(from, 'ladder', to, 0);
-    for (const [from, to] of SL_SNAKES) insert.run(from, 'snake', to, 0);
-    for (const [pos, val] of SL_BONUSES) insert.run(pos, 'bonus', null, val);
-  });
-  console.log(`Snakes & Ladders: plansza zaseedowana (${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów)`);
+  for (const [from, to] of SL_LADDERS) insert.run(from, 'ladder', to, 0);
+  for (const [from, to] of SL_SNAKES) insert.run(from, 'snake', to, 0);
+  for (const [pos, val] of SL_BONUSES) insert.run(pos, 'bonus', null, val);
 }
-seedSnakesBoard();
+
+// ── MIGRACJA ROZMIARU PLANSZY ──
+// Plansza schudła ze 100 do 49 pól. Pozycji graczy NIE zerujemy — skalujemy je
+// proporcjonalnie (abs_pos × nowy/stary), więc każdy zostaje mniej więcej tam, gdzie był
+// (ten sam procent okrążenia), a punkty, salda i ekwipunek zostają nietknięte.
+// Migracja jest idempotentna: znacznik `board_size` w sl_meta pilnuje, by poszła raz.
+function slMigrateBoard() {
+  const rows = db.prepare('SELECT COUNT(*) AS c, MAX(position) AS m FROM sl_board').get();
+  const stored = slMetaGet('board_size');
+
+  // Świeża instalacja — po prostu zaszczep planszę.
+  if (Number(rows.c) === 0) {
+    transaction(() => slSeedBoardRows());
+    slMetaSet('board_size', SL_BOARD_SIZE);
+    console.log(`Snakes & Ladders: plansza zaseedowana ${SL_BOARD_COLS}×${SL_BOARD_ROWS} (${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów)`);
+    return;
+  }
+
+  // Stary rozmiar: z metadanych, a gdy ich nie ma (baza sprzed tej wersji) — z układu pól.
+  const oldSize = stored ? Number(stored) : (Number(rows.m) >= SL_BOARD_SIZE ? 100 : SL_BOARD_SIZE);
+  if (oldSize === SL_BOARD_SIZE) {
+    slMetaSet('board_size', SL_BOARD_SIZE);
+    return;
+  }
+
+  const scaled = transaction(() => {
+    let n = 0;
+    for (const st of db.prepare('SELECT player_id, abs_pos FROM sl_state').all()) {
+      const newAbs = Math.round(Number(st.abs_pos) * SL_BOARD_SIZE / oldSize);
+      db.prepare('UPDATE sl_state SET abs_pos = ?, laps = ? WHERE player_id = ?')
+        .run(newAbs, Math.floor(newAbs / SL_BOARD_SIZE), st.player_id);
+      n++;
+    }
+    db.exec('DELETE FROM sl_board');
+    slSeedBoardRows();
+    return n;
+  });
+  slMetaSet('board_size', SL_BOARD_SIZE);
+  console.log(`Snakes & Ladders: MIGRACJA planszy ${oldSize} → ${SL_BOARD_SIZE} pól, przeskalowano pozycje ${scaled} graczy (punkty i ekwipunek bez zmian)`);
+}
+slMigrateBoard();
 
 function slBoardMap() {
   const map = {};
@@ -1315,8 +1405,9 @@ function slEnsureState(playerId) {
 
 function slInventory(playerId) {
   const rows = db.prepare('SELECT type, qty FROM sl_inventory WHERE player_id = ?').all(playerId);
-  const inv = { freeze: 0, curse: 0, double_move: 0 };
-  for (const r of rows) inv[r.type] = Number(r.qty);
+  const inv = {};
+  for (const t of SL_POWERUP_TYPES) inv[t] = 0;
+  for (const r of rows) if (r.type in inv) inv[r.type] = Number(r.qty);
   return inv;
 }
 
@@ -1334,6 +1425,20 @@ function d6() {
 // Pola na planszy = abs_pos zwinięty do 0..SL_BOARD_SIZE-1
 function slTileOf(absPos) {
   return ((absPos % SL_BOARD_SIZE) + SL_BOARD_SIZE) % SL_BOARD_SIZE;
+}
+
+// ── SHIELD ──
+// Aktywna tarcza = wpis 'shield' w sl_effects ze statusem 'pending'. Zużywa się
+// w momencie, w którym ktoś rzuca na gracza Freeze albo Curse: atak nie dochodzi
+// do skutku (zapisujemy go jako 'blocked'), a tarcza znika.
+function slActiveShield(playerId) {
+  return db.prepare(
+    `SELECT * FROM sl_effects WHERE target_player_id = ? AND type = 'shield' AND status = 'pending' ORDER BY id LIMIT 1`
+  ).get(playerId) || null;
+}
+
+function slHasShield(playerId) {
+  return !!slActiveShield(playerId);
 }
 
 // ── STUB KLĄTWY ──
@@ -1389,7 +1494,7 @@ function slStepMove(absBefore, roll, board) {
 // Buduje publiczny opis planszy (do rysowania w UI).
 function slBoardPayload() {
   const tiles = db.prepare('SELECT position, kind, target, value FROM sl_board ORDER BY position').all();
-  return { size: SL_BOARD_SIZE, tiles };
+  return { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS, tiles };
 }
 
 // Pozycje wszystkich graczy na wspólnej planszy (widoczne dla każdego).
@@ -1400,6 +1505,10 @@ function slPlayersPayload(meId) {
     ORDER BY s.total_points DESC, s.abs_pos DESC
   `).all();
   const today = todayWaw();
+  // Jedno zapytanie na wszystkie tarcze zamiast N zapytań w pętli.
+  const shielded = new Set(db.prepare(
+    `SELECT DISTINCT target_player_id AS id FROM sl_effects WHERE type = 'shield' AND status = 'pending'`
+  ).all().map(r => r.id));
   return rows.map(r => ({
     player_id: r.player_id,
     nickname: r.nickname,
@@ -1408,6 +1517,7 @@ function slPlayersPayload(meId) {
     laps: Number(r.laps),
     total_points: Number(r.total_points),
     moved_today: r.last_move_date === today,
+    has_shield: shielded.has(r.player_id),
     is_me: meId ? r.player_id === meId : false
   }));
 }
@@ -1443,6 +1553,222 @@ function slLeaderboard(meId) {
   }));
 }
 
+// ══ WYDARZENIE KOOPERACYJNE ══
+// Gracze dobrowolnie dorzucają punkty ze swojego salda do WSPÓLNEJ puli. Pula jest
+// osobnym workiem — nie miesza się z saldem na power-upy i nie da się jej wypłacić.
+// Po przekroczeniu progu rusza event „bossowy" (mechanika = stub do uzupełnienia),
+// a po jego zakończeniu kontrybutorzy dostają nagrody wg wybranego podziału.
+
+function slCurrentCoop() {
+  let coop = db.prepare(`SELECT * FROM sl_coop WHERE status != 'completed' ORDER BY cycle DESC LIMIT 1`).get();
+  if (!coop) {
+    const last = db.prepare('SELECT MAX(cycle) AS m FROM sl_coop').get().m;
+    const cycle = (Number(last) || 0) + 1;
+    db.prepare('INSERT INTO sl_coop (cycle, threshold) VALUES (?, ?)').run(cycle, SL_COOP_THRESHOLD);
+    coop = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
+  }
+  return coop;
+}
+
+function slCoopContributors(cycle) {
+  return db.prepare(`
+    SELECT c.player_id, p.nickname, SUM(c.amount) AS amount
+    FROM sl_coop_contributions c JOIN players p ON p.id = c.player_id
+    WHERE c.cycle = ?
+    GROUP BY c.player_id
+    ORDER BY amount DESC
+  `).all(cycle).map(r => ({
+    player_id: r.player_id,
+    nickname: r.nickname,
+    amount: Number(r.amount)
+  }));
+}
+
+function slCoopPayload(meId) {
+  const coop = slCurrentCoop();
+  const contributors = slCoopContributors(coop.cycle);
+  const mine = meId ? (contributors.find(c => c.player_id === meId) || { amount: 0 }).amount : 0;
+  const total = Number(coop.total);
+  const threshold = Number(coop.threshold);
+  return {
+    cycle: Number(coop.cycle),
+    total,
+    threshold,
+    percent: Math.min(100, Math.round((total / Math.max(1, threshold)) * 100)),
+    status: coop.status,
+    reward_pool: Number(coop.reward_pool) || Math.round(threshold * SL_COOP_REWARD_MULTIPLIER),
+    reward_split: SL_COOP_REWARD_SPLIT,
+    my_contribution: mine,
+    contributors
+  };
+}
+
+// ── STUB EVENTU BOSSOWEGO ──
+// Wołane, gdy pula przekroczy próg. Tu ma wylądować właściwa mechanika wydarzenia
+// (HP bossa, tury, obrażenia od rzutów graczy, faza itd.).
+function startCoopBossEvent(coop) {
+  // TODO(boss #1): zainicjuj bossa dla cyklu `coop.cycle` — np. HP = f(threshold),
+  // tabela sl_coop_boss, faza, czas trwania. Na razie event tylko zmienia status.
+  return { started: true, cycle: Number(coop.cycle) };
+}
+
+// Wołane przy zamykaniu eventu (na razie ręcznie przez admina — patrz endpoint niżej).
+// Docelowo powinno sprawdzać warunek zwycięstwa bossa.
+function resolveCoopBossEvent(coop) {
+  // TODO(boss #2): sprawdź warunek zwycięstwa (HP bossa <= 0 / limit czasu) i zwróć wynik.
+  // Placeholder: event zawsze uznajemy za wygrany, żeby dało się przetestować wypłatę nagród.
+  return { defeated: true, cycle: Number(coop.cycle) };
+}
+
+// Podział nagród: 'proportional' (domyślnie) — wg udziału w puli; 'flat' — po równo.
+// Zwraca listę { player_id, nickname, amount } (bez zapisu do bazy).
+function slCoopRewardSplit(contributors, rewardPool) {
+  if (!contributors.length) return [];
+  if (SL_COOP_REWARD_SPLIT === 'flat') {
+    const each = Math.floor(rewardPool / contributors.length);
+    return contributors.map(c => ({ ...c, reward: each }));
+  }
+  const total = contributors.reduce((a, c) => a + c.amount, 0) || 1;
+  return contributors.map(c => ({ ...c, reward: Math.round(rewardPool * (c.amount / total)) }));
+}
+
+// ══ DISCORD — SZYNA ZDARZEŃ ══
+// Zdarzenia gry lecą przez jedną szynę: każdy typ ma własny przełącznik, trzymany
+// w sl_meta (klucz 'discord_events'), więc da się je włączać/wyłączać z panelu admina
+// bez restartu. Webhook bierzemy z SNAKES_DISCORD_WEBHOOK_URL, a gdy go nie ma —
+// z DISCORD_WEBHOOK_URL (ten sam, co Wordle). Wysyłka jest „fire & forget":
+// błąd Discorda nigdy nie wywraca ruchu gracza.
+const SL_DISCORD_WEBHOOK_URL = process.env.SNAKES_DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL || '';
+const SNAKES_URL = (process.env.APP_URL || 'https://frog03-21535.wykr.es/').replace(/\/+$/, '') + '/snakes';
+
+// Domyślnie ON to rzeczy „warte pingu": ataki, tarcze, węże/drabiny, kamienie milowe
+// co-opu i dzienne podsumowanie. Codzienny wynik każdego rzutu i Double Move są
+// domyślnie OFF, żeby nie zasypywać kanału.
+const SL_EVENT_DEFAULTS = {
+  roll_result:       false,
+  tile_landing:      true,
+  powerup_freeze:    true,
+  powerup_curse:     true,
+  shield_block:      true,
+  double_move:       false,
+  coop_milestone:    true,
+  coop_completed:    true,
+  leaderboard_daily: true
+};
+
+const SL_EVENT_LABELS = {
+  roll_result:       'Wynik dziennego rzutu',
+  tile_landing:      'Wejście na węża / drabinę',
+  powerup_freeze:    'Użycie Freeze (kto na kogo)',
+  powerup_curse:     'Użycie Curse (kto na kogo)',
+  shield_block:      'Shield zablokował atak',
+  double_move:       'Użycie Double Move',
+  coop_milestone:    'Pula co-op przekroczyła próg',
+  coop_completed:    'Wydarzenie co-op ukończone',
+  leaderboard_daily: 'Dzienne podsumowanie rankingu'
+};
+
+function slEventsConfig() {
+  let stored = {};
+  try {
+    stored = JSON.parse(slMetaGet('discord_events') || '{}');
+  } catch {
+    stored = {};
+  }
+  const cfg = {};
+  for (const key of Object.keys(SL_EVENT_DEFAULTS)) {
+    cfg[key] = typeof stored[key] === 'boolean' ? stored[key] : SL_EVENT_DEFAULTS[key];
+  }
+  return cfg;
+}
+
+function slSetEventsConfig(patch) {
+  const cfg = slEventsConfig();
+  for (const [key, val] of Object.entries(patch || {})) {
+    if (key in SL_EVENT_DEFAULTS) cfg[key] = !!val;
+  }
+  slMetaSet('discord_events', JSON.stringify(cfg));
+  return cfg;
+}
+
+function slEventEnabled(type) {
+  return slEventsConfig()[type] === true;
+}
+
+async function slPostDiscord(payload) {
+  if (!SL_DISCORD_WEBHOOK_URL) return { skipped: 'brak webhooka' };
+  const r = await fetch(SL_DISCORD_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) throw new Error(`Discord ${r.status}: ${await r.text()}`);
+  return { sent: true };
+}
+
+// Główny punkt wejścia szyny. `build` to funkcja zwracająca treść (leniwie — nie
+// budujemy wiadomości, gdy zdarzenie jest wyłączone). Nigdy nie rzuca wyjątkiem.
+function slEmit(type, build) {
+  try {
+    if (!SL_DISCORD_WEBHOOK_URL) return;
+    if (!slEventEnabled(type)) return;
+    const content = build();
+    if (!content) return;
+    slPostDiscord(typeof content === 'string' ? { content } : content)
+      .catch(err => console.error(`Snakes/Discord [${type}]:`, err.message));
+  } catch (err) {
+    console.error(`Snakes/Discord [${type}] — błąd budowania wiadomości:`, err.message);
+  }
+}
+
+// ── DZIENNE PODSUMOWANIE RANKINGU ──
+// Tykamy co minutę (jak scheduler Wordle) i raz dziennie, o SNAKES_SUMMARY_HOUR,
+// wrzucamy skrót: podium, ilu graczy ruszyło się dziś, stan puli co-op.
+const SL_SUMMARY_HOUR = parseInt(process.env.SNAKES_SUMMARY_HOUR, 10) || 20;
+let slLastSummaryDate = null;
+
+function slBuildDailySummary() {
+  const today = todayWaw();
+  const top = slLeaderboard(null).slice(0, 5);
+  if (!top.length) return null;
+  const movedToday = Number(db.prepare(
+    'SELECT COUNT(*) AS c FROM sl_moves WHERE move_date = ?'
+  ).get(today).c);
+  const coop = slCoopPayload(null);
+  const medals = ['🥇', '🥈', '🥉', '4.', '5.'];
+  const lines = top.map((p, i) => `${medals[i]} **${p.nickname}** — ${p.total_points} pkt (okr. ${p.laps}, pole ${p.tile})`);
+  return {
+    content: '🐍 **Office Snakes & Ladders — podsumowanie dnia**',
+    embeds: [{
+      title: 'Ranking',
+      url: SNAKES_URL,
+      description: `${lines.join('\n')}\n\n🎲 Ruch dziś wykonało: **${movedToday}** ${movedToday === 1 ? 'osoba' : 'osób'}\n🤝 Pula co-op: **${coop.total}/${coop.threshold}** (${coop.percent}%)`,
+      color: 0xC8F135,
+      footer: { text: 'Jeden ruch dziennie — nie zapomnij rzucić kostką!' }
+    }]
+  };
+}
+
+function startSnakesDiscordScheduler() {
+  if (!SL_DISCORD_WEBHOOK_URL) {
+    console.log('Snakes/Discord: brak webhooka (SNAKES_DISCORD_WEBHOOK_URL / DISCORD_WEBHOOK_URL) — zdarzenia wyłączone');
+    return;
+  }
+  // Start po godzinie podsumowania = dzisiejsze uznajemy za wysłane (bez spamu po restarcie).
+  if (Number(warsawParts().h) >= SL_SUMMARY_HOUR) slLastSummaryDate = todayWaw();
+
+  setInterval(() => {
+    const today = todayWaw();
+    if (today === slLastSummaryDate) return;
+    if (Number(warsawParts().h) < SL_SUMMARY_HOUR) return;
+    slLastSummaryDate = today; // ustawiamy przed wysyłką — błąd sieci nie ma wracać co minutę
+    slEmit('leaderboard_daily', slBuildDailySummary);
+  }, 60_000);
+
+  console.log(`Snakes/Discord: szyna zdarzeń aktywna, podsumowanie dnia o ${String(SL_SUMMARY_HOUR).padStart(2, '0')}:00 (Europe/Warsaw)`);
+}
+startSnakesDiscordScheduler();
+
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
 function slBuildState(playerId) {
   const st = slEnsureState(playerId);
@@ -1459,12 +1785,14 @@ function slBuildState(playerId) {
       balance: Number(st.balance),
       total_points: Number(st.total_points),
       moved_today: movedToday,
-      can_roll: !movedToday
+      can_roll: !movedToday,
+      has_shield: slHasShield(playerId)
     },
     inventory: slInventory(playerId),
     pending_effects: slPendingEffects(playerId),
     leaderboard: slLeaderboard(playerId),
     shop: SL_POWERUP_TYPES.map(type => ({ type, cost: SL_POWERUP_COSTS[type] })),
+    coop: slCoopPayload(playerId),
     server_date: today
   };
 }
@@ -1478,12 +1806,18 @@ app.get('/api/snakes/state', authPlayer, (req, res) => {
 
 // GET /api/snakes/board — publiczny widok planszy + pozycji (bez logowania)
 app.get('/api/snakes/board', (req, res) => {
-  res.json({ board: slBoardPayload(), players: slPlayersPayload(null), leaderboard: slLeaderboard(null) });
+  res.json({
+    board: slBoardPayload(),
+    players: slPlayersPayload(null),
+    leaderboard: slLeaderboard(null),
+    coop: slCoopPayload(null)
+  });
 });
 
 // POST /api/snakes/roll — jedyny dzienny ruch gracza (rzut kostką).
 app.post('/api/snakes/roll', authPlayer, (req, res) => {
   const playerId = req.player.id;
+  const nickname = req.player.nickname;
   const today = todayWaw();
   const board = slBoardMap();
 
@@ -1491,7 +1825,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const st = slEnsureState(playerId);
     if (st.last_move_date === today) return { locked: true };
 
-    // Zbierz oczekujące efekty na tym graczu.
+    // Zbierz oczekujące efekty na tym graczu (tarcza nie jest efektem na turę — pomijamy).
     const pending = db.prepare(
       `SELECT * FROM sl_effects WHERE target_player_id = ? AND status = 'pending' ORDER BY id`
     ).all(playerId);
@@ -1518,7 +1852,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const rolls = doubleMove ? [d6(), d6()] : [d6()];
     if (doubleMove) consume(doubleMove.id);
 
-    // Sekwencyjnie wykonaj kroki (każdy rzut oddzielnie, by wężE/drabiny/bonusy
+    // Sekwencyjnie wykonaj kroki (każdy rzut oddzielnie, by węże/drabiny/bonusy
     // z każdego lądowania zadziałały poprawnie także przy podwójnym ruchu).
     let abs = Number(st.abs_pos);
     const from_abs = abs;
@@ -1586,6 +1920,25 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     return res.status(400).json({ error: 'Dziś już wykonałeś ruch — wróć jutro (doba wg czasu Warszawy).' });
   }
 
+  // ── ZDARZENIA DISCORD ──
+  if (result.frozen) {
+    slEmit('roll_result', () => `❄️ **${nickname}** próbował rzucić, ale jest zamrożony — tura przepada.`);
+  } else {
+    slEmit('roll_result', () => {
+      const dice = result.rolls.join(' + ');
+      return `🎲 **${nickname}** wyrzucił **${dice}** → pole **${result.to_tile}** (+${result.earned} pkt).`;
+    });
+    if (result.notes.includes('ladder')) {
+      slEmit('tile_landing', () => `🪜 **${nickname}** wszedł na drabinę i wskoczył na pole **${result.to_tile}**!`);
+    }
+    if (result.notes.includes('snake')) {
+      slEmit('tile_landing', () => `🐍 **${nickname}** wdepnął na węża i zjechał na pole **${result.to_tile}**.`);
+    }
+    if (result.double_move) {
+      slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dwa rzuty (${result.rolls.join(' + ')}) i pole **${result.to_tile}**.`);
+    }
+  }
+
   res.json({ move: result, state: slBuildState(playerId) });
 });
 
@@ -1613,15 +1966,19 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
 });
 
 // POST /api/snakes/shop/use { type, target_player_id? } — użyj power-up z ekwipunku.
-// Freeze/Curse wymagają celu (innego gracza). Double Move działa na siebie.
+// Freeze/Curse wymagają celu (innego gracza). Double Move i Shield działają na siebie.
+// Jeśli cel ma aktywny Shield, atak zostaje ZABLOKOWANY: tarcza znika, atak nie działa
+// (power-up atakującego i tak się zużywa — ryzyko wpisane w atak).
 app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   const playerId = req.player.id;
+  const nickname = req.player.nickname;
   const type = String(req.body.type || '');
   if (!SL_POWERUP_TYPES.includes(type)) {
     return res.status(400).json({ error: 'Nieznany power-up' });
   }
-  const needsTarget = (type === 'freeze' || type === 'curse');
+  const needsTarget = SL_SHIELD_BLOCKS.includes(type); // freeze / curse
   let targetId = playerId;
+  let targetNick = nickname;
 
   if (needsTarget) {
     targetId = parseInt(req.body.target_player_id, 10);
@@ -1631,15 +1988,34 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     if (targetId === playerId) {
       return res.status(400).json({ error: 'Freeze i Curse rzucasz na INNEGO gracza.' });
     }
-    const target = db.prepare('SELECT id FROM players WHERE id = ?').get(targetId);
+    const target = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(targetId);
     if (!target) return res.status(404).json({ error: 'Nie ma takiego gracza.' });
+    targetNick = target.nickname;
     slEnsureState(targetId); // upewnij się, że cel ma stan gry
   }
 
   const out = transaction(() => {
     const inv = slInventory(playerId);
     if (inv[type] <= 0) return { none: true };
+
+    // Shield można trzymać tylko jeden naraz — drugi byłby wyrzuceniem punktów.
+    if (type === 'shield' && slHasShield(playerId)) return { already: true };
+
     slAddPowerup(playerId, type, -1);
+
+    // TARCZA CELU: przechwytuje Freeze/Curse zanim staną się efektem na turę.
+    if (needsTarget) {
+      const shield = slActiveShield(targetId);
+      if (shield) {
+        db.prepare(`UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(shield.id);
+        db.prepare(`
+          INSERT INTO sl_effects (target_player_id, source_player_id, type, variant, status, consumed_at)
+          VALUES (?, ?, ?, ?, 'blocked', CURRENT_TIMESTAMP)
+        `).run(targetId, playerId, type, null);
+        return { none: false, blocked: true };
+      }
+    }
 
     // Curse: losujemy wariant (1..SL_CURSE_VARIANTS) w momencie użycia — efekt to stub.
     const variant = type === 'curse' ? (1 + Math.floor(Math.random() * SL_CURSE_VARIANTS)) : null;
@@ -1649,15 +2025,32 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
       VALUES (?, ?, ?, ?)
     `).run(targetId, playerId, type, variant);
 
-    return { none: false, variant };
+    return { none: false, blocked: false, variant };
   });
 
   if (out.none) {
     return res.status(400).json({ error: 'Nie masz tego power-upa w ekwipunku.' });
   }
+  if (out.already) {
+    return res.status(400).json({ error: 'Masz już aktywną tarczę — poczekaj, aż coś zablokuje.' });
+  }
+
+  // ── ZDARZENIA DISCORD ──
+  if (out.blocked) {
+    slEmit('shield_block', () =>
+      `🛡️ **${targetNick}** zablokował tarczą ${type === 'freeze' ? 'Freeze' : 'Curse'} od **${nickname}**! Tarcza zużyta.`);
+  } else if (type === 'freeze') {
+    slEmit('powerup_freeze', () => `❄️ **${nickname}** zamroził **${targetNick}** — następna tura celu przepada.`);
+  } else if (type === 'curse') {
+    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę (wariant ${out.variant}) na **${targetNick}**.`);
+  } else if (type === 'shield') {
+    slEmit('shield_block', () => `🛡️ **${nickname}** aktywował tarczę — najbliższy Freeze/Curse się od niego odbije.`);
+  }
+
   res.json({
     success: true,
     applied_to: targetId,
+    blocked: !!out.blocked,
     curse_variant: out.variant, // dla klątwy: który wariant został wylosowany (efekt TBD)
     state: slBuildState(playerId)
   });
@@ -1668,9 +2061,158 @@ app.get('/api/snakes/players', authPlayer, (req, res) => {
   res.json({ players: slPlayersPayload(req.player.id) });
 });
 
+// POST /api/snakes/coop/contribute { amount } — dorzuć punkty do wspólnej puli.
+app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const nickname = req.player.nickname;
+  const amount = parseInt(req.body.amount, 10);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Podaj dodatnią liczbę punktów.' });
+  }
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.balance < amount) return { poor: true, balance: st.balance };
+
+    const coop = slCurrentCoop();
+    if (coop.status !== 'collecting') return { closed: true, status: coop.status };
+
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(amount, playerId);
+    db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
+      .run(coop.cycle, playerId, amount);
+    db.prepare('UPDATE sl_coop SET total = total + ? WHERE cycle = ?').run(amount, coop.cycle);
+
+    const updated = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
+    let triggered = false;
+    // Próg przekroczony → rusza event bossowy (mechanika = stub).
+    if (Number(updated.total) >= Number(updated.threshold)) {
+      const rewardPool = Math.round(Number(updated.threshold) * SL_COOP_REWARD_MULTIPLIER);
+      db.prepare(`
+        UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
+        WHERE cycle = ?
+      `).run(rewardPool, updated.cycle);
+      startCoopBossEvent(updated);
+      triggered = true;
+    }
+    return { poor: false, triggered, cycle: Number(updated.cycle), total: Number(updated.total), threshold: Number(updated.threshold) };
+  });
+
+  if (out.poor) {
+    return res.status(400).json({ error: `Za mało punktów — masz ${out.balance}.` });
+  }
+  if (out.closed) {
+    return res.status(400).json({ error: 'Zbiórka zamknięta — trwa wydarzenie. Poczekaj na kolejną edycję.' });
+  }
+
+  if (out.triggered) {
+    slEmit('coop_milestone', () => ({
+      content: '🤝 **Pula co-op osiągnęła próg!**',
+      embeds: [{
+        title: `Wydarzenie #${out.cycle} rusza!`,
+        url: SNAKES_URL,
+        description: `Wspólnie uzbieraliście **${out.total}/${out.threshold}** pkt. Ostatnią cegiełkę dorzucił **${nickname}**.\nBoss się budzi… 👹`,
+        color: 0xF5C842
+      }]
+    }));
+  }
+
+  res.json({ success: true, triggered: !!out.triggered, state: slBuildState(playerId) });
+});
+
+// ── ENDPOINTY ADMINA (Snakes) ──
+
+// GET /api/snakes/admin/settings?password= — konfiguracja zdarzeń + stan co-opu
+app.get('/api/snakes/admin/settings', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  res.json({
+    events: slEventsConfig(),
+    labels: SL_EVENT_LABELS,
+    defaults: SL_EVENT_DEFAULTS,
+    webhook_configured: !!SL_DISCORD_WEBHOOK_URL,
+    summary_hour: SL_SUMMARY_HOUR,
+    board: { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS },
+    powerup_costs: SL_POWERUP_COSTS,
+    coop: { ...slCoopPayload(null), reward_multiplier: SL_COOP_REWARD_MULTIPLIER }
+  });
+});
+
+// POST /api/snakes/admin/settings { password, events: { typ: bool } } — przełącz zdarzenia
+app.post('/api/snakes/admin/settings', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const events = slSetEventsConfig(req.body.events);
+  res.json({ success: true, events });
+});
+
+// POST /api/snakes/admin/discord-test { password } — testowy strzał w webhooka
+app.post('/api/snakes/admin/discord-test', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  if (!SL_DISCORD_WEBHOOK_URL) {
+    return res.status(400).json({ error: 'Brak webhooka — ustaw SNAKES_DISCORD_WEBHOOK_URL lub DISCORD_WEBHOOK_URL w .env' });
+  }
+  try {
+    await slPostDiscord({ content: '🐍 Test webhooka Office Snakes & Ladders — działa!' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/snakes/admin/coop/complete { password } — zamknij wydarzenie i wypłać nagrody.
+// Docelowo domknie je sama mechanika bossa; na razie robi to admin (patrz stuby wyżej).
+app.post('/api/snakes/admin/coop/complete', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
+
+    const outcome = resolveCoopBossEvent(coop);
+    if (!outcome.defeated) return { notDefeated: true };
+
+    const contributors = slCoopContributors(coop.cycle);
+    const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
+    const payouts = slCoopRewardSplit(contributors, rewardPool);
+
+    for (const p of payouts) {
+      db.prepare(
+        'UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?'
+      ).run(p.reward, p.reward, p.player_id);
+    }
+    db.prepare(`UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE cycle = ?`)
+      .run(coop.cycle);
+
+    return { notActive: false, cycle: Number(coop.cycle), reward_pool: rewardPool, payouts };
+  });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: `Żadne wydarzenie nie trwa (status: ${out.status}).` });
+  }
+  if (out.notDefeated) {
+    return res.status(400).json({ error: 'Boss jeszcze nie pokonany.' });
+  }
+
+  slEmit('coop_completed', () => ({
+    content: '🏆 **Wydarzenie co-op ukończone!**',
+    embeds: [{
+      title: `Boss #${out.cycle} pokonany`,
+      url: SNAKES_URL,
+      description: `Pula nagród: **${out.reward_pool}** pkt (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
+        out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n'),
+      color: 0xC8F135
+    }]
+  }));
+
+  res.json({ success: true, ...out });
+});
+
 // Strona gry
 app.get('/snakes', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'snakes.html'));
+});
+
+// Panel admina trybu Snakes (przełączniki zdarzeń Discorda, co-op)
+app.get('/snakes/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'snakes-admin.html'));
 });
 
 app.listen(PORT, () => {
