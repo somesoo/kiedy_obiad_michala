@@ -1183,6 +1183,496 @@ app.post('/api/admin/discord-test', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// ── SNAKES & LADDERS (Węże i Drabiny) — nieskończona pętla, 1 ruch dziennie ──
+// ══════════════════════════════════════════════════════════════════════════
+// Osobny tryb gry, w pełni addytywny wobec Wordle: współdzieli tabelę `players`
+// (logowanie tokenem X-Token), ale trzyma swój stan w tabelach `sl_*`.
+//
+// Zasady w skrócie:
+//  • Jedna WSPÓLNA plansza dla wszystkich (100 pól, indeks 0..99), zapętlona —
+//    po ostatnim polu wraca się na start i liczy kolejne okrążenie (brak „mety").
+//  • Każdy gracz ma DOKŁADNIE JEDEN ruch dziennie (blokada jak w Wordle: unikalny
+//    wpis (player_id, move_date) w `sl_moves`; doba wg strefy Europe/Warsaw).
+//  • Ruch jest wyzwalany przez gracza (klik „Rzuć kostką"), nie automatyczny.
+//  • Punkty = wartość rzutu + pola bonusowe + postęp po planszy (przebyty dystans
+//    i ukończone okrążenia). Punkty się kumulują (leaderboard) i są walutą sklepu.
+//  • Power-upy kupowane za punkty (NIE losowe dropy): Freeze, Curse (3 warianty),
+//    Double Move. Freeze/Curse wymagają wskazania celu.
+
+const SL_BOARD_SIZE = 100;             // pól na planszy (indeks 0..99), potem pętla
+const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
+const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
+const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
+
+// Koszty power-upów (w punktach). Domyślne, rozsądne wartości — łatwo zmienić.
+const SL_POWERUP_COSTS = { freeze: 30, curse: 50, double_move: 40 };
+const SL_POWERUP_TYPES = Object.keys(SL_POWERUP_COSTS);
+const SL_CURSE_VARIANTS = 3;           // liczba losowych wariantów klątwy (efekty TBD)
+
+// ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
+db.exec(`
+  -- Stan gracza w Wężach i Drabinach
+  CREATE TABLE IF NOT EXISTS sl_state (
+    player_id      INTEGER PRIMARY KEY REFERENCES players(id),
+    abs_pos        INTEGER DEFAULT 0,   -- łączny przebyty dystans (pól od startu)
+    laps           INTEGER DEFAULT 0,   -- ukończone okrążenia
+    balance        INTEGER DEFAULT 0,   -- punkty do wydania w sklepie
+    total_points   INTEGER DEFAULT 0,   -- suma zdobytych punktów (leaderboard)
+    last_move_date TEXT,                -- YYYY-MM-DD (Europe/Warsaw) ostatniego ruchu
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Konfiguracja wspólnej planszy: typ pola i (dla węża/drabiny) cel skoku.
+  CREATE TABLE IF NOT EXISTS sl_board (
+    position INTEGER PRIMARY KEY,       -- 0..SL_BOARD_SIZE-1
+    kind     TEXT NOT NULL,             -- 'ladder' | 'snake' | 'bonus'
+    target   INTEGER,                   -- pole docelowe (ladder/snake), NULL dla bonus
+    value    INTEGER DEFAULT 0          -- punkty bonusowe (bonus), 0 dla ladder/snake
+  );
+
+  -- Dziennik ruchów — jednocześnie blokada „raz dziennie" przez UNIQUE(player_id, move_date).
+  CREATE TABLE IF NOT EXISTS sl_moves (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id  INTEGER REFERENCES players(id),
+    move_date  TEXT NOT NULL,           -- YYYY-MM-DD (Europe/Warsaw)
+    rolls      TEXT DEFAULT '[]',       -- JSON: rzucone wartości (1 lub 2 przy Double Move)
+    from_abs   INTEGER,
+    to_abs     INTEGER,
+    points     INTEGER DEFAULT 0,
+    note       TEXT,                    -- np. 'frozen', 'ladder', 'snake', 'bonus'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(player_id, move_date)
+  );
+
+  -- Ekwipunek power-upów (ile sztuk danego typu ma gracz).
+  CREATE TABLE IF NOT EXISTS sl_inventory (
+    player_id INTEGER REFERENCES players(id),
+    type      TEXT NOT NULL,            -- 'freeze' | 'curse' | 'double_move'
+    qty       INTEGER DEFAULT 0,
+    PRIMARY KEY (player_id, type)
+  );
+
+  -- Aktywne efekty power-upów oczekujące na „następną turę" celu.
+  CREATE TABLE IF NOT EXISTS sl_effects (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_player_id INTEGER REFERENCES players(id),
+    source_player_id INTEGER REFERENCES players(id),
+    type             TEXT NOT NULL,     -- 'freeze' | 'curse' | 'double_move'
+    variant          INTEGER,           -- dla 'curse': 1..3 (który wariant); inaczej NULL
+    status           TEXT DEFAULT 'pending',  -- 'pending' | 'consumed'
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    consumed_at      DATETIME
+  );
+`);
+
+// ── SEED PLANSZY ──
+// Wspólna, deterministyczna plansza (indeks 0..99). Drabiny w górę, węże w dół,
+// pola bonusowe dają punkty bez ruchu. Zaszczepiana raz; admin może ją wyczyścić
+// i przeseedować przez endpoint, jeśli zajdzie potrzeba.
+const SL_LADDERS = [               // [from, to] — to > from
+  [2, 21], [7, 29], [16, 41], [27, 48], [35, 56],
+  [50, 71], [61, 80], [70, 89], [78, 97]
+];
+const SL_SNAKES = [                // [from, to] — to < from
+  [24, 3], [33, 11], [46, 25], [54, 37], [64, 47],
+  [73, 52], [87, 66], [94, 74], [98, 77]
+];
+const SL_BONUSES = [               // [position, points]
+  [9, 15], [19, 20], [39, 25], [59, 30], [84, 40]
+];
+
+function seedSnakesBoard() {
+  const count = db.prepare('SELECT COUNT(*) AS c FROM sl_board').get().c;
+  if (count > 0) return;
+  const insert = db.prepare('INSERT INTO sl_board (position, kind, target, value) VALUES (?, ?, ?, ?)');
+  transaction(() => {
+    for (const [from, to] of SL_LADDERS) insert.run(from, 'ladder', to, 0);
+    for (const [from, to] of SL_SNAKES) insert.run(from, 'snake', to, 0);
+    for (const [pos, val] of SL_BONUSES) insert.run(pos, 'bonus', null, val);
+  });
+  console.log(`Snakes & Ladders: plansza zaseedowana (${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów)`);
+}
+seedSnakesBoard();
+
+function slBoardMap() {
+  const map = {};
+  for (const t of db.prepare('SELECT position, kind, target, value FROM sl_board').all()) {
+    map[t.position] = t;
+  }
+  return map;
+}
+
+// Zwraca (i w razie potrzeby tworzy) rekord stanu gracza.
+function slEnsureState(playerId) {
+  let st = db.prepare('SELECT * FROM sl_state WHERE player_id = ?').get(playerId);
+  if (!st) {
+    db.prepare('INSERT INTO sl_state (player_id) VALUES (?)').run(playerId);
+    st = db.prepare('SELECT * FROM sl_state WHERE player_id = ?').get(playerId);
+  }
+  return st;
+}
+
+function slInventory(playerId) {
+  const rows = db.prepare('SELECT type, qty FROM sl_inventory WHERE player_id = ?').all(playerId);
+  const inv = { freeze: 0, curse: 0, double_move: 0 };
+  for (const r of rows) inv[r.type] = Number(r.qty);
+  return inv;
+}
+
+function slAddPowerup(playerId, type, delta) {
+  db.prepare(`
+    INSERT INTO sl_inventory (player_id, type, qty) VALUES (?, ?, ?)
+    ON CONFLICT(player_id, type) DO UPDATE SET qty = qty + ?
+  `).run(playerId, type, delta, delta);
+}
+
+function d6() {
+  return 1 + Math.floor(Math.random() * 6);
+}
+
+// Pola na planszy = abs_pos zwinięty do 0..SL_BOARD_SIZE-1
+function slTileOf(absPos) {
+  return ((absPos % SL_BOARD_SIZE) + SL_BOARD_SIZE) % SL_BOARD_SIZE;
+}
+
+// ── STUB KLĄTWY ──
+// Klątwa ma 3 losowe warianty. Wariant losujemy w momencie RZUCENIA klątwy i
+// zapisujemy w sl_effects.variant. Faktyczna logika efektu jest CELOWO zostawiona
+// jako placeholder do uzupełnienia — patrz TODO niżej. Wywoływana, gdy cel wykonuje
+// swój następny ruch (klątwa „na następną turę").
+function applyCurseEffect(variant, ctx) {
+  // ctx = { targetPlayerId, sourcePlayerId, state, rolls, movement }
+  // `movement` można zmodyfikować (np. cofnąć, wyzerować postęp) — zwróć zmieniony obiekt.
+  switch (variant) {
+    case 1:
+      // TODO(klątwa #1): zaimplementuj efekt wariantu 1 (np. „połowa punktów z ruchu").
+      break;
+    case 2:
+      // TODO(klątwa #2): zaimplementuj efekt wariantu 2 (np. „cofnij o X pól").
+      break;
+    case 3:
+      // TODO(klątwa #3): zaimplementuj efekt wariantu 3 (np. „pomiń pola bonusowe").
+      break;
+    default:
+      break;
+  }
+  // Placeholder: na razie klątwa nie zmienia ruchu — tylko zostaje odnotowana.
+  return ctx.movement;
+}
+
+// Wykonuje pojedynczy krok ruchu o `roll` pól, uwzględniając węże/drabiny/bonusy.
+// Zwraca { absAfter, tilePoints, note } dla tego kroku.
+function slStepMove(absBefore, roll, board) {
+  let absAfter = absBefore + roll;
+  let note = null;
+  let tilePoints = 0;
+
+  const landed = slTileOf(absAfter);
+  const tile = board[landed];
+  if (tile) {
+    if (tile.kind === 'ladder' || tile.kind === 'snake') {
+      // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
+      // zachowując bieżące okrążenie jako bazę.
+      const base = absAfter - landed;
+      absAfter = base + tile.target;
+      if (absAfter < 0) absAfter = 0; // nie schodzimy poniżej startu
+      note = tile.kind;
+    } else if (tile.kind === 'bonus') {
+      tilePoints += tile.value;
+      note = 'bonus';
+    }
+  }
+  return { absAfter, tilePoints, note };
+}
+
+// Buduje publiczny opis planszy (do rysowania w UI).
+function slBoardPayload() {
+  const tiles = db.prepare('SELECT position, kind, target, value FROM sl_board ORDER BY position').all();
+  return { size: SL_BOARD_SIZE, tiles };
+}
+
+// Pozycje wszystkich graczy na wspólnej planszy (widoczne dla każdego).
+function slPlayersPayload(meId) {
+  const rows = db.prepare(`
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+    ORDER BY s.total_points DESC, s.abs_pos DESC
+  `).all();
+  const today = todayWaw();
+  return rows.map(r => ({
+    player_id: r.player_id,
+    nickname: r.nickname,
+    tile: slTileOf(r.abs_pos),
+    abs_pos: Number(r.abs_pos),
+    laps: Number(r.laps),
+    total_points: Number(r.total_points),
+    moved_today: r.last_move_date === today,
+    is_me: meId ? r.player_id === meId : false
+  }));
+}
+
+// Oczekujące efekty na danym graczu (do pokazania „co Cię czeka w następnej turze").
+function slPendingEffects(playerId) {
+  return db.prepare(`
+    SELECT e.type, e.variant, p.nickname AS source_nickname
+    FROM sl_effects e LEFT JOIN players p ON p.id = e.source_player_id
+    WHERE e.target_player_id = ? AND e.status = 'pending'
+    ORDER BY e.id
+  `).all(playerId).map(e => ({
+    type: e.type,
+    variant: e.variant == null ? null : Number(e.variant),
+    source_nickname: e.source_nickname
+  }));
+}
+
+function slLeaderboard(meId) {
+  const rows = db.prepare(`
+    SELECT s.player_id, p.nickname, s.total_points, s.laps, s.abs_pos, s.balance
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+    ORDER BY s.total_points DESC, s.laps DESC, s.abs_pos DESC
+  `).all();
+  return rows.map((r, i) => ({
+    rank: i + 1,
+    player_id: r.player_id,
+    nickname: r.nickname,
+    total_points: Number(r.total_points),
+    laps: Number(r.laps),
+    tile: slTileOf(r.abs_pos),
+    is_me: meId ? r.player_id === meId : false
+  }));
+}
+
+// Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
+function slBuildState(playerId) {
+  const st = slEnsureState(playerId);
+  const today = todayWaw();
+  const movedToday = st.last_move_date === today;
+  return {
+    board: slBoardPayload(),
+    players: slPlayersPayload(playerId),
+    me: {
+      player_id: playerId,
+      tile: slTileOf(st.abs_pos),
+      abs_pos: Number(st.abs_pos),
+      laps: Number(st.laps),
+      balance: Number(st.balance),
+      total_points: Number(st.total_points),
+      moved_today: movedToday,
+      can_roll: !movedToday
+    },
+    inventory: slInventory(playerId),
+    pending_effects: slPendingEffects(playerId),
+    leaderboard: slLeaderboard(playerId),
+    shop: SL_POWERUP_TYPES.map(type => ({ type, cost: SL_POWERUP_COSTS[type] })),
+    server_date: today
+  };
+}
+
+// ── ENDPOINTY — SNAKES & LADDERS ──
+
+// GET /api/snakes/state — pełny stan gry gracza (plansza, pozycje, sklep, ekwipunek…)
+app.get('/api/snakes/state', authPlayer, (req, res) => {
+  res.json(slBuildState(req.player.id));
+});
+
+// GET /api/snakes/board — publiczny widok planszy + pozycji (bez logowania)
+app.get('/api/snakes/board', (req, res) => {
+  res.json({ board: slBoardPayload(), players: slPlayersPayload(null), leaderboard: slLeaderboard(null) });
+});
+
+// POST /api/snakes/roll — jedyny dzienny ruch gracza (rzut kostką).
+app.post('/api/snakes/roll', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const today = todayWaw();
+  const board = slBoardMap();
+
+  const result = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.last_move_date === today) return { locked: true };
+
+    // Zbierz oczekujące efekty na tym graczu.
+    const pending = db.prepare(
+      `SELECT * FROM sl_effects WHERE target_player_id = ? AND status = 'pending' ORDER BY id`
+    ).all(playerId);
+    const freeze = pending.find(e => e.type === 'freeze');
+    const curse = pending.find(e => e.type === 'curse');
+    const doubleMove = pending.find(e => e.type === 'double_move');
+
+    const consume = id => db.prepare(
+      `UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).run(id);
+
+    // FREEZE: blokuje ruch. Zużywa dzienny ruch bez przesunięcia; inne efekty zostają.
+    if (freeze) {
+      consume(freeze.id);
+      db.prepare(`
+        INSERT INTO sl_moves (player_id, move_date, rolls, from_abs, to_abs, points, note)
+        VALUES (?, ?, '[]', ?, ?, 0, 'frozen')
+      `).run(playerId, today, st.abs_pos, st.abs_pos);
+      db.prepare('UPDATE sl_state SET last_move_date = ? WHERE player_id = ?').run(today, playerId);
+      return { frozen: true, source: freeze.source_player_id };
+    }
+
+    // DOUBLE MOVE: dwa rzuty w jednej turze.
+    const rolls = doubleMove ? [d6(), d6()] : [d6()];
+    if (doubleMove) consume(doubleMove.id);
+
+    // Sekwencyjnie wykonaj kroki (każdy rzut oddzielnie, by wężE/drabiny/bonusy
+    // z każdego lądowania zadziałały poprawnie także przy podwójnym ruchu).
+    let abs = Number(st.abs_pos);
+    const from_abs = abs;
+    let tilePoints = 0;
+    const notes = [];
+    for (const roll of rolls) {
+      const step = slStepMove(abs, roll, board);
+      abs = step.absAfter;
+      tilePoints += step.tilePoints;
+      if (step.note) notes.push(step.note);
+    }
+
+    // CURSE: wariant wylosowany przy rzuceniu; efekt to STUB (placeholder do uzupełnienia).
+    let movement = { from_abs, to_abs: abs, tilePoints };
+    if (curse) {
+      movement = applyCurseEffect(Number(curse.variant), {
+        targetPlayerId: playerId,
+        sourcePlayerId: curse.source_player_id,
+        state: st,
+        rolls,
+        movement
+      }) || movement;
+      consume(curse.id);
+      notes.push(`curse${curse.variant}`);
+      abs = movement.to_abs;
+      tilePoints = movement.tilePoints;
+    }
+
+    // ── PUNKTACJA ──
+    const pipPoints = rolls.reduce((a, r) => a + r, 0) * SL_POINTS_PER_PIP;
+    const distance = Math.max(0, abs - from_abs);
+    const progressPoints = distance * SL_POINTS_PER_TILE;
+    const oldLaps = Math.floor(from_abs / SL_BOARD_SIZE);
+    const newLaps = Math.floor(abs / SL_BOARD_SIZE);
+    const lapPoints = Math.max(0, newLaps - oldLaps) * SL_POINTS_PER_LAP;
+    const earned = pipPoints + progressPoints + lapPoints + tilePoints;
+
+    db.prepare(`
+      INSERT INTO sl_moves (player_id, move_date, rolls, from_abs, to_abs, points, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(playerId, today, JSON.stringify(rolls), from_abs, abs, earned, notes.join(',') || null);
+
+    db.prepare(`
+      UPDATE sl_state
+      SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?, last_move_date = ?
+      WHERE player_id = ?
+    `).run(abs, newLaps, earned, earned, today, playerId);
+
+    return {
+      frozen: false,
+      rolls,
+      from_tile: slTileOf(from_abs),
+      to_tile: slTileOf(abs),
+      distance,
+      completed_laps: Math.max(0, newLaps - oldLaps),
+      breakdown: { pip: pipPoints, progress: progressPoints, laps: lapPoints, bonus: tilePoints },
+      earned,
+      notes,
+      curse_applied: !!curse,
+      double_move: !!doubleMove
+    };
+  });
+
+  if (result.locked) {
+    return res.status(400).json({ error: 'Dziś już wykonałeś ruch — wróć jutro (doba wg czasu Warszawy).' });
+  }
+
+  res.json({ move: result, state: slBuildState(playerId) });
+});
+
+// POST /api/snakes/shop/buy { type } — kup power-up za punkty.
+app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const type = String(req.body.type || '');
+  if (!SL_POWERUP_TYPES.includes(type)) {
+    return res.status(400).json({ error: 'Nieznany power-up' });
+  }
+  const cost = SL_POWERUP_COSTS[type];
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.balance < cost) return { poor: true, balance: st.balance };
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(cost, playerId);
+    slAddPowerup(playerId, type, 1);
+    return { poor: false };
+  });
+
+  if (out.poor) {
+    return res.status(400).json({ error: `Za mało punktów — koszt ${cost}, masz ${out.balance}.` });
+  }
+  res.json({ success: true, state: slBuildState(playerId) });
+});
+
+// POST /api/snakes/shop/use { type, target_player_id? } — użyj power-up z ekwipunku.
+// Freeze/Curse wymagają celu (innego gracza). Double Move działa na siebie.
+app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const type = String(req.body.type || '');
+  if (!SL_POWERUP_TYPES.includes(type)) {
+    return res.status(400).json({ error: 'Nieznany power-up' });
+  }
+  const needsTarget = (type === 'freeze' || type === 'curse');
+  let targetId = playerId;
+
+  if (needsTarget) {
+    targetId = parseInt(req.body.target_player_id, 10);
+    if (!Number.isInteger(targetId)) {
+      return res.status(400).json({ error: 'Wskaż gracza, na którego użyjesz power-upa.' });
+    }
+    if (targetId === playerId) {
+      return res.status(400).json({ error: 'Freeze i Curse rzucasz na INNEGO gracza.' });
+    }
+    const target = db.prepare('SELECT id FROM players WHERE id = ?').get(targetId);
+    if (!target) return res.status(404).json({ error: 'Nie ma takiego gracza.' });
+    slEnsureState(targetId); // upewnij się, że cel ma stan gry
+  }
+
+  const out = transaction(() => {
+    const inv = slInventory(playerId);
+    if (inv[type] <= 0) return { none: true };
+    slAddPowerup(playerId, type, -1);
+
+    // Curse: losujemy wariant (1..SL_CURSE_VARIANTS) w momencie użycia — efekt to stub.
+    const variant = type === 'curse' ? (1 + Math.floor(Math.random() * SL_CURSE_VARIANTS)) : null;
+
+    db.prepare(`
+      INSERT INTO sl_effects (target_player_id, source_player_id, type, variant)
+      VALUES (?, ?, ?, ?)
+    `).run(targetId, playerId, type, variant);
+
+    return { none: false, variant };
+  });
+
+  if (out.none) {
+    return res.status(400).json({ error: 'Nie masz tego power-upa w ekwipunku.' });
+  }
+  res.json({
+    success: true,
+    applied_to: targetId,
+    curse_variant: out.variant, // dla klątwy: który wariant został wylosowany (efekt TBD)
+    state: slBuildState(playerId)
+  });
+});
+
+// GET /api/snakes/players — lekka lista graczy do wyboru celu power-upa.
+app.get('/api/snakes/players', authPlayer, (req, res) => {
+  res.json({ players: slPlayersPayload(req.player.id) });
+});
+
+// Strona gry
+app.get('/snakes', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'snakes.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
   // Znacznik wersji w logach — po deployu widać w `pm2 logs`, czy wstał nowy kod.

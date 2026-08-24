@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Snakes &amp; Ladders</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="snakes.css" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <span class="logo-text">OFFICE SNAKES</span>
+        <span class="logo-sub">węże i drabiny · nieskończona pętla</span>
+      </div>
+      <div class="header-user" id="header-user">
+        <a class="btn-ghost" href="/" title="Wróć do Wordle">↩ wordle</a>
+        <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">?</button>
+        <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
+        <span class="user-nick" id="user-nick-display"></span>
+        <span class="user-balance" id="user-balance-display"></span>
+      </div>
+    </div>
+    <div class="countdown-bar-wrap">
+      <div class="countdown-bar" id="countdown-bar"></div>
+      <div class="countdown-text" id="countdown-text">ładowanie...</div>
+    </div>
+    <div class="season-ribbon" id="season-ribbon">🐍 Jedna wspólna plansza · jeden ruch dziennie · graj bez końca i zbieraj punkty</div>
+  </header>
+
+  <!-- REJESTRACJA / LOGOWANIE -->
+  <div class="overlay" id="login-overlay">
+    <div class="login-card">
+      <h2>Dołącz do gry</h2>
+      <p class="login-sub">Podaj swój nick — to samo konto co w Office Wordle. Codziennie jeden rzut kostką na wspólnej planszy węży i drabin.</p>
+      <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
+      <button class="btn-primary" id="btn-login">Wchodzę w to</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- JAK TO DZIAŁA -->
+  <div class="how-it-works" id="how-it-works" style="display:none">
+    <div class="how-inner">
+      <button class="how-close" id="how-close">✕</button>
+      <h3>Jak grać w Office Snakes &amp; Ladders?</h3>
+      <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty.</p>
+      <ol>
+        <li><strong>Jeden ruch dziennie.</strong> Raz na dobę (czasu Warszawy) klikasz <strong>„Rzuć kostką"</strong>. Po ruchu jesteś zablokowany do następnego dnia — dokładnie jak hasło dnia w Wordle.</li>
+        <li><strong>Drabiny i węże.</strong> Wejdziesz na drabinę 🪜 — wskakujesz wyżej. Wdepniesz na węża 🐍 — zjeżdżasz w dół. Pola bonusowe ⭐ dają dodatkowe punkty bez ruchu.</li>
+        <li><strong>Punkty.</strong> Zdobywasz je za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus). Punkty się kumulują i budują <strong>leaderboard</strong>.</li>
+        <li><strong>Power-upy (za punkty, nie losowo).</strong> W sklepie kupujesz:
+          <ul>
+            <li>❄️ <strong>Freeze</strong> — zatrzymuje wybranego gracza w jego następnej turze.</li>
+            <li>💀 <strong>Curse</strong> — klątwa z 3 losowymi wariantami (efekty w przygotowaniu).</li>
+            <li>⏩ <strong>Double Move</strong> — Twój następny ruch to dwa rzuty naraz.</li>
+          </ul>
+          Przy Freeze i Curse wybierasz <strong>cel</strong> — innego gracza.</li>
+        <li><strong>Rywalizacja bez końca.</strong> Nie ma zwycięskiego pola — liczy się, kto uzbiera najwięcej punktów i zrobi najwięcej okrążeń.</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <main class="main-grid main-grid-snakes" id="main-content" style="display:none">
+
+    <!-- LEWA KOLUMNA — INFO + STATY -->
+    <aside class="col-info">
+      <div class="sidebar-card info-card">
+        <div class="sidebar-card-header"><h3>TWOJE STATY</h3></div>
+        <div class="sl-stats">
+          <div class="sl-stat"><span class="sl-stat-num accent" id="stat-points">–</span><span class="sl-stat-lbl">⭐ punkty (total)</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-balance">–</span><span class="sl-stat-lbl">💰 do wydania</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-tile">–</span><span class="sl-stat-lbl">📍 pole</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-laps">–</span><span class="sl-stat-lbl">🔁 okrążenia</span></div>
+        </div>
+        <button class="btn-ghost how-open-desktop" id="btn-how-desktop" style="margin-top:14px;width:100%">Pełne zasady →</button>
+      </div>
+
+      <!-- SKLEP -->
+      <div class="sidebar-card shop-card">
+        <div class="sidebar-card-header"><h3>🛒 SKLEP POWER-UPÓW</h3></div>
+        <div id="shop-list"></div>
+        <div class="sl-hint text-muted small" id="effects-hint"></div>
+      </div>
+    </aside>
+
+    <!-- ŚRODEK — PLANSZA -->
+    <section class="col-game">
+      <div class="section-header"><h2>WSPÓLNA PLANSZA</h2></div>
+      <p class="game-subtitle">wszystkie pionki na jednej pętli</p>
+
+      <div class="roll-panel">
+        <button class="btn-primary btn-roll" id="btn-roll">🎲 Rzuć kostką</button>
+        <div class="roll-result" id="roll-result"></div>
+      </div>
+
+      <div id="board-area"></div>
+    </section>
+
+    <!-- PRAWA — LEADERBOARD + GRACZE -->
+    <aside class="col-sidebar">
+      <div class="sidebar-card leaderboard-card">
+        <div class="sidebar-card-header">
+          <h3>LEADERBOARD</h3>
+          <span class="text-muted small" id="players-count"></span>
+        </div>
+        <div id="leaderboard-list"></div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <span class="bank-info">🐍 Nieskończona pętla · jeden ruch dziennie · punkty się kumulują</span>
+    <span class="footer-copy text-muted">made with ❤️ i poranną kawą</span>
+  </footer>
+
+  <!-- TARGET PICKER MODAL -->
+  <div class="how-it-works" id="target-modal" style="display:none">
+    <div class="how-inner target-inner">
+      <button class="how-close" id="target-close">✕</button>
+      <h3 id="target-title">Wybierz cel</h3>
+      <p class="how-intro" id="target-sub"></p>
+      <div id="target-list" class="target-list"></div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast" style="display:none"><span id="toast-text"></span></div>
+
+  <!-- CONFETTI -->
+  <div class="confetti-container" id="confetti-container"></div>
+
+  <script src="snakes.js"></script>
+</body>
+</html>
