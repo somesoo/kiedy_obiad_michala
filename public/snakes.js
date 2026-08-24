@@ -226,12 +226,26 @@ function renderConnectors(g, cols, rows) {
       <g class="${cls}">
         <title>${title}</title>
         <path d="${path}" />
-        <circle class="sl-link-start" cx="${a.x}" cy="${a.y}" r="1.6" />
-        <circle class="sl-link-end" cx="${b.x}" cy="${b.y}" r="2.4" />
       </g>`;
   }).join('');
 
-  return `<svg class="sl-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${parts}</svg>`;
+  return `<svg class="sl-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${parts}</svg>`
+    + renderLinkDots(links, cols, rows);
+}
+
+// Kropki na początku i końcu każdego połączenia. Świadomie w HTML, nie w SVG:
+// warstwa SVG jest rozciągana (preserveAspectRatio="none"), więc <circle> zrobiłby się
+// elipsą, gdy kafelki są prostokątne. Element HTML pozycjonowany procentowo zostaje kołem.
+function renderLinkDots(links, cols, rows) {
+  const dots = links.map(t => {
+    const a = tileCenter(t.position, cols, rows);
+    const b = tileCenter(t.target, cols, rows);
+    const kind = t.kind === 'ladder' ? 'ladder' : 'snake';
+    return `
+      <span class="sl-dot sl-dot-start sl-dot-${kind}" style="left:${a.x}%;top:${a.y}%"></span>
+      <span class="sl-dot sl-dot-end sl-dot-${kind}" style="left:${b.x}%;top:${b.y}%"></span>`;
+  }).join('');
+  return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
 
 function renderCell(idx, sp, players) {

@@ -71,38 +71,45 @@
     </div>
   </div>
 
-  <!-- MAIN -->
-  <main class="main-grid main-grid-snakes" id="main-content" style="display:none">
+  <!-- MAIN — wąski lewy panel + plansza na całą resztę ekranu -->
+  <main class="main-grid-snakes" id="main-content" style="display:none">
 
-    <!-- LEWA KOLUMNA — INFO + STATY -->
-    <aside class="col-info">
-      <div class="sidebar-card info-card">
-        <div class="sidebar-card-header"><h3>TWOJE STATY</h3></div>
+    <!-- LEWY PANEL (jedyny) — staty, sklep, ranking; wszystko w kompakcie -->
+    <aside class="col-side">
+
+      <div class="mini-card">
+        <div class="mini-head">TWOJE STATY</div>
         <div class="sl-stats">
-          <div class="sl-stat"><span class="sl-stat-num accent" id="stat-points">–</span><span class="sl-stat-lbl">⭐ punkty (total)</span></div>
-          <div class="sl-stat"><span class="sl-stat-num" id="stat-balance">–</span><span class="sl-stat-lbl">💰 do wydania</span></div>
+          <div class="sl-stat"><span class="sl-stat-num accent" id="stat-points">–</span><span class="sl-stat-lbl">⭐ pkt</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-balance">–</span><span class="sl-stat-lbl">💰 saldo</span></div>
           <div class="sl-stat"><span class="sl-stat-num" id="stat-tile">–</span><span class="sl-stat-lbl">📍 pole</span></div>
-          <div class="sl-stat"><span class="sl-stat-num" id="stat-laps">–</span><span class="sl-stat-lbl">🔁 okrążenia</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-laps">–</span><span class="sl-stat-lbl">🔁 okr.</span></div>
         </div>
         <div class="sl-shield-status" id="shield-status"></div>
-        <button class="btn-ghost how-open-desktop" id="btn-how-desktop" style="margin-top:14px;width:100%">Pełne zasady →</button>
       </div>
 
-      <!-- SKLEP -->
-      <div class="sidebar-card shop-card">
-        <div class="sidebar-card-header"><h3>🛒 SKLEP POWER-UPÓW</h3></div>
+      <div class="mini-card">
+        <div class="mini-head">🛒 POWER-UPY</div>
         <div id="shop-list"></div>
         <div class="sl-hint text-muted small" id="effects-hint"></div>
       </div>
 
+      <div class="mini-card">
+        <div class="mini-head">🏆 RANKING <span class="text-muted" id="players-count"></span></div>
+        <div id="leaderboard-list"></div>
+      </div>
+
+      <button class="btn-ghost mini-rules" id="btn-how-desktop">Pełne zasady →</button>
     </aside>
 
-    <!-- ŚRODEK — PLANSZA -->
+    <!-- PLANSZA — zajmuje całą pozostałą przestrzeń -->
     <section class="col-game">
-      <div class="section-header"><h2>WSPÓLNA PLANSZA</h2></div>
-      <p class="game-subtitle">7×7 · wszystkie pionki na jednej pętli</p>
 
-      <div class="roll-panel">
+      <div class="game-bar">
+        <div class="game-bar-title">
+          <h2>WSPÓLNA PLANSZA</h2>
+          <span class="game-bar-sub">7×7 · wszystkie pionki na jednej pętli</span>
+        </div>
         <button class="btn-primary btn-roll" id="btn-roll">🎲 Rzuć kostką</button>
         <div class="roll-result" id="roll-result"></div>
       </div>
@@ -112,17 +119,6 @@
       <!-- WYDARZENIE KOOPERACYJNE — pod planszą, widoczne dla wszystkich -->
       <div class="coop-card" id="coop-panel"></div>
     </section>
-
-    <!-- PRAWA — LEADERBOARD + GRACZE -->
-    <aside class="col-sidebar">
-      <div class="sidebar-card leaderboard-card">
-        <div class="sidebar-card-header">
-          <h3>LEADERBOARD</h3>
-          <span class="text-muted small" id="players-count"></span>
-        </div>
-        <div id="leaderboard-list"></div>
-      </div>
-    </aside>
 
   </main>
 
