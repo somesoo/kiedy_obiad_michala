@@ -6,6 +6,7 @@ let state = {
   game: null,        // ostatni stan z /api/snakes/state
   busy: false,
   pendingUse: null,  // typ power-upa czekający na wybór celu
+  pushFlash: null,   // Set<player_id> aktualnie podświetlanych wypchnięć (animacja)
 };
 
 const POWERUP_META = {
@@ -260,10 +261,11 @@ function renderCell(idx, sp, players) {
   const pawnsHtml = (players || []).map(p => {
     const meCls = p.is_me ? ' sl-pawn-me' : '';
     const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
+    const pushCls = (state.pushFlash && state.pushFlash.has(p.player_id)) ? ' sl-pawn-pushed' : '';
     const shieldBadge = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
     const initials = esc(p.nickname.slice(0, 2).toUpperCase());
     const tip = `${esc(p.nickname)} (okr. ${p.laps})${p.has_shield ? ' — chroniony tarczą' : ''}`;
-    return `<span class="sl-pawn${meCls}${shieldCls}" title="${tip}">${initials}${shieldBadge}</span>`;
+    return `<span class="sl-pawn${meCls}${shieldCls}${pushCls}" title="${tip}">${initials}${shieldBadge}</span>`;
   }).join('');
   return `
     <div class="${cls}">
@@ -310,11 +312,23 @@ async function roll() {
     state.game = res.state;
     renderAll();
     showRollResult(res.move);
+    if (res.move.knockback && res.move.knockback.length) flashKnockback(res.move.knockback);
   } catch (e) {
     showToast(e.message);
   } finally {
     state.busy = false;
   }
+}
+
+// Krótkie podświetlenie pionków, które zostały wypchnięte tym rzutem — pulsują
+// przez ~1.6s, żeby wypchnięcie (i efekt domina) było widoczne na planszy.
+function flashKnockback(chain) {
+  state.pushFlash = new Set(chain.map(k => k.player_id));
+  renderBoard(state.game);
+  setTimeout(() => {
+    state.pushFlash = null;
+    if (state.game) renderBoard(state.game);
+  }, 1600);
 }
 
 function showRollResult(m) {
@@ -337,6 +351,10 @@ function showRollResult(m) {
   if (m.notes.includes('bonus')) noteTxt.push('⭐ pole bonusowe!');
   if (m.double_move) noteTxt.push('⏩ podwójny ruch!');
   if (m.curse_applied) noteTxt.push('💀 dopadła Cię klątwa!');
+  if (m.knockback && m.knockback.length) {
+    const names = m.knockback.map(k => esc(k.nickname)).join(', ');
+    noteTxt.push(`💥 wypchnąłeś: ${names}!`);
+  }
 
   el.innerHTML = `
     <div class="roll-line"><strong>${dice}</strong> → pole <strong>${m.to_tile}</strong></div>
@@ -504,6 +522,10 @@ function renderCoop(g) {
     action = `<div class="coop-event">🏆 Wydarzenie ukończone. Nowa zbiórka wkrótce.</div>`;
   }
 
+  const deadline = c.status === 'collecting'
+    ? `<span class="coop-deadline mono" id="coop-deadline" data-until="${esc(c.window_ends_at)}">⏳ –</span>`
+    : '';
+
   el.innerHTML = `
     <div class="coop-head">
       <span class="coop-title">🤝 WSPÓLNA PULA <span class="coop-cycle text-muted">· edycja #${c.cycle}</span></span>
@@ -513,10 +535,25 @@ function renderCoop(g) {
     <div class="coop-body">
       <div class="coop-sub text-muted small">
         Nagrody: <strong>${c.reward_pool} pkt</strong> · podział ${splitLabel} · Twój wkład: <strong>${c.my_contribution}</strong>
+        ${deadline ? `· kara za niedobicie: <strong>-${c.penalty_amount} pkt</strong>/gracza` : ''}
       </div>
       ${action}
     </div>
+    ${deadline}
     ${chips}`;
+  updateCoopDeadline();
+}
+
+// Odświeża licznik czasu do zamknięcia okna co-op (wołane co sekundę z updateCountdown).
+function updateCoopDeadline() {
+  const el = document.getElementById('coop-deadline');
+  if (!el) return;
+  const until = Date.parse(el.dataset.until);
+  const secs = Math.max(0, Math.round((until - Date.now()) / 1000));
+  const days = Math.floor(secs / 86400);
+  const rest = secs % 86400;
+  const daysTxt = days > 0 ? `${days}d ` : '';
+  el.textContent = `⏳ okno zamyka się za: ${daysTxt}${fmtHMS(rest)}`;
 }
 
 document.getElementById('coop-panel').addEventListener('click', e => {
@@ -613,6 +650,7 @@ function updateCountdown() {
     textEl.textContent = `🔒 Ruch wykonany — nowy ruch za ${fmtHMS(toNext)}`;
   }
   if (barEl) barEl.style.width = ((1 - toNext / 86400) * 100) + '%';
+  updateCoopDeadline();
 }
 
 // ── CONFETTI ──

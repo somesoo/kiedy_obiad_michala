@@ -1226,6 +1226,17 @@ const SL_COOP_REWARD_MULTIPLIER = Number(process.env.SNAKES_COOP_REWARD_MULTIPLI
 // 'flat' = po równo między wszystkich kontrybutorów.
 const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportional').toLowerCase();
 
+// ── KNOCKBACK (wypychanie z zajętego pola) ──
+const SL_KNOCKBACK_TILES = 5;
+
+// ── OKNO CO-OP + KARA ──
+// Cykliczne "okno" na osiągnięcie progu puli. Domyślnie tydzień; jeśli w oknie próg
+// nie padnie, każdy gracz traci punkty (saldo MOŻE zejść poniżej zera) i startuje
+// nowe okno z pulą wyzerowaną — niezależnie od tego, czy poprzednie okno wygrano.
+const SL_COOP_WINDOW_DAYS = Number(process.env.SNAKES_COOP_WINDOW_DAYS || 7);
+const SL_COOP_WINDOW_MS = SL_COOP_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+const SL_COOP_PENALTY = parseInt(process.env.SNAKES_COOP_PENALTY, 10) || 100;
+
 // ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
 db.exec(`
   -- Stan gracza w Wężach i Drabinach
@@ -1491,6 +1502,53 @@ function slStepMove(absBefore, roll, board) {
   return { absAfter, tilePoints, note };
 }
 
+// ── KNOCKBACK ──
+// Znajduje gracza (poza wykluczonymi) stojącego na danym polu — po numerze pola
+// (abs_pos modulo rozmiar planszy), bo to WSPÓLNA, zapętlona plansza.
+function slFindOccupant(tile, excludeIds) {
+  const rows = db.prepare(`
+    SELECT s.player_id, s.abs_pos, p.nickname
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+  `).all();
+  return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
+}
+
+// Gracz, który ląduje na zajętym polu, wypycha okupanta o SL_KNOCKBACK_TILES pól
+// wstecz (liczone od WŁASNEJ pozycji okupanta, nie od pola lądowania). Jeśli pole
+// docelowe wypchnięcia jest też zajęte — kaskada: kolejny okupant też zostaje wypchnięty
+// od swojej pozycji, i tak dalej. Dno planszy (pole 0) jest twarde: cofnięcie poniżej
+// zera przycinamy do 0, NIE zawijamy na koniec pętli (założenie do potwierdzenia —
+// patrz podsumowanie).
+// Wypchnięci gracze NIE uruchamiają węży/drabin/bonusów swojego nowego pola — te
+// efekty odpalają tylko z WŁASNEGO rzutu gracza (decyzja projektowa do potwierdzenia).
+function slApplyKnockback(rollerPlayerId, landingAbsPos) {
+  const pushedIds = new Set([rollerPlayerId]);
+  const chain = [];
+  let targetTile = slTileOf(landingAbsPos);
+  for (let i = 0; i < 200; i++) { // bezpiecznik przeciw pętli nieskończonej
+    const occ = slFindOccupant(targetTile, pushedIds);
+    if (!occ) break;
+    const fromAbs = Number(occ.abs_pos);
+    const toAbs = Math.max(0, fromAbs - SL_KNOCKBACK_TILES);
+    const clamped = fromAbs - SL_KNOCKBACK_TILES < 0;
+    db.prepare('UPDATE sl_state SET abs_pos = ?, laps = ? WHERE player_id = ?')
+      .run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), occ.player_id);
+    chain.push({
+      player_id: occ.player_id,
+      nickname: occ.nickname,
+      from_tile: slTileOf(fromAbs),
+      to_tile: slTileOf(toAbs),
+      clamped
+    });
+    pushedIds.add(occ.player_id);
+    if (fromAbs === toAbs) break; // już był na dnie — brak ruchu, koniec kaskady
+    targetTile = slTileOf(toAbs);
+  }
+  return chain;
+}
+
+
+
 // Buduje publiczny opis planszy (do rysowania w UI).
 function slBoardPayload() {
   const tiles = db.prepare('SELECT position, kind, target, value FROM sl_board ORDER BY position').all();
@@ -1584,6 +1642,13 @@ function slCoopContributors(cycle) {
   }));
 }
 
+// Koniec bieżącego okna (ms epoch) — okno liczone od started_at cyklu + SL_COOP_WINDOW_DAYS.
+// SQLite CURRENT_TIMESTAMP jest w UTC bez 'Z' — trzeba to jawnie dopisać przy parsowaniu.
+function slCoopWindowEndMs(coop) {
+  const startMs = Date.parse(coop.started_at.replace(' ', 'T') + 'Z');
+  return startMs + SL_COOP_WINDOW_MS;
+}
+
 function slCoopPayload(meId) {
   const coop = slCurrentCoop();
   const contributors = slCoopContributors(coop.cycle);
@@ -1599,7 +1664,10 @@ function slCoopPayload(meId) {
     reward_pool: Number(coop.reward_pool) || Math.round(threshold * SL_COOP_REWARD_MULTIPLIER),
     reward_split: SL_COOP_REWARD_SPLIT,
     my_contribution: mine,
-    contributors
+    contributors,
+    window_days: SL_COOP_WINDOW_DAYS,
+    window_ends_at: new Date(slCoopWindowEndMs(coop)).toISOString(),
+    penalty_amount: SL_COOP_PENALTY
   };
 }
 
@@ -1632,6 +1700,41 @@ function slCoopRewardSplit(contributors, rewardPool) {
   return contributors.map(c => ({ ...c, reward: Math.round(rewardPool * (c.amount / total)) }));
 }
 
+// ── ZAMKNIĘCIE OKNA CO-OP ──
+// Wołane co minutę (patrz scheduler niżej). Działa TYLKO gdy bieżący cykl wciąż zbiera
+// ('collecting') i jego okno upłynęło — jeśli próg już padł (status 'event_active' albo
+// 'completed', bo admin rozstrzygnął bossa), zegar okna nic tu nie robi: cykl idzie
+// swoją dotychczasową ścieżką (walka z bossem → wypłata nagród), a nowe okno i tak
+// otworzy się automatycznie przy najbliższym zapytaniu o stan (slCurrentCoop tworzy
+// nowy cykl, gdy nie ma żadnego niezakończonego). Kara dotyczy WYŁĄCZNIE przypadku,
+// gdy próg nie padł w ogóle w danym oknie czasowym.
+function slCheckCoopWindowClose() {
+  const coop = slCurrentCoop();
+  if (coop.status !== 'collecting') return null;
+  if (Date.now() < slCoopWindowEndMs(coop)) return null;
+
+  return transaction(() => {
+    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
+    if (!fresh || fresh.status !== 'collecting') return null; // ktoś już to obsłużył
+
+    const players = db.prepare('SELECT player_id FROM sl_state').all();
+    const upd = db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?');
+    for (const p of players) upd.run(SL_COOP_PENALTY, p.player_id);
+
+    db.prepare(`UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE cycle = ?`)
+      .run(fresh.cycle);
+    // Nowe okno startuje od razu, niezależnie od wyniku poprzedniego.
+    db.prepare('INSERT INTO sl_coop (cycle, threshold) VALUES (?, ?)').run(fresh.cycle + 1, SL_COOP_THRESHOLD);
+
+    return {
+      cycle: Number(fresh.cycle),
+      total: Number(fresh.total),
+      threshold: Number(fresh.threshold),
+      players_affected: players.length
+    };
+  });
+}
+
 // ══ DISCORD — SZYNA ZDARZEŃ ══
 // Zdarzenia gry lecą przez jedną szynę: każdy typ ma własny przełącznik, trzymany
 // w sl_meta (klucz 'discord_events'), więc da się je włączać/wyłączać z panelu admina
@@ -1645,27 +1748,31 @@ const SNAKES_URL = (process.env.APP_URL || 'https://frog03-21535.wykr.es/').repl
 // co-opu i dzienne podsumowanie. Codzienny wynik każdego rzutu i Double Move są
 // domyślnie OFF, żeby nie zasypywać kanału.
 const SL_EVENT_DEFAULTS = {
-  roll_result:       false,
-  tile_landing:      true,
-  powerup_freeze:    true,
-  powerup_curse:     true,
-  shield_block:      true,
-  double_move:       false,
-  coop_milestone:    true,
-  coop_completed:    true,
-  leaderboard_daily: true
+  roll_result:        false,
+  tile_landing:       true,
+  powerup_freeze:     true,
+  powerup_curse:      true,
+  shield_block:       true,
+  double_move:        false,
+  knockback:          true,
+  coop_milestone:     true,
+  coop_completed:     true,
+  coop_window_result: true,
+  leaderboard_daily:  true
 };
 
 const SL_EVENT_LABELS = {
-  roll_result:       'Wynik dziennego rzutu',
-  tile_landing:      'Wejście na węża / drabinę',
-  powerup_freeze:    'Użycie Freeze (kto na kogo)',
-  powerup_curse:     'Użycie Curse (kto na kogo)',
-  shield_block:      'Shield zablokował atak',
-  double_move:       'Użycie Double Move',
-  coop_milestone:    'Pula co-op przekroczyła próg',
-  coop_completed:    'Wydarzenie co-op ukończone',
-  leaderboard_daily: 'Dzienne podsumowanie rankingu'
+  roll_result:        'Wynik dziennego rzutu',
+  tile_landing:       'Wejście na węża / drabinę',
+  powerup_freeze:     'Użycie Freeze (kto na kogo)',
+  powerup_curse:      'Użycie Curse (kto na kogo)',
+  shield_block:       'Shield zablokował atak',
+  double_move:        'Użycie Double Move',
+  knockback:          'Wypchnięcie z zajętego pola (i efekt domina)',
+  coop_milestone:     'Pula co-op przekroczyła próg',
+  coop_completed:     'Wydarzenie co-op ukończone (nagrody wypłacone)',
+  coop_window_result: 'Koniec okna co-op — cel nieosiągnięty, kara nałożona',
+  leaderboard_daily:  'Dzienne podsumowanie rankingu'
 };
 
 function slEventsConfig() {
@@ -1768,6 +1875,36 @@ function startSnakesDiscordScheduler() {
   console.log(`Snakes/Discord: szyna zdarzeń aktywna, podsumowanie dnia o ${String(SL_SUMMARY_HOUR).padStart(2, '0')}:00 (Europe/Warsaw)`);
 }
 startSnakesDiscordScheduler();
+
+// ── SCHEDULER OKNA CO-OP ──
+// Działa ZAWSZE (niezależnie od webhooka Discorda) — kara punktowa to realny efekt
+// w grze, nie tylko powiadomienie. slEmit sam pomija wysyłkę, gdy webhook nie jest
+// skonfigurowany, więc bezpiecznie wołamy go bezwarunkowo. Tick co minutę + jedno
+// sprawdzenie od razu przy starcie, żeby samo-naprawić się po restarcie serwera,
+// który przespał moment zamknięcia okna (analogicznie do harmonogramu Wordle/Discorda).
+function slEmitCoopWindowResult(outcome) {
+  slEmit('coop_window_result', () => ({
+    content: '❌ **Cel co-op tego okna NIE został osiągnięty.**',
+    embeds: [{
+      title: `Edycja #${outcome.cycle} — kara`,
+      url: SNAKES_URL,
+      description: `Pula zatrzymała się na **${outcome.total}/${outcome.threshold}** pkt.\n` +
+        `Każdy gracz traci **${SL_COOP_PENALTY} pkt** (dotyczy ${outcome.players_affected} ${outcome.players_affected === 1 ? 'osoby' : 'osób'}). Nowe okno (${SL_COOP_WINDOW_DAYS} dni) właśnie się rozpoczyna.`,
+      color: 0xE85D4A
+    }]
+  }));
+}
+
+function startCoopWindowScheduler() {
+  const tick = () => {
+    const outcome = slCheckCoopWindowClose();
+    if (outcome) slEmitCoopWindowResult(outcome);
+  };
+  tick();
+  setInterval(tick, 60_000);
+  console.log(`Snakes/Co-op: okno ${SL_COOP_WINDOW_DAYS} dni, kara przy niedobiciu progu: ${SL_COOP_PENALTY} pkt/gracza`);
+}
+startCoopWindowScheduler();
 
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
 function slBuildState(playerId) {
@@ -1881,6 +2018,12 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       tilePoints = movement.tilePoints;
     }
 
+    // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
+    // Sprawdzane na OSTATECZNYM polu lądowania tej tury (po drabinach/wężach/klątwie,
+    // po obu rzutach przy Double Move) — nie na każdym pośrednim kroku.
+    const knockback = slApplyKnockback(playerId, abs);
+    if (knockback.length) notes.push('knockback');
+
     // ── PUNKTACJA ──
     const pipPoints = rolls.reduce((a, r) => a + r, 0) * SL_POINTS_PER_PIP;
     const distance = Math.max(0, abs - from_abs);
@@ -1912,7 +2055,8 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       earned,
       notes,
       curse_applied: !!curse,
-      double_move: !!doubleMove
+      double_move: !!doubleMove,
+      knockback
     };
   });
 
@@ -1936,6 +2080,12 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     }
     if (result.double_move) {
       slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dwa rzuty (${result.rolls.join(' + ')}) i pole **${result.to_tile}**.`);
+    }
+    if (result.knockback && result.knockback.length) {
+      slEmit('knockback', () => result.knockback.map((k, i) => i === 0
+        ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.to_tile}**${k.clamped ? ' (dno planszy)' : ''}.`
+        : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.to_tile}**${k.clamped ? ' (dno planszy)' : ''}.`
+      ).join('\n'));
     }
   }
 

@@ -480,3 +480,20 @@
 }
 .coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 .coop-chip .coop-amt { margin-left: 4px; }
+
+/* ── KNOCKBACK — pulsujące podświetlenie wypchniętych pionków ── */
+.sl-pawn-pushed {
+  animation: sl-push-pulse 0.4s ease-in-out 4;
+}
+@keyframes sl-push-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 1px 3px rgba(0,0,0,0.45); }
+  50% { transform: scale(1.25); box-shadow: 0 0 10px 3px rgba(232,93,74,0.8); background: var(--danger); color: #fff; }
+}
+
+/* ── LICZNIK OKNA CO-OP ── */
+.coop-deadline {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--gold);
+}
