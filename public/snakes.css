@@ -129,12 +129,15 @@
   width: 100%;
 }
 .sl-board {
+  /* Safari: height:100% na gridzie zagnieżdżonym w łańcuchu flex o niejawnej
+     wysokości (flex:1 bez ustalonej wysokości) potrafi się nie rozwiązać —
+     plansza znika. position:absolute + inset:0 nie zależy od tej rezolucji. */
+  position: absolute;
+  inset: 0;
   display: grid;
   grid-template-columns: repeat(var(--cols, 7), 1fr);
   grid-template-rows: repeat(var(--rows, 7), 1fr);
   gap: 5px;
-  width: 100%;
-  height: 100%;
 }
 .sl-cell {
   position: relative;
