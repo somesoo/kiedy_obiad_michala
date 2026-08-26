@@ -22,6 +22,14 @@
     .adm-note { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
     .adm-warn { color: var(--gold); }
     .adm-stat { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+    .pl-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; background: var(--surface-alt); border: 1px solid var(--muted); margin-bottom: 8px; flex-wrap: wrap; }
+    .pl-name { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; min-width: 110px; }
+    .pl-stats { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; flex: 1; min-width: 160px; }
+    .pl-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .pl-actions input[type=date] { background: var(--surface); border: 1px solid var(--muted); border-radius: 6px; color: var(--text-primary); padding: 4px 6px; font-size: 11px; }
+    .pl-actions button { font-size: 11px; padding: 5px 9px; }
+    .btn-danger { background: var(--danger); color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+    .pl-moved { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -71,6 +79,18 @@
         <div class="adm-actions">
           <button class="btn-ghost" id="btn-coop-complete">Zamknij wydarzenie i wypłać nagrody</button>
         </div>
+      </div>
+
+      <div class="adm-card">
+        <h3>🎮 GRACZE</h3>
+        <div class="adm-note">
+          „Dodaj ruch” zdejmuje blokadę dzienną dla wskazanej daty — kasuje zapisany
+          tamtejszy ruch i pozwala rzucić jeszcze raz. Nie cofa punktów z poprzedniego
+          rzutu, to dodatkowa szansa, nie cofnięcie. „Usuń” kasuje gracza WYŁĄCZNIE
+          z trybu Snakes (stan, ekwipunek, historia, wpłaty do puli) — konto i wyniki
+          w Wordle zostają nietknięte; gracz wystartuje w Snakes od zera przy powrocie.
+        </div>
+        <div id="players-list"></div>
       </div>
 
       <div class="adm-card">
@@ -134,7 +154,64 @@
       cfg = await api('GET', `/api/snakes/admin/settings?password=${encodeURIComponent(pass)}`);
       renderEvents();
       renderInfo();
+      await loadPlayers();
     }
+
+    let playersToday = null;
+
+    async function loadPlayers() {
+      const data = await api('GET', `/api/snakes/admin/players?password=${encodeURIComponent(pass)}`);
+      playersToday = data.today;
+      renderPlayers(data.players);
+    }
+
+    function renderPlayers(players) {
+      const list = document.getElementById('players-list');
+      if (!players.length) {
+        list.innerHTML = '<div class="adm-note">Nikt jeszcze nie zagrał w Snakes.</div>';
+        return;
+      }
+      list.innerHTML = players.map(p => `
+        <div class="pl-row" data-id="${p.player_id}">
+          <span class="pl-name">${esc(p.nickname)}</span>
+          <span class="pl-stats">
+            pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt · saldo ${p.balance}
+            · ruch dziś: <span class="${p.moved_today ? 'pl-moved' : ''}">${p.moved_today ? '✅ tak' : '— nie'}</span>
+          </span>
+          <span class="pl-actions">
+            <input type="date" class="pl-date" value="${playersToday}" />
+            <button class="btn-ghost pl-grant">➕ Dodaj ruch</button>
+            <button class="btn-danger pl-delete">🗑 Usuń</button>
+          </span>
+        </div>`).join('');
+    }
+
+    document.getElementById('players-list').addEventListener('click', async e => {
+      const row = e.target.closest('.pl-row');
+      if (!row) return;
+      const id = row.dataset.id;
+      const nickname = row.querySelector('.pl-name').textContent;
+
+      if (e.target.closest('.pl-grant')) {
+        const date = row.querySelector('.pl-date').value || playersToday;
+        try {
+          await api('POST', `/api/snakes/admin/players/${id}/grant-move`, { password: pass, date });
+          showToast(`➕ ${nickname}: dodatkowy ruch na ${date}`);
+          await loadPlayers();
+        } catch (err) {
+          showToast(err.message);
+        }
+      } else if (e.target.closest('.pl-delete')) {
+        if (!confirm(`Usunąć ${nickname} z trybu Snakes? Wordle i konto zostają nietknięte.`)) return;
+        try {
+          const res = await api('DELETE', `/api/snakes/admin/players/${id}?password=${encodeURIComponent(pass)}`);
+          showToast(`🗑 Usunięto ${res.deleted} z trybu Snakes`);
+          await loadPlayers();
+        } catch (err) {
+          showToast(err.message);
+        }
+      }
+    });
 
     function renderEvents() {
       const list = document.getElementById('events-list');

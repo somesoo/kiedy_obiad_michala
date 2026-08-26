@@ -2450,6 +2450,79 @@ app.get('/api/snakes/admin/settings', (req, res) => {
   });
 });
 
+// GET /api/snakes/admin/players — lista graczy z ich stanem w Snakes & Ladders
+// (tylko ci, którzy mieli już z grą kontakt — sl_state powstaje leniwie przy pierwszym
+// zapytaniu o stan). Do wyboru gracza w akcjach admina niżej.
+app.get('/api/snakes/admin/players', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const today = todayWaw();
+  const rows = db.prepare(`
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+    ORDER BY p.nickname COLLATE NOCASE ASC
+  `).all();
+  res.json({
+    players: rows.map(r => ({
+      player_id: r.player_id,
+      nickname: r.nickname,
+      tile: slTileOf(r.abs_pos),
+      laps: Number(r.laps),
+      balance: Number(r.balance),
+      total_points: Number(r.total_points),
+      last_move_date: r.last_move_date,
+      moved_today: r.last_move_date === today
+    })),
+    today
+  });
+});
+
+// DELETE /api/snakes/admin/players/:id — usuwa gracza WYŁĄCZNIE z trybu Snakes.
+// Kasuje jego stan, ekwipunek, dziennik ruchów, aktywne/przychodzące efekty i wpłaty
+// do puli co-op. Konto (players) i dane Wordle zostają nietknięte — to ten sam login,
+// więc gracz może dalej grać w Wordle, a w Snakes wystartuje od zera przy następnym
+// wejściu (sl_state tworzy się leniwie).
+app.delete('/api/snakes/admin/players/:id', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  transaction(() => {
+    db.prepare('DELETE FROM sl_moves WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_inventory WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
+    db.prepare('DELETE FROM sl_coop_contributions WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);
+  });
+
+  res.json({ success: true, deleted: player.nickname });
+});
+
+// POST /api/snakes/admin/players/:id/grant-move { password, date? } — daje graczowi
+// dodatkowy ruch danego dnia (domyślnie dziś, wg czasu Warszawy). Kasuje zapisany ruch
+// z tego dnia (jeśli istnieje) i zdejmuje blokadę last_move_date, więc gracz może
+// rzucić ponownie tak, jakby jeszcze dziś nie grał. NIE cofa punktów/pozycji z tamtego
+// ruchu — to świadomie dodatkowa szansa, a nie cofnięcie poprzedniej.
+app.post('/api/snakes/admin/players/:id/grant-move', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
+
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  transaction(() => {
+    slEnsureState(playerId);
+    db.prepare('DELETE FROM sl_moves WHERE player_id = ? AND move_date = ?').run(playerId, date);
+    db.prepare(
+      `UPDATE sl_state SET last_move_date = NULL WHERE player_id = ? AND last_move_date = ?`
+    ).run(playerId, date);
+  });
+
+  res.json({ success: true, nickname: player.nickname, date });
+});
+
 // POST /api/snakes/admin/settings { password, events: { typ: bool } } — przełącz zdarzenia
 app.post('/api/snakes/admin/settings', (req, res) => {
   if (!checkAdmin(req, res)) return;
