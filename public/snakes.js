@@ -108,8 +108,61 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 // ── APP MAIN ──
 function startApp() {
   loadState();
+  loadActivity();
   setInterval(updateCountdown, 1000);
 }
+
+// ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', coop_contribute: '🤝', knockback: '💥' };
+
+async function loadActivity(date) {
+  try {
+    const q = date ? `?date=${encodeURIComponent(date)}` : '';
+    const data = await api('GET', `/api/snakes/activity${q}`);
+    renderActivity(data);
+  } catch (e) {
+    console.error('Błąd ładowania historii:', e);
+  }
+}
+
+function renderActivity(data) {
+  const sel = document.getElementById('activity-date');
+  if (sel && sel.dataset.populated !== '1') {
+    const opts = ['<option value="">Ostatnie</option>'].concat(
+      data.dates.map(d => `<option value="${d}">${d}</option>`)
+    );
+    sel.innerHTML = opts.join('');
+    sel.dataset.populated = '1';
+  }
+
+  const list = document.getElementById('activity-list');
+  if (!list) return;
+  if (!data.entries.length) {
+    list.innerHTML = '<div class="text-muted small" style="padding:8px 4px">Brak aktywności.</div>';
+    return;
+  }
+
+  let lastDay = null;
+  let html = '';
+  for (const e of data.entries) {
+    if (e.date !== lastDay) {
+      html += `<div class="activity-day">${esc(e.date)}</div>`;
+      lastDay = e.date;
+    }
+    const time = new Date(e.created_at.replace(' ', 'T') + 'Z')
+      .toLocaleTimeString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit' });
+    const icon = ACTIVITY_ICONS[e.type] || '•';
+    html += `
+      <div class="activity-entry">
+        <span class="activity-time mono">${time}</span>
+        <span class="activity-icon">${icon}</span>
+        <span class="activity-body"><strong>${esc(e.nickname)}</strong> ${esc(e.detail)}</span>
+      </div>`;
+  }
+  list.innerHTML = html;
+}
+
+document.getElementById('activity-date').addEventListener('change', e => loadActivity(e.target.value || null));
 
 async function loadState() {
   try {
@@ -313,6 +366,7 @@ async function roll() {
     renderAll();
     showRollResult(res.move);
     if (res.move.knockback && res.move.knockback.length) flashKnockback(res.move.knockback);
+    loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
     showToast(e.message);
   } finally {
@@ -402,6 +456,7 @@ async function buyPowerup(type) {
     state.game = res.state;
     renderAll();
     showToast(`🛒 Kupiono: ${POWERUP_META[type].name}`);
+    loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
     showToast(e.message);
   } finally {
@@ -435,6 +490,7 @@ async function doUse(type, targetId) {
     } else {
       showToast(`${meta.icon} ${meta.name} użyty!`);
     }
+    loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
     showToast(e.message);
   } finally {
@@ -496,6 +552,9 @@ function renderEffectsHint(g) {
 // ── WYDARZENIE KOOPERACYJNE ──
 // Wspólna pula widoczna dla wszystkich: pasek postępu, lista kontrybutorów
 // i pole do dorzucenia własnych punktów. Po przekroczeniu progu rusza event bossowy.
+// Wpłaty do puli są ZAWSZE możliwe (backup mechanizm — patrz serwer), więc formularz
+// renderuje się niezależnie od fazy. Nad nim pokazujemy notatkę statusu + odliczanie
+// do najbliższej istotnej chwili (rozliczenia albo startu nowego okna).
 function renderCoop(g) {
   const c = g.coop;
   if (!c) return;
@@ -509,22 +568,19 @@ function renderCoop(g) {
       ).join('') + `</div>`
     : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nic nie dorzucił — bądź pierwszy!</span></div>`;
 
-  let action;
+  let statusNote = '';
+  let deadlineTarget, deadlineLabel;
   if (c.status === 'collecting') {
-    action = `
-      <div class="coop-form">
-        <input type="number" id="coop-amount" min="1" step="1" placeholder="ile pkt?" />
-        <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>
-      </div>`;
-  } else if (c.status === 'event_active') {
-    action = `<div class="coop-event">👹 <strong>Boss się obudził!</strong> Wydarzenie trwa — zbiórka zamknięta.</div>`;
+    deadlineTarget = c.resolve_at; deadlineLabel = 'rozliczenie za';
+  } else if (c.goal_met) {
+    statusNote = c.status === 'event_active'
+      ? `<div class="coop-event">👹 <strong>Cel osiągnięty!</strong> Trwa rozstrzygnięcie wydarzenia — dodatkowe wpłaty nadal możliwe.</div>`
+      : `<div class="coop-event">🏆 <strong>Cel osiągnięty!</strong> Czekamy na nowe okno.</div>`;
+    deadlineTarget = c.next_start_at; deadlineLabel = 'nowe okno za';
   } else {
-    action = `<div class="coop-event">🏆 Wydarzenie ukończone. Nowa zbiórka wkrótce.</div>`;
+    statusNote = `<div class="coop-event coop-event-bad">❌ <strong>Próg nieosiągnięty</strong> — każdy stracił ${c.penalty_amount} pkt.</div>`;
+    deadlineTarget = c.next_start_at; deadlineLabel = 'nowe okno za';
   }
-
-  const deadline = c.status === 'collecting'
-    ? `<span class="coop-deadline mono" id="coop-deadline" data-until="${esc(c.window_ends_at)}">⏳ –</span>`
-    : '';
 
   el.innerHTML = `
     <div class="coop-head">
@@ -535,16 +591,21 @@ function renderCoop(g) {
     <div class="coop-body">
       <div class="coop-sub text-muted small">
         Nagrody: <strong>${c.reward_pool} pkt</strong> · podział ${splitLabel} · Twój wkład: <strong>${c.my_contribution}</strong>
-        ${deadline ? `· kara za niedobicie: <strong>-${c.penalty_amount} pkt</strong>/gracza` : ''}
+        · kara za niedobicie: <strong>-${c.penalty_amount} pkt</strong>/gracza
       </div>
-      ${action}
+      <div class="coop-form">
+        <input type="number" id="coop-amount" min="1" step="1" placeholder="ile pkt?" />
+        <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>
+      </div>
     </div>
-    ${deadline}
+    ${statusNote}
+    <span class="coop-deadline mono" id="coop-deadline" data-until="${esc(deadlineTarget)}" data-label="${esc(deadlineLabel)}">⏳ –</span>
     ${chips}`;
   updateCoopDeadline();
 }
 
-// Odświeża licznik czasu do zamknięcia okna co-op (wołane co sekundę z updateCountdown).
+// Odświeża licznik czasu (wołane co sekundę z updateCountdown) — cel odliczania zależy
+// od fazy (rozliczenie w trakcie zbiórki, start nowego okna po jej zamknięciu).
 function updateCoopDeadline() {
   const el = document.getElementById('coop-deadline');
   if (!el) return;
@@ -553,7 +614,7 @@ function updateCoopDeadline() {
   const days = Math.floor(secs / 86400);
   const rest = secs % 86400;
   const daysTxt = days > 0 ? `${days}d ` : '';
-  el.textContent = `⏳ okno zamyka się za: ${daysTxt}${fmtHMS(rest)}`;
+  el.textContent = `⏳ ${el.dataset.label}: ${daysTxt}${fmtHMS(rest)}`;
 }
 
 document.getElementById('coop-panel').addEventListener('click', e => {
@@ -582,6 +643,7 @@ async function contributeCoop() {
     } else {
       showToast(`🤝 Dorzucono ${amount} pkt do wspólnej puli.`);
     }
+    loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
     showToast(e.message);
   } finally {

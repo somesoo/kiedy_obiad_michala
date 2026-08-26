@@ -6,7 +6,7 @@
    przeniósł się do lewego panelu, żeby oddać planszy maksimum miejsca. */
 .main-grid-snakes {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr) 240px;
   gap: 14px;
   width: 100%;
   padding: 12px 16px;
@@ -394,6 +394,8 @@
   }
   .col-side { order: 2; }
   .col-game { order: 1; }
+  .col-activity { order: 3; }
+  .activity-card { max-height: 50vh; overflow-y: auto; }
   .sl-board-wrap { min-height: 60vh; }
   .game-bar { flex-wrap: wrap; gap: 10px; }
   .sl-idx { font-size: 10px; }
@@ -410,18 +412,55 @@
     height: 100vh;
     overflow: hidden;
   }
-  body.snakes-page .col-side {
+  body.snakes-page .col-side,
+  body.snakes-page .col-activity {
     max-height: 100%;
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--muted) transparent;
   }
-  body.snakes-page .col-side::-webkit-scrollbar { width: 5px; }
-  body.snakes-page .col-side::-webkit-scrollbar-thumb {
+  body.snakes-page .col-side::-webkit-scrollbar,
+  body.snakes-page .col-activity::-webkit-scrollbar { width: 5px; }
+  body.snakes-page .col-side::-webkit-scrollbar-thumb,
+  body.snakes-page .col-activity::-webkit-scrollbar-thumb {
     background: var(--muted);
     border-radius: 3px;
   }
 }
+
+/* ── HISTORIA AKTYWNOŚCI (prawa kolumna) ── */
+.col-activity { min-width: 0; }
+.activity-card { display: flex; flex-direction: column; min-height: 0; }
+.activity-date-select {
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 10px;
+  padding: 2px 4px;
+  max-width: 90px;
+}
+.activity-day {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  margin: 8px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--muted);
+}
+.activity-day:first-child { margin-top: 0; }
+.activity-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.activity-time { color: var(--text-muted); font-size: 9px; flex: 0 0 auto; }
+.activity-icon { flex: 0 0 auto; }
+.activity-body { min-width: 0; word-break: break-word; }
+.activity-body strong { font-family: 'Space Grotesk', sans-serif; }
 
 /* ── RANKING W WĄSKIM PANELU ──
    Nadpisujemy współdzielone .lb-* ze style.css tylko wewnątrz lewego panelu,
