@@ -1249,6 +1249,10 @@ const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportio
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 const SL_KNOCKBACK_TILES = 5;
 
+// Ile ruchów (rzutów) dziennie ma każdy gracz. Freeze blokuje JEDEN z nich (nie cały
+// dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
+const SL_DAILY_ROLLS = 2;
+
 // ── OKNO CO-OP + KARA ──
 // Cykliczne "okno" na osiągnięcie progu puli, zakotwiczone w konkretnym dniu tygodnia
 // i godzinie (czasu Warszawy) — domyślnie start wtorek 13:00. Okno trwa WINDOW_DAYS
@@ -1289,18 +1293,21 @@ db.exec(`
     value    INTEGER DEFAULT 0          -- punkty bonusowe (bonus), 0 dla ladder/snake
   );
 
-  -- Dziennik ruchów — jednocześnie blokada „raz dziennie" przez UNIQUE(player_id, move_date).
+  -- Dziennik ruchów — blokada „SL_DAILY_ROLLS ruchów dziennie" przez
+  -- UNIQUE(player_id, move_date, move_seq): move_seq numeruje kolejne ruchy tego
+  -- samego dnia (1, 2, ...), więc każdy z dziennych ruchów dostaje własny wiersz.
   CREATE TABLE IF NOT EXISTS sl_moves (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id  INTEGER REFERENCES players(id),
     move_date  TEXT NOT NULL,           -- YYYY-MM-DD (Europe/Warsaw)
+    move_seq   INTEGER NOT NULL DEFAULT 1, -- który to ruch danego dnia (1, 2, ...)
     rolls      TEXT DEFAULT '[]',       -- JSON: rzucone wartości (1 lub 2 przy Double Move)
     from_abs   INTEGER,
     to_abs     INTEGER,
     points     INTEGER DEFAULT 0,
     note       TEXT,                    -- np. 'frozen', 'ladder', 'snake', 'bonus'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(player_id, move_date)
+    UNIQUE(player_id, move_date, move_seq)
   );
 
   -- Ekwipunek power-upów (ile sztuk danego typu ma gracz).
@@ -1367,6 +1374,54 @@ db.exec(`
 // dla istniejących wdrożeń (musi być PO utworzeniu tabeli, stąd nie przy graczach/games wyżej).
 ensureColumn('sl_state', 'has_avatar', 'INTEGER DEFAULT 0');
 ensureColumn('sl_state', 'avatar_updated_at', 'DATETIME');
+// Ile z dziennego limitu ruchów (SL_DAILY_ROLLS) gracz już zużył — liczone dla dnia
+// zapisanego w last_move_date; przy zmianie dnia licznik efektywnie wraca do zera
+// (patrz slRollsUsedToday), więc kolumna nie musi być sama w sobie zerowana o północy.
+ensureColumn('sl_state', 'rolls_today', 'INTEGER DEFAULT 0');
+
+// sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
+// jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
+// błąd unikalności, więc trzeba przebudować tabelę (SQLite nie zmienia constraintów
+// przez ALTER). Bezpieczne: to tylko dziennik/log, nie trzyma stanu gry (to sl_state).
+(function migrateSlMovesUniqueConstraint() {
+  const ddl = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='sl_moves'`).get();
+  if (!ddl || !ddl.sql.includes('UNIQUE(player_id, move_date)') || ddl.sql.includes('move_seq')) return;
+  transaction(() => {
+    db.exec(`
+      CREATE TABLE sl_moves_new (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id  INTEGER REFERENCES players(id),
+        move_date  TEXT NOT NULL,
+        move_seq   INTEGER NOT NULL DEFAULT 1,
+        rolls      TEXT DEFAULT '[]',
+        from_abs   INTEGER,
+        to_abs     INTEGER,
+        points     INTEGER DEFAULT 0,
+        note       TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(player_id, move_date, move_seq)
+      );
+      INSERT INTO sl_moves_new (id, player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note, created_at)
+        SELECT id, player_id, move_date, 1, rolls, from_abs, to_abs, points, note, created_at FROM sl_moves;
+      DROP TABLE sl_moves;
+      ALTER TABLE sl_moves_new RENAME TO sl_moves;
+    `);
+  });
+  console.log('Snakes & Ladders: sl_moves przebudowane pod wiele ruchów dziennie (move_seq)');
+})();
+
+// Backfill rolls_today: gracze, którzy mieli już zapisany last_move_date PRZED tą
+// aktualizacją, dostaliby świeżą kolumnę z DEFAULT 0 — czyli z powrotem PEŁNY dzienny
+// limit, mimo że część już dziś zużyli. Liczymy rzeczywistą liczbę ruchów z sl_moves
+// dla ich last_move_date i tym uzupełniamy. Bezpieczne uruchamiać przy każdym starcie:
+// dotyka tylko wierszy z rolls_today=0, więc dla już poprawnie policzonych graczy to no-op.
+db.exec(`
+  UPDATE sl_state SET rolls_today = (
+    SELECT COUNT(*) FROM sl_moves
+    WHERE sl_moves.player_id = sl_state.player_id AND sl_moves.move_date = sl_state.last_move_date
+  )
+  WHERE last_move_date IS NOT NULL AND rolls_today = 0
+`);
 
 // Zapisuje wpis do dziennika aktywności. Wołane z ruchu, sklepu, wpłat do puli i knockbacku.
 function slLogActivity(playerId, type, detail) {
@@ -1668,7 +1723,7 @@ function slBoardPayload() {
 // bramki na rzut (patrz POST /api/snakes/roll): kto nie wgrał zdjęcia, ten "nie gra".
 function slPlayersPayload(meId) {
   const rows = db.prepare(`
-    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.avatar_updated_at
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.rolls_today, s.avatar_updated_at
     FROM sl_state s JOIN players p ON p.id = s.player_id
     WHERE s.has_avatar = 1
     ORDER BY s.total_points DESC, s.abs_pos DESC
@@ -1678,18 +1733,23 @@ function slPlayersPayload(meId) {
   const shielded = new Set(db.prepare(
     `SELECT DISTINCT target_player_id AS id FROM sl_effects WHERE type = 'shield' AND status = 'pending'`
   ).all().map(r => r.id));
-  return rows.map(r => ({
-    player_id: r.player_id,
-    nickname: r.nickname,
-    avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at),
-    tile: slTileOf(r.abs_pos),
-    abs_pos: Number(r.abs_pos),
-    laps: Number(r.laps),
-    total_points: Number(r.total_points),
-    moved_today: r.last_move_date === today,
-    has_shield: shielded.has(r.player_id),
-    is_me: meId ? r.player_id === meId : false
-  }));
+  return rows.map(r => {
+    const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
+    return {
+      player_id: r.player_id,
+      nickname: r.nickname,
+      avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at),
+      tile: slTileOf(r.abs_pos),
+      abs_pos: Number(r.abs_pos),
+      laps: Number(r.laps),
+      total_points: Number(r.total_points),
+      moved_today: rollsUsedToday >= SL_DAILY_ROLLS,
+      rolls_used_today: rollsUsedToday,
+      rolls_remaining_today: Math.max(0, SL_DAILY_ROLLS - rollsUsedToday),
+      has_shield: shielded.has(r.player_id),
+      is_me: meId ? r.player_id === meId : false
+    };
+  });
 }
 
 // Oczekujące efekty na danym graczu (do pokazania „co Cię czeka w następnej turze").
@@ -2059,7 +2119,8 @@ startCoopWindowScheduler();
 function slBuildState(playerId) {
   const st = slEnsureState(playerId);
   const today = todayWaw();
-  const movedToday = st.last_move_date === today;
+  const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
+  const rollsRemainingToday = Math.max(0, SL_DAILY_ROLLS - rollsUsedToday);
   return {
     board: slBoardPayload(),
     players: slPlayersPayload(playerId),
@@ -2070,8 +2131,11 @@ function slBuildState(playerId) {
       laps: Number(st.laps),
       balance: Number(st.balance),
       total_points: Number(st.total_points),
-      moved_today: movedToday,
-      can_roll: !movedToday && !!st.has_avatar,
+      moved_today: rollsRemainingToday === 0,
+      rolls_used_today: rollsUsedToday,
+      rolls_remaining_today: rollsRemainingToday,
+      daily_rolls: SL_DAILY_ROLLS,
+      can_roll: rollsRemainingToday > 0 && !!st.has_avatar,
       has_shield: slHasShield(playerId),
       has_avatar: !!st.has_avatar,
       avatar_url: slAvatarUrl(playerId, st.avatar_updated_at)
@@ -2178,7 +2242,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
   const result = transaction(() => {
     const st = slEnsureState(playerId);
-    if (st.last_move_date === today) return { locked: true };
+    // rolls_today liczy się dla dnia zapisanego w last_move_date — inny dzień = licznik
+    // efektywnie na zero, bez potrzeby osobnego resetu o północy.
+    const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
+    if (rollsUsedToday >= SL_DAILY_ROLLS) return { locked: true };
+    const moveSeq = rollsUsedToday + 1;
 
     // Zbierz oczekujące efekty na tym graczu (tarcza nie jest efektem na turę — pomijamy).
     const pending = db.prepare(
@@ -2192,16 +2260,18 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       `UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`
     ).run(id);
 
-    // FREEZE: blokuje ruch. Zużywa dzienny ruch bez przesunięcia; inne efekty zostają.
+    // FREEZE: blokuje JEDEN ruch (nie cały dzień) — zużywa ten slot bez przesunięcia,
+    // inne sloty tego dnia (przy SL_DAILY_ROLLS > 1) zostają nietknięte.
     if (freeze) {
       consume(freeze.id);
       db.prepare(`
-        INSERT INTO sl_moves (player_id, move_date, rolls, from_abs, to_abs, points, note)
-        VALUES (?, ?, '[]', ?, ?, 0, 'frozen')
-      `).run(playerId, today, st.abs_pos, st.abs_pos);
-      db.prepare('UPDATE sl_state SET last_move_date = ? WHERE player_id = ?').run(today, playerId);
-      slLogActivity(playerId, 'roll', '❄️ Zamrożony — tura przepadła.');
-      return { frozen: true, source: freeze.source_player_id };
+        INSERT INTO sl_moves (player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note)
+        VALUES (?, ?, ?, '[]', ?, ?, 0, 'frozen')
+      `).run(playerId, today, moveSeq, st.abs_pos, st.abs_pos);
+      db.prepare('UPDATE sl_state SET last_move_date = ?, rolls_today = ? WHERE player_id = ?')
+        .run(today, moveSeq, playerId);
+      slLogActivity(playerId, 'roll', `❄️ Zamrożony — ruch ${moveSeq}/${SL_DAILY_ROLLS} dzisiaj przepadł.`);
+      return { frozen: true, source: freeze.source_player_id, rolls_used_today: moveSeq };
     }
 
     // DOUBLE MOVE: dwa rzuty w jednej turze.
@@ -2253,18 +2323,18 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const earned = pipPoints + progressPoints + lapPoints + tilePoints;
 
     db.prepare(`
-      INSERT INTO sl_moves (player_id, move_date, rolls, from_abs, to_abs, points, note)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(playerId, today, JSON.stringify(rolls), from_abs, abs, earned, notes.join(',') || null);
+      INSERT INTO sl_moves (player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(playerId, today, moveSeq, JSON.stringify(rolls), from_abs, abs, earned, notes.join(',') || null);
 
     db.prepare(`
       UPDATE sl_state
-      SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?, last_move_date = ?
+      SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?, last_move_date = ?, rolls_today = ?
       WHERE player_id = ?
-    `).run(abs, newLaps, earned, earned, today, playerId);
+    `).run(abs, newLaps, earned, earned, today, moveSeq, playerId);
 
     slLogActivity(playerId, 'roll',
-      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''}`);
+      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`);
 
     return {
       frozen: false,
@@ -2278,12 +2348,13 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       notes,
       curse_applied: !!curse,
       double_move: !!doubleMove,
-      knockback
+      knockback,
+      rolls_used_today: moveSeq
     };
   });
 
   if (result.locked) {
-    return res.status(400).json({ error: 'Dziś już wykonałeś ruch — wróć jutro (doba wg czasu Warszawy).' });
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${SL_DAILY_ROLLS} ruchy — wróć jutro (doba wg czasu Warszawy).` });
   }
 
   // ── ZDARZENIA DISCORD ──
@@ -2534,21 +2605,26 @@ app.get('/api/snakes/admin/players', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const today = todayWaw();
   const rows = db.prepare(`
-    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date, s.rolls_today
     FROM sl_state s JOIN players p ON p.id = s.player_id
     ORDER BY p.nickname COLLATE NOCASE ASC
   `).all();
   res.json({
-    players: rows.map(r => ({
-      player_id: r.player_id,
-      nickname: r.nickname,
-      tile: slTileOf(r.abs_pos),
-      laps: Number(r.laps),
-      balance: Number(r.balance),
-      total_points: Number(r.total_points),
-      last_move_date: r.last_move_date,
-      moved_today: r.last_move_date === today
-    })),
+    players: rows.map(r => {
+      const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
+      return {
+        player_id: r.player_id,
+        nickname: r.nickname,
+        tile: slTileOf(r.abs_pos),
+        laps: Number(r.laps),
+        balance: Number(r.balance),
+        total_points: Number(r.total_points),
+        last_move_date: r.last_move_date,
+        rolls_used_today: rollsUsedToday,
+        daily_rolls: SL_DAILY_ROLLS,
+        moved_today: rollsUsedToday >= SL_DAILY_ROLLS
+      };
+    }),
     today
   });
 });
@@ -2576,11 +2652,11 @@ app.delete('/api/snakes/admin/players/:id', (req, res) => {
   res.json({ success: true, deleted: player.nickname });
 });
 
-// POST /api/snakes/admin/players/:id/grant-move { password, date? } — daje graczowi
-// dodatkowy ruch danego dnia (domyślnie dziś, wg czasu Warszawy). Kasuje zapisany ruch
-// z tego dnia (jeśli istnieje) i zdejmuje blokadę last_move_date, więc gracz może
-// rzucić ponownie tak, jakby jeszcze dziś nie grał. NIE cofa punktów/pozycji z tamtego
-// ruchu — to świadomie dodatkowa szansa, a nie cofnięcie poprzedniej.
+// POST /api/snakes/admin/players/:id/grant-move { password, date? } — oddaje graczowi
+// JEDEN dodatkowy ruch danego dnia (domyślnie dziś, wg czasu Warszawy) — z SL_DAILY_ROLLS
+// dostępnych ruchów cofa licznik zużycia o jeden i kasuje ostatni zapisany ruch z tego
+// dnia. NIE cofa punktów/pozycji z ruchów już wykonanych — to dodatkowa szansa, nie
+// cofnięcie. Wołane wielokrotnie odda kolejne sloty (aż do pełnego dziennego limitu).
 app.post('/api/snakes/admin/players/:id/grant-move', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const playerId = parseInt(req.params.id, 10);
@@ -2589,15 +2665,21 @@ app.post('/api/snakes/admin/players/:id/grant-move', (req, res) => {
   const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
 
-  transaction(() => {
-    slEnsureState(playerId);
-    db.prepare('DELETE FROM sl_moves WHERE player_id = ? AND move_date = ?').run(playerId, date);
-    db.prepare(
-      `UPDATE sl_state SET last_move_date = NULL WHERE player_id = ? AND last_move_date = ?`
-    ).run(playerId, date);
+  const result = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.last_move_date !== date) return { already_full: true };
+    const used = Number(st.rolls_today);
+    if (used <= 0) return { already_full: true };
+    db.prepare('DELETE FROM sl_moves WHERE player_id = ? AND move_date = ? AND move_seq = ?')
+      .run(playerId, date, used);
+    db.prepare('UPDATE sl_state SET rolls_today = ? WHERE player_id = ?').run(used - 1, playerId);
+    return { already_full: false, rolls_used_today: used - 1 };
   });
 
-  res.json({ success: true, nickname: player.nickname, date });
+  if (result.already_full) {
+    return res.status(400).json({ error: `${player.nickname} ma już pełny limit ruchów na ${date}.` });
+  }
+  res.json({ success: true, nickname: player.nickname, date, rolls_used_today: result.rolls_used_today, daily_rolls: SL_DAILY_ROLLS });
 });
 
 // POST /api/snakes/admin/settings { password, events: { typ: bool } } — przełącz zdarzenia

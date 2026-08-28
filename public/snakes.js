@@ -487,12 +487,14 @@ function renderLegend() {
 function renderRollButton(g) {
   const btn = document.getElementById('btn-roll');
   const frozen = g.pending_effects.some(e => e.type === 'freeze');
+  const left = g.me.rolls_remaining_today;
   if (g.me.can_roll) {
     btn.disabled = false;
-    btn.textContent = frozen ? '🎲 Rzuć (uwaga: masz Freeze!)' : '🎲 Rzuć kostką';
+    const countTxt = g.me.daily_rolls > 1 ? ` (${left}/${g.me.daily_rolls})` : '';
+    btn.textContent = frozen ? `🎲 Rzuć (uwaga: masz Freeze!)${countTxt}` : `🎲 Rzuć kostką${countTxt}`;
   } else {
     btn.disabled = true;
-    btn.textContent = '✅ Ruch wykonany — wróć jutro';
+    btn.textContent = '✅ Ruchy wykorzystane — wróć jutro';
   }
 }
 
@@ -532,8 +534,10 @@ function flashKnockback(chain) {
 function showRollResult(m) {
   const el = document.getElementById('roll-result');
   if (m.frozen) {
-    el.innerHTML = `<span class="roll-frozen">❄️ Zostałeś zamrożony! Ruch przepada — tura pominięta.</span>`;
-    showToast('❄️ Freeze! Ktoś Cię zatrzymał — dziś nie ruszasz się z miejsca.');
+    const left = state.game ? state.game.me.rolls_remaining_today : 0;
+    const leftTxt = left > 0 ? ` Zostało Ci jeszcze ${left} dzisiaj.` : ' To był ostatni ruch na dziś.';
+    el.innerHTML = `<span class="roll-frozen">❄️ Zostałeś zamrożony! Ten ruch przepada.${leftTxt}</span>`;
+    showToast(`❄️ Freeze! Ktoś Cię zatrzymał na jeden ruch.${leftTxt}`);
     return;
   }
   const dice = m.rolls.map(r => `🎲${r}`).join(' + ');
@@ -854,9 +858,10 @@ function updateCountdown() {
   const textEl = document.getElementById('countdown-text');
   const barEl = document.getElementById('countdown-bar');
   if (g && g.me.can_roll) {
-    textEl.textContent = `🎲 Masz ruch na dziś! Kolejny za ${fmtHMS(toNext)}`;
+    const countTxt = g.me.daily_rolls > 1 ? ` (${g.me.rolls_remaining_today}/${g.me.daily_rolls})` : '';
+    textEl.textContent = `🎲 Masz ruch na dziś${countTxt}! Nowa doba za ${fmtHMS(toNext)}`;
   } else {
-    textEl.textContent = `🔒 Ruch wykonany — nowy ruch za ${fmtHMS(toNext)}`;
+    textEl.textContent = `🔒 Ruchy wykorzystane — nowe za ${fmtHMS(toNext)}`;
   }
   if (barEl) barEl.style.width = ((1 - toNext / 86400) * 100) + '%';
   updateCoopDeadline();

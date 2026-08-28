@@ -84,9 +84,11 @@
       <div class="adm-card">
         <h3>🎮 GRACZE</h3>
         <div class="adm-note">
-          „Dodaj ruch” zdejmuje blokadę dzienną dla wskazanej daty — kasuje zapisany
-          tamtejszy ruch i pozwala rzucić jeszcze raz. Nie cofa punktów z poprzedniego
-          rzutu, to dodatkowa szansa, nie cofnięcie. „Usuń” kasuje gracza WYŁĄCZNIE
+          „Dodaj ruch” oddaje graczowi JEDEN dodatkowy ruch na wskazaną datę (z dziennego
+          limitu — patrz „ruchy dziś” przy graczu) — kasuje ostatni zapisany tamtejszy
+          ruch i pozwala rzucić jeszcze raz. Nie cofa punktów z poprzednich rzutów, to
+          dodatkowa szansa, nie cofnięcie. Kliknij ponownie, żeby oddać kolejny slot.
+          „Usuń” kasuje gracza WYŁĄCZNIE
           z trybu Snakes (stan, ekwipunek, historia, wpłaty do puli) — konto i wyniki
           w Wordle zostają nietknięte; gracz wystartuje w Snakes od zera przy powrocie.
         </div>
@@ -176,7 +178,7 @@
           <span class="pl-name">${esc(p.nickname)}</span>
           <span class="pl-stats">
             pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt · saldo ${p.balance}
-            · ruch dziś: <span class="${p.moved_today ? 'pl-moved' : ''}">${p.moved_today ? '✅ tak' : '— nie'}</span>
+            · ruchy dziś: <span class="${p.moved_today ? 'pl-moved' : ''}">${p.rolls_used_today}/${p.daily_rolls}</span>
           </span>
           <span class="pl-actions">
             <input type="date" class="pl-date" value="${playersToday}" />
@@ -195,8 +197,8 @@
       if (e.target.closest('.pl-grant')) {
         const date = row.querySelector('.pl-date').value || playersToday;
         try {
-          await api('POST', `/api/snakes/admin/players/${id}/grant-move`, { password: pass, date });
-          showToast(`➕ ${nickname}: dodatkowy ruch na ${date}`);
+          const res = await api('POST', `/api/snakes/admin/players/${id}/grant-move`, { password: pass, date });
+          showToast(`➕ ${nickname}: dodatkowy ruch na ${date} (${res.rolls_used_today}/${res.daily_rolls} zużytych)`);
           await loadPlayers();
         } catch (err) {
           showToast(err.message);
