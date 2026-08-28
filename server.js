@@ -1391,14 +1391,13 @@ function slMetaSet(key, value) {
 
 // ── UKŁAD PLANSZY 7×7 ──
 // Drabiny ciągną w górę, węże w dół, pola bonusowe dają punkty bez przesunięcia.
-// Rozkład dobrany pod 49 pól: 5 drabin / 5 węży / 5 bonusów (~31% pól to pola specjalne),
-// z lekką przewagą drabin nad wężami, żeby pętla realnie posuwała się do przodu.
+// Rozkład dobrany pod 49 pól: 4 drabiny / 4 węże / 5 bonusów (~27% pól to pola specjalne).
 // Żaden cel skoku nie ląduje na innym polu specjalnym (brak reakcji łańcuchowych).
 const SL_LADDERS = [               // [from, to] — to > from
-  [3, 17], [8, 24], [14, 31], [21, 39], [28, 44]
+  [3, 17], [8, 24], [21, 39], [28, 44]
 ];
 const SL_SNAKES = [                // [from, to] — to < from
-  [12, 2], [19, 7], [27, 13], [36, 20], [45, 29]
+  [12, 2], [19, 7], [36, 20], [45, 29]
 ];
 const SL_BONUSES = [               // [position, points]
   [5, 15], [11, 20], [23, 25], [34, 30], [41, 35]
@@ -1416,6 +1415,10 @@ function slSeedBoardRows() {
 // proporcjonalnie (abs_pos × nowy/stary), więc każdy zostaje mniej więcej tam, gdzie był
 // (ten sam procent okrążenia), a punkty, salda i ekwipunek zostają nietknięte.
 // Migracja jest idempotentna: znacznik `board_size` w sl_meta pilnuje, by poszła raz.
+// Bump przy KAŻDEJ zmianie SL_LADDERS/SL_SNAKES/SL_BONUSES — wymusza reseed na już
+// działających wdrożeniach, żeby zmiana układu (nie tylko rozmiaru) też dotarła.
+const SL_BOARD_LAYOUT_VERSION = 2;
+
 function slMigrateBoard() {
   const rows = db.prepare('SELECT COUNT(*) AS c, MAX(position) AS m FROM sl_board').get();
   const stored = slMetaGet('board_size');
@@ -1424,6 +1427,7 @@ function slMigrateBoard() {
   if (Number(rows.c) === 0) {
     transaction(() => slSeedBoardRows());
     slMetaSet('board_size', SL_BOARD_SIZE);
+    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
     console.log(`Snakes & Ladders: plansza zaseedowana ${SL_BOARD_COLS}×${SL_BOARD_ROWS} (${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów)`);
     return;
   }
@@ -1432,23 +1436,37 @@ function slMigrateBoard() {
   const oldSize = stored ? Number(stored) : (Number(rows.m) >= SL_BOARD_SIZE ? 100 : SL_BOARD_SIZE);
   if (oldSize === SL_BOARD_SIZE) {
     slMetaSet('board_size', SL_BOARD_SIZE);
+  } else {
+    const scaled = transaction(() => {
+      let n = 0;
+      for (const st of db.prepare('SELECT player_id, abs_pos FROM sl_state').all()) {
+        const newAbs = Math.round(Number(st.abs_pos) * SL_BOARD_SIZE / oldSize);
+        db.prepare('UPDATE sl_state SET abs_pos = ?, laps = ? WHERE player_id = ?')
+          .run(newAbs, Math.floor(newAbs / SL_BOARD_SIZE), st.player_id);
+        n++;
+      }
+      db.exec('DELETE FROM sl_board');
+      slSeedBoardRows();
+      return n;
+    });
+    slMetaSet('board_size', SL_BOARD_SIZE);
+    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
+    console.log(`Snakes & Ladders: MIGRACJA planszy ${oldSize} → ${SL_BOARD_SIZE} pól, przeskalowano pozycje ${scaled} graczy (punkty i ekwipunek bez zmian)`);
     return;
   }
 
-  const scaled = transaction(() => {
-    let n = 0;
-    for (const st of db.prepare('SELECT player_id, abs_pos FROM sl_state').all()) {
-      const newAbs = Math.round(Number(st.abs_pos) * SL_BOARD_SIZE / oldSize);
-      db.prepare('UPDATE sl_state SET abs_pos = ?, laps = ? WHERE player_id = ?')
-        .run(newAbs, Math.floor(newAbs / SL_BOARD_SIZE), st.player_id);
-      n++;
-    }
-    db.exec('DELETE FROM sl_board');
-    slSeedBoardRows();
-    return n;
-  });
-  slMetaSet('board_size', SL_BOARD_SIZE);
-  console.log(`Snakes & Ladders: MIGRACJA planszy ${oldSize} → ${SL_BOARD_SIZE} pól, przeskalowano pozycje ${scaled} graczy (punkty i ekwipunek bez zmian)`);
+  // Rozmiar bez zmian — ale sam UKŁAD (które pola są czym) mógł się zmienić w kodzie.
+  // sl_board nie trzyma stanu gracza (to robi sl_state), więc reseed jest tu bezpieczny:
+  // nie rusza pozycji, punktów ani ekwipunku nikogo — zmienia tylko co stoi na której kratce.
+  const storedLayout = Number(slMetaGet('board_layout_version') || 0);
+  if (storedLayout !== SL_BOARD_LAYOUT_VERSION) {
+    transaction(() => {
+      db.exec('DELETE FROM sl_board');
+      slSeedBoardRows();
+    });
+    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
+    console.log(`Snakes & Ladders: układ planszy zaktualizowany (wersja ${SL_BOARD_LAYOUT_VERSION}) — ${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów`);
+  }
 }
 slMigrateBoard();
 

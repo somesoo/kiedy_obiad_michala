@@ -291,34 +291,44 @@ function renderStats(g) {
 // ── PLANSZA (serpentyna 7×7, pętla) ──
 // Wymiary bierzemy z serwera (board.cols/rows), więc zmiana rozmiaru planszy
 // po stronie backendu nie wymaga ruszania frontu.
-// Wysokość „szczeliny” między wierszami, jako ułamek wysokości standardowego wiersza.
-// Kafelek na zakręcie zajmuje swój wiersz PLUS tę szczelinę — stąd wygląda na wydłużony
-// dokładnie tam, gdzie ścieżka skręca do wiersza nad nim; pozostałe kafelki (bez zakrętu)
-// mają standardową wysokość, a szczelina między nimi zostaje po prostu pusta — to właśnie
-// tworzy wizualną przerwę między wierszami.
+// Wysokość „szczeliny” między wierszami (sumarycznie), jako ułamek wysokości
+// standardowego wiersza. Każda szczelina dzieli się na DWIE połówki — po jednej dla
+// każdego z dwóch kafelków zakrętu, które się w niej stykają (kafelek KOŃCZĄCY wiersz
+// poniżej i kafelek ZACZYNAJĄCY wiersz powyżej), więc oba rosną symetrycznie i spotykają
+// się pośrodku szczeliny. Pozostałe kafelki (bez zakrętu) mają standardową wysokość,
+// a cała szczelina między nimi zostaje pusta — to tworzy wizualną przerwę między wierszami.
 const SL_ROW_GAP_FR = 0.35;
+const SL_ROW_HALF_GAP_FR = SL_ROW_GAP_FR / 2;
 
 // Geometria pola: który to wiersz/kolumna (licząc od góry planszy) i czy to kafelek
-// "na zakręcie" — ostatni odwiedzany w danym wierszu, z którego numeracja skacze
-// do wiersza nad nim (boustrophedon, jak w klasycznych Wężach i Drabinach).
+// "na zakręcie" — a jeśli tak, to której strony: EXIT (ostatni odwiedzany w wierszu,
+// stąd ścieżka skacze do wiersza NAD nim) czy ENTRY (pierwszy odwiedzany w wierszu,
+// TU ścieżka weszła z wiersza POD nim). To ta sama para kolumn co w klasycznym
+// boustrophedon — EXIT wiersza r i ENTRY wiersza r+1 leżą w tej samej kolumnie.
 function slTileGeometry(idx, cols, rows) {
   const boardRow = Math.floor(idx / cols);
   const posInRow = idx % cols;
   const leftToRight = boardRow % 2 === 0;
   const col = leftToRight ? posInRow : (cols - 1 - posInRow);
   const rowFromTop = rows - 1 - boardRow;
-  const turnCol = leftToRight ? cols - 1 : 0;
-  const isTurn = boardRow < rows - 1 && col === turnCol;
-  return { boardRow, col, rowFromTop, isTurn };
+  const exitCol = leftToRight ? cols - 1 : 0;
+  const entryCol = leftToRight ? 0 : cols - 1;
+  const isExit = boardRow < rows - 1 && col === exitCol;
+  const isEntry = boardRow > 0 && col === entryCol;
+  return { boardRow, col, rowFromTop, isExit, isEntry, isTurn: isExit || isEntry };
 }
 
-// CSS grid-row dla danego pola. Tory idą na przemian: standard, szczelina, standard,
-// szczelina, ..., standard (patrz grid-template-rows w renderBoard) — standardowy tor
-// dla rowFromTop=k zaczyna się na linii 2k+1. Kafelek na zakręcie dokłada do siebie
-// szczelinę TUŻ NAD sobą (w stronę mniejszego rowFromTop = wiersza, do którego skręca).
-function slGridRowStyle(rowFromTop, isTurn) {
-  const stdLine = 2 * rowFromTop + 1;
-  return isTurn ? `${stdLine - 1} / ${stdLine + 1}` : `${stdLine} / ${stdLine + 1}`;
+// CSS grid-row dla danego pola. Tory idą w trójkach: standard, pół-szczelina-A,
+// pół-szczelina-B, standard, ... (patrz grid-template-rows w renderBoard) —
+// standardowy tor dla rowFromTop=m zaczyna się na linii 3m+1. Kafelek EXIT dokłada
+// do siebie pół-szczelinę B tuż NAD sobą (w stronę wiersza, do którego skręca);
+// kafelek ENTRY dokłada pół-szczelinę A tuż POD sobą (w stronę wiersza, z którego
+// przyszedł) — oba rosną o tyle samo, każdy w swoją stronę, spotykając się pośrodku.
+function slGridRowStyle(rowFromTop, isExit, isEntry) {
+  const m = rowFromTop;
+  if (isExit) return `${3 * m} / ${3 * m + 2}`;
+  if (isEntry) return `${3 * m + 1} / ${3 * m + 3}`;
+  return `${3 * m + 1} / ${3 * m + 2}`;
 }
 
 function renderBoard(g) {
@@ -341,16 +351,16 @@ function renderBoard(g) {
     for (let c = 0; c < cols; c++) {
       const col = leftToRight ? c : (cols - 1 - c);
       const idx = boardRow * cols + col;
-      const { isTurn } = slTileGeometry(idx, cols, rows);
-      const rowStyle = slGridRowStyle(rowFromTop, isTurn);
+      const { isExit, isEntry, isTurn } = slTileGeometry(idx, cols, rows);
+      const rowStyle = slGridRowStyle(rowFromTop, isExit, isEntry);
       if (idx >= size) { cells += `<div class="sl-cell sl-cell-empty" style="grid-row:${rowStyle}"></div>`; continue; }
       cells += renderCell(idx, special[idx], pawns[idx], rowStyle, isTurn);
     }
   }
 
-  // grid-template-rows liczony w JS (nie w statycznym CSS): powtarza [standard, szczelina]
-  // dla każdej pary wierszy poza ostatnim, kończąc samym standardowym torem u góry.
-  const rowTemplate = `repeat(${rows - 1}, 1fr ${SL_ROW_GAP_FR}fr) 1fr`;
+  // grid-template-rows liczony w JS (nie w statycznym CSS): powtarza [standard, pół-szczelina,
+  // pół-szczelina] dla każdej pary wierszy poza ostatnim, kończąc samym standardowym torem u góry.
+  const rowTemplate = `repeat(${rows - 1}, 1fr ${SL_ROW_HALF_GAP_FR}fr ${SL_ROW_HALF_GAP_FR}fr) 1fr`;
 
   area.innerHTML = `
     <div class="sl-board-wrap">
@@ -364,12 +374,12 @@ function renderBoard(g) {
 // kafelków na zakręcie, żeby linie łączników (drabiny/węże) i tak trafiały w środek
 // realnie wyrenderowanego kafelka, a nie w środek "standardowej" wysokości wiersza.
 function tileCenter(idx, cols, rows) {
-  const { col, rowFromTop, isTurn } = slTileGeometry(idx, cols, rows);
-  const totalWeight = rows + (rows - 1) * SL_ROW_GAP_FR;
+  const { col, rowFromTop, isExit, isEntry } = slTileGeometry(idx, cols, rows);
+  const totalWeight = rows + (rows - 1) * SL_ROW_GAP_FR; // suma wag = bez zmian (szczelina tylko podzielona na pół)
   const stdStart = rowFromTop * (1 + SL_ROW_GAP_FR); // suma wag torów przed tym wierszem
-  const centerWeight = isTurn
-    ? stdStart - SL_ROW_GAP_FR / 2 + 0.5
-    : stdStart + 0.5;
+  let centerWeight = stdStart + 0.5;
+  if (isExit) centerWeight -= SL_ROW_HALF_GAP_FR / 2;
+  else if (isEntry) centerWeight += SL_ROW_HALF_GAP_FR / 2;
   return {
     x: ((col + 0.5) / cols) * 100,
     y: (centerWeight / totalWeight) * 100
