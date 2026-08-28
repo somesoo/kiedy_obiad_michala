@@ -116,14 +116,39 @@ async function startApp() {
   setInterval(updateCountdown, 1000);
 }
 
-// ── ZDJĘCIE PROFILOWE (wymagane, żeby zagrać) ──
+// ── ZDJĘCIE PROFILOWE (wymagane, żeby zagrać — i wymienialne w każdej chwili) ──
 // Kadruje wgrany plik do kwadratu (cover-crop, jak object-fit:cover) i eksportuje
 // jako JPEG przez <canvas> — trzyma przesyłany rozmiar małym niezależnie od tego,
 // jak duże zdjęcie wgra użytkownik, i gwarantuje, że serwer zawsze dostaje realny JPEG.
 let avatarBlob = null;
+let avatarOverlayMandatory = true; // false = otwarty dobrowolnie do zmiany — wolno zamknąć bez uploadu
 
-function showAvatarOverlay() {
-  document.getElementById('main-content').style.display = 'none';
+// `mandatory` = true (domyślnie): ekran blokujący grę, bez możliwości zamknięcia (brak
+// zdjęcia). `mandatory` = false: dobrowolna zmiana już istniejącego zdjęcia — gra zostaje
+// widoczna pod spodem, pojawia się ✕, a podgląd startuje od AKTUALNEGO zdjęcia gracza.
+function showAvatarOverlay(mandatory = true) {
+  avatarOverlayMandatory = mandatory;
+  avatarBlob = null;
+  document.getElementById('avatar-overlay-close').style.display = mandatory ? 'none' : 'block';
+  document.getElementById('avatar-overlay-title').textContent = mandatory ? 'Dodaj zdjęcie' : 'Zmień zdjęcie';
+  document.getElementById('avatar-overlay-sub').textContent = mandatory
+    ? 'Żeby zagrać, potrzebujesz zdjęcia — Twojego albo dowolnego innego. Będzie widoczne jako okrągły awatar na wspólnej planszy; najedź na niego myszką, żeby zobaczyć większy podgląd i nick.'
+    : 'Wybierz nowe zdjęcie — zastąpi poprzednie wszędzie, gdzie się pojawiasz (plansza, wybór celu).';
+  document.getElementById('avatar-error').textContent = '';
+  document.getElementById('avatar-file').value = '';
+  document.getElementById('btn-avatar-upload').disabled = true;
+
+  const preview = document.getElementById('avatar-preview');
+  const myUrl = state.game && state.game.me.avatar_url;
+  if (!mandatory && myUrl) {
+    preview.src = myUrl;
+    preview.classList.add('has-img');
+  } else {
+    preview.removeAttribute('src');
+    preview.classList.remove('has-img');
+  }
+
+  if (mandatory) document.getElementById('main-content').style.display = 'none';
   document.getElementById('avatar-overlay').style.display = 'flex';
 }
 
@@ -131,6 +156,44 @@ function hideAvatarOverlay() {
   document.getElementById('avatar-overlay').style.display = 'none';
   document.getElementById('main-content').style.display = 'grid';
 }
+
+document.getElementById('btn-change-avatar').addEventListener('click', () => showAvatarOverlay(false));
+document.getElementById('avatar-overlay-close').addEventListener('click', () => {
+  if (!avatarOverlayMandatory) hideAvatarOverlay();
+});
+
+// ── WIĘKSZY PODGLĄD ZDJĘCIA NA HOVER ──
+// Delegacja na document (nie na poszczególnych <img>) — pionki i miniatury w wyborze
+// celu są re-renderowane co chwilę, więc listenery wpięte bezpośrednio w nie
+// znikałyby przy każdym odświeżeniu. Działa dla każdego .sl-pawn-avatar / .target-avatar,
+// niezależnie kiedy powstał.
+const AVATAR_HOVER_SELECTOR = '.sl-pawn-avatar, .target-avatar, .my-avatar-thumb';
+
+function positionAvatarHoverPreview(x, y) {
+  const el = document.getElementById('avatar-hover-preview');
+  const pad = 18, w = 180, h = 180;
+  let left = x + pad, top = y + pad;
+  if (left + w > window.innerWidth) left = x - w - pad;
+  if (top + h > window.innerHeight) top = y - h - pad;
+  el.style.left = Math.max(4, left) + 'px';
+  el.style.top = Math.max(4, top) + 'px';
+}
+
+document.addEventListener('mouseover', e => {
+  const img = e.target.closest(AVATAR_HOVER_SELECTOR);
+  if (!img || !img.src) return;
+  document.getElementById('avatar-hover-img').src = img.src;
+  positionAvatarHoverPreview(e.clientX, e.clientY);
+  document.getElementById('avatar-hover-preview').style.display = 'block';
+});
+document.addEventListener('mousemove', e => {
+  const preview = document.getElementById('avatar-hover-preview');
+  if (preview.style.display === 'block') positionAvatarHoverPreview(e.clientX, e.clientY);
+});
+document.addEventListener('mouseout', e => {
+  if (!e.target.closest(AVATAR_HOVER_SELECTOR)) return;
+  document.getElementById('avatar-hover-preview').style.display = 'none';
+});
 
 function resizeImageToJpeg(file, size) {
   return new Promise((resolve, reject) => {
@@ -186,11 +249,12 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Błąd serwera');
+    const wasMandatory = avatarOverlayMandatory;
     state.game = data.state;
     hideAvatarOverlay();
     renderAll();
     loadActivity();
-    showToast('🖼️ Zdjęcie wgrane — możesz grać!');
+    showToast(wasMandatory ? '🖼️ Zdjęcie wgrane — możesz grać!' : '🖼️ Zdjęcie zaktualizowane!');
   } catch (err) {
     errEl.textContent = err.message;
     btn.disabled = false;
@@ -276,6 +340,8 @@ function renderAll() {
 // ── STATY ──
 function renderStats(g) {
   document.getElementById('user-balance-display').textContent = `💰 ${g.me.balance} pkt`;
+  const thumb = document.getElementById('my-avatar-thumb');
+  if (thumb && g.me.avatar_url) thumb.src = g.me.avatar_url;
   document.getElementById('stat-points').textContent = g.me.total_points;
   document.getElementById('stat-balance').textContent = g.me.balance;
   document.getElementById('stat-tile').textContent = g.me.tile;

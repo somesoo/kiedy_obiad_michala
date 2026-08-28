@@ -46,11 +46,12 @@
     </div>
   </div>
 
-  <!-- ZDJĘCIE PROFILOWE — WYMAGANE DO GRY -->
+  <!-- ZDJĘCIE PROFILOWE — WYMAGANE DO GRY (i do zmiany istniejącego) -->
   <div class="overlay" id="avatar-overlay" style="display:none">
     <div class="login-card">
-      <h2>Dodaj zdjęcie</h2>
-      <p class="login-sub">Żeby zagrać, potrzebujesz zdjęcia — Twojego albo dowolnego innego. Będzie widoczne jako okrągły awatar na wspólnej planszy; najedź na niego myszką, żeby zobaczyć nick.</p>
+      <button class="avatar-overlay-close" id="avatar-overlay-close" style="display:none" title="Zamknij">✕</button>
+      <h2 id="avatar-overlay-title">Dodaj zdjęcie</h2>
+      <p class="login-sub" id="avatar-overlay-sub">Żeby zagrać, potrzebujesz zdjęcia — Twojego albo dowolnego innego. Będzie widoczne jako okrągły awatar na wspólnej planszy; najedź na niego myszką, żeby zobaczyć większy podgląd i nick.</p>
       <div class="avatar-preview-wrap">
         <img class="avatar-preview" id="avatar-preview" alt="" />
         <span class="avatar-preview-placeholder" id="avatar-preview-placeholder">📷</span>
@@ -94,6 +95,10 @@
 
       <div class="mini-card">
         <div class="mini-head">TWOJE STATY</div>
+        <div class="my-avatar-row">
+          <img class="my-avatar-thumb" id="my-avatar-thumb" alt="" />
+          <button class="btn-ghost my-avatar-change" id="btn-change-avatar">🔄 Zmień zdjęcie</button>
+        </div>
         <div class="sl-stats">
           <div class="sl-stat"><span class="sl-stat-num accent" id="stat-points">–</span><span class="sl-stat-lbl">⭐ pkt</span></div>
           <div class="sl-stat"><span class="sl-stat-num" id="stat-balance">–</span><span class="sl-stat-lbl">💰 saldo</span></div>
@@ -169,6 +174,11 @@
 
   <!-- CONFETTI -->
   <div class="confetti-container" id="confetti-container"></div>
+
+  <!-- WIĘKSZY PODGLĄD ZDJĘCIA PO NAJECHANIU (pionki na planszy + wybór celu) -->
+  <div class="avatar-hover-preview" id="avatar-hover-preview" style="display:none">
+    <img id="avatar-hover-img" alt="" />
+  </div>
 
   <script src="snakes.js"></script>
 </body>
