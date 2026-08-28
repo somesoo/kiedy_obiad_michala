@@ -291,6 +291,36 @@ function renderStats(g) {
 // ── PLANSZA (serpentyna 7×7, pętla) ──
 // Wymiary bierzemy z serwera (board.cols/rows), więc zmiana rozmiaru planszy
 // po stronie backendu nie wymaga ruszania frontu.
+// Wysokość „szczeliny” między wierszami, jako ułamek wysokości standardowego wiersza.
+// Kafelek na zakręcie zajmuje swój wiersz PLUS tę szczelinę — stąd wygląda na wydłużony
+// dokładnie tam, gdzie ścieżka skręca do wiersza nad nim; pozostałe kafelki (bez zakrętu)
+// mają standardową wysokość, a szczelina między nimi zostaje po prostu pusta — to właśnie
+// tworzy wizualną przerwę między wierszami.
+const SL_ROW_GAP_FR = 0.35;
+
+// Geometria pola: który to wiersz/kolumna (licząc od góry planszy) i czy to kafelek
+// "na zakręcie" — ostatni odwiedzany w danym wierszu, z którego numeracja skacze
+// do wiersza nad nim (boustrophedon, jak w klasycznych Wężach i Drabinach).
+function slTileGeometry(idx, cols, rows) {
+  const boardRow = Math.floor(idx / cols);
+  const posInRow = idx % cols;
+  const leftToRight = boardRow % 2 === 0;
+  const col = leftToRight ? posInRow : (cols - 1 - posInRow);
+  const rowFromTop = rows - 1 - boardRow;
+  const turnCol = leftToRight ? cols - 1 : 0;
+  const isTurn = boardRow < rows - 1 && col === turnCol;
+  return { boardRow, col, rowFromTop, isTurn };
+}
+
+// CSS grid-row dla danego pola. Tory idą na przemian: standard, szczelina, standard,
+// szczelina, ..., standard (patrz grid-template-rows w renderBoard) — standardowy tor
+// dla rowFromTop=k zaczyna się na linii 2k+1. Kafelek na zakręcie dokłada do siebie
+// szczelinę TUŻ NAD sobą (w stronę mniejszego rowFromTop = wiersza, do którego skręca).
+function slGridRowStyle(rowFromTop, isTurn) {
+  const stdLine = 2 * rowFromTop + 1;
+  return isTurn ? `${stdLine - 1} / ${stdLine + 1}` : `${stdLine} / ${stdLine + 1}`;
+}
+
 function renderBoard(g) {
   const area = document.getElementById('board-area');
   const size = g.board.size;
@@ -311,28 +341,38 @@ function renderBoard(g) {
     for (let c = 0; c < cols; c++) {
       const col = leftToRight ? c : (cols - 1 - c);
       const idx = boardRow * cols + col;
-      if (idx >= size) { cells += `<div class="sl-cell sl-cell-empty"></div>`; continue; }
-      cells += renderCell(idx, special[idx], pawns[idx]);
+      const { isTurn } = slTileGeometry(idx, cols, rows);
+      const rowStyle = slGridRowStyle(rowFromTop, isTurn);
+      if (idx >= size) { cells += `<div class="sl-cell sl-cell-empty" style="grid-row:${rowStyle}"></div>`; continue; }
+      cells += renderCell(idx, special[idx], pawns[idx], rowStyle, isTurn);
     }
   }
 
+  // grid-template-rows liczony w JS (nie w statycznym CSS): powtarza [standard, szczelina]
+  // dla każdej pary wierszy poza ostatnim, kończąc samym standardowym torem u góry.
+  const rowTemplate = `repeat(${rows - 1}, 1fr ${SL_ROW_GAP_FR}fr) 1fr`;
+
   area.innerHTML = `
     <div class="sl-board-wrap">
-      <div class="sl-board" style="--cols:${cols};--rows:${rows}">${cells}</div>
+      <div class="sl-board" style="--cols:${cols};grid-template-rows:${rowTemplate}">${cells}</div>
       ${renderConnectors(g, cols, rows)}
     </div>
     ${renderLegend()}`;
 }
 
-// Środek pola w procentach szerokości/wysokości planszy (serpentyna jak w renderBoard).
+// Środek pola w procentach szerokości/wysokości planszy — uwzględnia wydłużenie
+// kafelków na zakręcie, żeby linie łączników (drabiny/węże) i tak trafiały w środek
+// realnie wyrenderowanego kafelka, a nie w środek "standardowej" wysokości wiersza.
 function tileCenter(idx, cols, rows) {
-  const boardRow = Math.floor(idx / cols);
-  const posInRow = idx % cols;
-  const col = boardRow % 2 === 0 ? posInRow : (cols - 1 - posInRow);
-  const rowFromTop = rows - 1 - boardRow;
+  const { col, rowFromTop, isTurn } = slTileGeometry(idx, cols, rows);
+  const totalWeight = rows + (rows - 1) * SL_ROW_GAP_FR;
+  const stdStart = rowFromTop * (1 + SL_ROW_GAP_FR); // suma wag torów przed tym wierszem
+  const centerWeight = isTurn
+    ? stdStart - SL_ROW_GAP_FR / 2 + 0.5
+    : stdStart + 0.5;
   return {
     x: ((col + 0.5) / cols) * 100,
-    y: ((rowFromTop + 0.5) / rows) * 100
+    y: (centerWeight / totalWeight) * 100
   };
 }
 
@@ -389,8 +429,9 @@ function renderLinkDots(links, cols, rows) {
   return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
 
-function renderCell(idx, sp, players) {
+function renderCell(idx, sp, players, rowStyle, isTurn) {
   let cls = 'sl-cell';
+  if (isTurn) cls += ' sl-cell-turn';
   let mark = '';
   if (sp) {
     cls += ` sl-${sp.kind}`;
@@ -414,7 +455,7 @@ function renderCell(idx, sp, players) {
       </span>`;
   }).join('');
   return `
-    <div class="${cls}">
+    <div class="${cls}" style="grid-row:${rowStyle}">
       <span class="sl-idx">${idx}</span>
       ${mark}
       <div class="sl-pawns">${pawnsHtml}</div>

@@ -136,8 +136,17 @@
   inset: 0;
   display: grid;
   grid-template-columns: repeat(var(--cols, 7), 1fr);
-  grid-template-rows: repeat(var(--rows, 7), 1fr);
-  gap: 5px;
+  /* grid-template-rows ustawiany z JS (renderBoard) — tory na przemian standard/szczelina,
+     żeby kafelki na zakręcie (sl-cell-turn) mogły wydłużyć się o szczelinę nad sobą przez
+     grid-row: span 2, a pozostałe kafelki w tym samym wierszu zostały standardowej wysokości.
+     Stąd tylko column-gap tutaj — odstęp między wierszami to same tory szczelin. */
+  column-gap: 5px;
+}
+/* Kafelek na zakręcie: zajmuje swój wiersz + szczelinę nad nim (patrz slGridRowStyle),
+   więc jest wyraźnie wyższy niż sąsiedzi w tym samym wierszu — to właśnie ma pokazywać,
+   że tu ścieżka skręca do wiersza powyżej. */
+.sl-cell-turn {
+  z-index: 1;
 }
 .sl-cell {
   position: relative;
