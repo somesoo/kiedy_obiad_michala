@@ -41,6 +41,10 @@ function maxAttemptsFor(wordLength) {
 const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
+// Zdjęcia profilowe Snakes — wymagane do gry, serwowane statycznie spod /avatars/<id>.jpg.
+const avatarsDir = path.join(__dirname, 'public', 'avatars');
+if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+
 const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
 
 // ── MIGRACJA ──
@@ -1266,13 +1270,15 @@ const SL_COOP_START_HOUR = Number(process.env.SNAKES_COOP_START_HOUR ?? 13);
 db.exec(`
   -- Stan gracza w Wężach i Drabinach
   CREATE TABLE IF NOT EXISTS sl_state (
-    player_id      INTEGER PRIMARY KEY REFERENCES players(id),
-    abs_pos        INTEGER DEFAULT 0,   -- łączny przebyty dystans (pól od startu)
-    laps           INTEGER DEFAULT 0,   -- ukończone okrążenia
-    balance        INTEGER DEFAULT 0,   -- punkty do wydania w sklepie
-    total_points   INTEGER DEFAULT 0,   -- suma zdobytych punktów (leaderboard)
-    last_move_date TEXT,                -- YYYY-MM-DD (Europe/Warsaw) ostatniego ruchu
-    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+    player_id         INTEGER PRIMARY KEY REFERENCES players(id),
+    abs_pos           INTEGER DEFAULT 0,   -- łączny przebyty dystans (pól od startu)
+    laps              INTEGER DEFAULT 0,   -- ukończone okrążenia
+    balance           INTEGER DEFAULT 0,   -- punkty do wydania w sklepie
+    total_points      INTEGER DEFAULT 0,   -- suma zdobytych punktów (leaderboard)
+    last_move_date    TEXT,                -- YYYY-MM-DD (Europe/Warsaw) ostatniego ruchu
+    has_avatar        INTEGER DEFAULT 0,   -- 1 = ma zdjęcie profilowe (wymagane do gry)
+    avatar_updated_at DATETIME,            -- kiedy ostatnio wgrał/zmienił zdjęcie
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Konfiguracja wspólnej planszy: typ pola i (dla węża/drabiny) cel skoku.
@@ -1356,6 +1362,11 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// sl_state powstał już wcześniej niż zdjęcia profilowe w tym projekcie — dołóż kolumny
+// dla istniejących wdrożeń (musi być PO utworzeniu tabeli, stąd nie przy graczach/games wyżej).
+ensureColumn('sl_state', 'has_avatar', 'INTEGER DEFAULT 0');
+ensureColumn('sl_state', 'avatar_updated_at', 'DATETIME');
 
 // Zapisuje wpis do dziennika aktywności. Wołane z ruchu, sklepu, wpłat do puli i knockbacku.
 function slLogActivity(playerId, type, detail) {
@@ -1481,6 +1492,15 @@ function d6() {
 // Pola na planszy = abs_pos zwinięty do 0..SL_BOARD_SIZE-1
 function slTileOf(absPos) {
   return ((absPos % SL_BOARD_SIZE) + SL_BOARD_SIZE) % SL_BOARD_SIZE;
+}
+
+// URL zdjęcia profilowego gracza — z parametrem wersji (data ostatniej zmiany), żeby
+// przeglądarki od razu widziały nowe zdjęcie po re-uploadzie, a nie stare z cache'u.
+// null, gdy gracz jeszcze nie wgrał zdjęcia (avatar_updated_at puste).
+function slAvatarUrl(playerId, avatarUpdatedAt) {
+  if (!avatarUpdatedAt) return null;
+  const v = Date.parse(avatarUpdatedAt.replace(' ', 'T') + 'Z') || Date.now();
+  return `/avatars/${playerId}.jpg?v=${v}`;
 }
 
 // ── SHIELD ──
@@ -1625,10 +1645,14 @@ function slBoardPayload() {
 }
 
 // Pozycje wszystkich graczy na wspólnej planszy (widoczne dla każdego).
+// TYLKO gracze ze zdjęciem profilowym — bez zdjęcia nie widać ich na planszy i nie da
+// się ich wskazać jako celu power-upa (has_avatar = 1 w WHERE). To lustrzane odbicie
+// bramki na rzut (patrz POST /api/snakes/roll): kto nie wgrał zdjęcia, ten "nie gra".
 function slPlayersPayload(meId) {
   const rows = db.prepare(`
-    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.avatar_updated_at
     FROM sl_state s JOIN players p ON p.id = s.player_id
+    WHERE s.has_avatar = 1
     ORDER BY s.total_points DESC, s.abs_pos DESC
   `).all();
   const today = todayWaw();
@@ -1639,6 +1663,7 @@ function slPlayersPayload(meId) {
   return rows.map(r => ({
     player_id: r.player_id,
     nickname: r.nickname,
+    avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at),
     tile: slTileOf(r.abs_pos),
     abs_pos: Number(r.abs_pos),
     laps: Number(r.laps),
@@ -2028,8 +2053,10 @@ function slBuildState(playerId) {
       balance: Number(st.balance),
       total_points: Number(st.total_points),
       moved_today: movedToday,
-      can_roll: !movedToday,
-      has_shield: slHasShield(playerId)
+      can_roll: !movedToday && !!st.has_avatar,
+      has_shield: slHasShield(playerId),
+      has_avatar: !!st.has_avatar,
+      avatar_url: slAvatarUrl(playerId, st.avatar_updated_at)
     },
     inventory: slInventory(playerId),
     pending_effects: slPendingEffects(playerId),
@@ -2045,6 +2072,32 @@ function slBuildState(playerId) {
 // GET /api/snakes/state — pełny stan gry gracza (plansza, pozycje, sklep, ekwipunek…)
 app.get('/api/snakes/state', authPlayer, (req, res) => {
   res.json(slBuildState(req.player.id));
+});
+
+// POST /api/snakes/avatar — wgraj/zmień zdjęcie profilowe (wymagane, żeby zagrać).
+// Ciało to SUROWE bajty JPEG (Content-Type: application/octet-stream) — nie JSON —
+// świadomie, żeby nie podnosić globalnego limitu express.json() (dzielonego z Wordle)
+// tylko dla tego jednego, cięższego endpointu. Klient sam kadruje/kompresuje zdjęcie
+// przez <canvas> przed wysyłką, więc 3 MB to zapas bezpieczeństwa, nie oczekiwany rozmiar.
+const SL_AVATAR_MAX_BYTES = 3 * 1024 * 1024;
+app.post('/api/snakes/avatar', authPlayer, express.raw({ type: '*/*', limit: SL_AVATAR_MAX_BYTES }), (req, res) => {
+  const playerId = req.player.id;
+  const buffer = Buffer.isBuffer(req.body) ? req.body : null;
+
+  // Minimalna walidacja "to naprawdę JPEG" po magicznych bajtach (0xFFD8) — klient
+  // zawsze eksportuje przez canvas.toBlob('image/jpeg', ...), więc to powinno się zgadzać;
+  // to tylko siatka bezpieczeństwa przeciw pustym/zepsutym/nie-obrazkowym wysyłkom.
+  if (!buffer || buffer.length < 100 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) {
+    return res.status(400).json({ error: 'Nieprawidłowy plik zdjęcia — spróbuj innego.' });
+  }
+
+  fs.writeFileSync(path.join(avatarsDir, `${playerId}.jpg`), buffer);
+  slEnsureState(playerId);
+  db.prepare(`UPDATE sl_state SET has_avatar = 1, avatar_updated_at = CURRENT_TIMESTAMP WHERE player_id = ?`)
+    .run(playerId);
+  slLogActivity(playerId, 'avatar', '🖼️ Wgrał/zaktualizował zdjęcie profilowe');
+
+  res.json({ success: true, state: slBuildState(playerId) });
 });
 
 // GET /api/snakes/board — publiczny widok planszy + pozycji (bez logowania)
@@ -2098,6 +2151,12 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   const nickname = req.player.nickname;
   const today = todayWaw();
   const board = slBoardMap();
+
+  // Bramka: bez zdjęcia profilowego nie da się zagrać. Sprawdzana przed transakcją,
+  // żeby nawet nie próbować rzutu — klient i tak trzyma gracza na ekranie uploadu.
+  if (!slEnsureState(playerId).has_avatar) {
+    return res.status(403).json({ error: 'Wgraj najpierw zdjęcie profilowe, żeby móc zagrać.', avatar_required: true });
+  }
 
   const result = transaction(() => {
     const st = slEnsureState(playerId);

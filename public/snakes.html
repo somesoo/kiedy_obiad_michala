@@ -46,6 +46,21 @@
     </div>
   </div>
 
+  <!-- ZDJĘCIE PROFILOWE — WYMAGANE DO GRY -->
+  <div class="overlay" id="avatar-overlay" style="display:none">
+    <div class="login-card">
+      <h2>Dodaj zdjęcie</h2>
+      <p class="login-sub">Żeby zagrać, potrzebujesz zdjęcia — Twojego albo dowolnego innego. Będzie widoczne jako okrągły awatar na wspólnej planszy; najedź na niego myszką, żeby zobaczyć nick.</p>
+      <div class="avatar-preview-wrap">
+        <img class="avatar-preview" id="avatar-preview" alt="" />
+        <span class="avatar-preview-placeholder" id="avatar-preview-placeholder">📷</span>
+      </div>
+      <input type="file" id="avatar-file" accept="image/*" />
+      <button class="btn-primary" id="btn-avatar-upload" disabled>Wgraj zdjęcie</button>
+      <div class="login-error" id="avatar-error"></div>
+    </div>
+  </div>
+
   <!-- JAK TO DZIAŁA -->
   <div class="how-it-works" id="how-it-works" style="display:none">
     <div class="how-inner">
@@ -53,6 +68,7 @@
       <h3>Jak grać w Office Snakes &amp; Ladders?</h3>
       <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty.</p>
       <ol>
+        <li><strong>Zdjęcie profilowe — wymagane.</strong> Zanim zagrasz, wgraj zdjęcie (swoje albo dowolne inne) — to Twój pionek na planszy, okrągły awatar widoczny dla wszystkich. Najedź na czyjeś zdjęcie myszką, żeby zobaczyć nick. Bez zdjęcia nie da się rzucić kostką.</li>
         <li><strong>Jeden ruch dziennie.</strong> Raz na dobę (czasu Warszawy) klikasz <strong>„Rzuć kostką"</strong>. Po ruchu jesteś zablokowany do następnego dnia — dokładnie jak hasło dnia w Wordle.</li>
         <li><strong>Drabiny i węże.</strong> Wejdziesz na drabinę 🪜 — wskakujesz wyżej. Wdepniesz na węża 🐍 — zjeżdżasz w dół. Pola bonusowe ⭐ dają dodatkowe punkty bez ruchu. Na planszy <strong>każdy wąż i każda drabina ma narysowaną linię</strong> od pola startowego do docelowego: drabiny to proste, zielone linie w górę, węże to czerwone, wijące się krzywe w dół — od razu widać, dokąd prowadzą.</li>
         <li><strong>Punkty.</strong> Zdobywasz je za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus). Punkty się kumulują i budują <strong>leaderboard</strong>.</li>

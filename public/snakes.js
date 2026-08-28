@@ -106,14 +106,101 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 });
 
 // ── APP MAIN ──
-function startApp() {
-  loadState();
-  loadActivity();
+async function startApp() {
+  await loadState();
+  if (state.game && !state.game.me.has_avatar) {
+    showAvatarOverlay();
+  } else {
+    loadActivity();
+  }
   setInterval(updateCountdown, 1000);
 }
 
+// ── ZDJĘCIE PROFILOWE (wymagane, żeby zagrać) ──
+// Kadruje wgrany plik do kwadratu (cover-crop, jak object-fit:cover) i eksportuje
+// jako JPEG przez <canvas> — trzyma przesyłany rozmiar małym niezależnie od tego,
+// jak duże zdjęcie wgra użytkownik, i gwarantuje, że serwer zawsze dostaje realny JPEG.
+let avatarBlob = null;
+
+function showAvatarOverlay() {
+  document.getElementById('main-content').style.display = 'none';
+  document.getElementById('avatar-overlay').style.display = 'flex';
+}
+
+function hideAvatarOverlay() {
+  document.getElementById('avatar-overlay').style.display = 'none';
+  document.getElementById('main-content').style.display = 'grid';
+}
+
+function resizeImageToJpeg(file, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const scale = Math.max(size / img.width, size / img.height);
+      const w = img.width * scale, h = img.height * scale;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Nie udało się przetworzyć zdjęcia.')), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Nie udało się wczytać pliku jako obrazek.')); };
+    img.src = url;
+  });
+}
+
+document.getElementById('avatar-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  const errEl = document.getElementById('avatar-error');
+  const btn = document.getElementById('btn-avatar-upload');
+  errEl.textContent = '';
+  if (!file) return;
+  try {
+    avatarBlob = await resizeImageToJpeg(file, 320);
+    const preview = document.getElementById('avatar-preview');
+    preview.src = URL.createObjectURL(avatarBlob);
+    preview.classList.add('has-img');
+    btn.disabled = false;
+  } catch (err) {
+    avatarBlob = null;
+    btn.disabled = true;
+    errEl.textContent = err.message;
+  }
+});
+
+document.getElementById('btn-avatar-upload').addEventListener('click', async () => {
+  if (!avatarBlob || state.busy) return;
+  const btn = document.getElementById('btn-avatar-upload');
+  const errEl = document.getElementById('avatar-error');
+  state.busy = true;
+  btn.disabled = true;
+  errEl.textContent = '';
+  try {
+    const r = await fetch('/api/snakes/avatar', {
+      method: 'POST',
+      headers: { 'X-Token': state.token, 'Content-Type': 'application/octet-stream' },
+      body: avatarBlob
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Błąd serwera');
+    state.game = data.state;
+    hideAvatarOverlay();
+    renderAll();
+    loadActivity();
+    showToast('🖼️ Zdjęcie wgrane — możesz grać!');
+  } catch (err) {
+    errEl.textContent = err.message;
+    btn.disabled = false;
+  } finally {
+    state.busy = false;
+  }
+});
+
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', coop_contribute: '🤝', knockback: '💥' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', coop_contribute: '🤝', knockback: '💥', avatar: '🖼️' };
 
 async function loadActivity(date) {
   try {
@@ -311,14 +398,20 @@ function renderCell(idx, sp, players) {
     else if (sp.kind === 'snake') mark = `<span class="sl-mark" title="Wąż → ${sp.target}">🐍</span>`;
     else if (sp.kind === 'bonus') mark = `<span class="sl-mark" title="Bonus +${sp.value} pkt">⭐</span>`;
   }
+  // Pionek = okrągłe zdjęcie profilowe; serwer zwraca w `players` WYŁĄCZNIE graczy,
+  // którzy je wgrali (bez zdjęcia = nie widać na planszy), więc avatar_url zawsze jest.
+  // Nick pojawia się po najechaniu myszką (natywny tooltip z title).
   const pawnsHtml = (players || []).map(p => {
     const meCls = p.is_me ? ' sl-pawn-me' : '';
     const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
     const pushCls = (state.pushFlash && state.pushFlash.has(p.player_id)) ? ' sl-pawn-pushed' : '';
     const shieldBadge = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
-    const initials = esc(p.nickname.slice(0, 2).toUpperCase());
     const tip = `${esc(p.nickname)} (okr. ${p.laps})${p.has_shield ? ' — chroniony tarczą' : ''}`;
-    return `<span class="sl-pawn${meCls}${shieldCls}${pushCls}" title="${tip}">${initials}${shieldBadge}</span>`;
+    return `
+      <span class="sl-pawn-wrap${meCls}${shieldCls}${pushCls}" title="${tip}">
+        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />
+        ${shieldBadge}
+      </span>`;
   }).join('');
   return `
     <div class="${cls}">
@@ -512,8 +605,11 @@ function openTargetPicker(type) {
   } else {
     list.innerHTML = others.map(p => `
       <button class="target-row" data-id="${p.player_id}">
-        <span class="target-nick">${esc(p.nickname)}</span>
-        <span class="target-meta text-muted small">pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt${p.moved_today ? ' · ✅ ruszył się dziś' : ''}</span>
+        <img class="target-avatar" src="${p.avatar_url}" alt="" />
+        <span class="target-info">
+          <span class="target-nick">${esc(p.nickname)}</span>
+          <span class="target-meta text-muted small">pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt${p.moved_today ? ' · ✅ ruszył się dziś' : ''}</span>
+        </span>
       </button>`).join('');
   }
   document.getElementById('target-modal').style.display = 'flex';
