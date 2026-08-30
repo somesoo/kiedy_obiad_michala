@@ -799,11 +799,14 @@ function renderCoop(g) {
   if (!el) return;
 
   const active = c.status === 'event_active' && c.boss && c.boss.active;
+  const karaTxt = c.next_on_loss.threshold < c.threshold
+    ? `spóźnienie → próg spadnie do ${c.next_on_loss.threshold}`
+    : `próg już na minimum (${c.threshold})`;
 
   const rulesHtml = `
     <div class="boss-instructions text-muted small">
-      <p>Wpłacajcie wspólnie do puli — gdy padnie próg, budzi się boss z limitem czasu na pokonanie go (liczą się tylko dni robocze).</p>
-      <p>Zdążycie: próg i tempo rosną na kolejną rundę. Nie zdążycie: robi się odrobinę łatwiej.</p>
+      <p>Wpłacajcie do wspólnej puli, aż padnie próg — wtedy budzi się boss z limitem czasu na pokonanie.</p>
+      <p>Zdążycie: kolejny boss trudniejszy. Nie zdążycie: kolejny łatwiejszy.</p>
     </div>`;
 
   const rightHtml = active ? `
@@ -812,20 +815,21 @@ function renderCoop(g) {
       <div class="boss-name">${esc(c.boss.name)}</div>
       <div class="coop-bar boss-hp-bar"><div class="coop-bar-fill boss-hp-fill" style="width:${c.boss.percent}%"></div></div>
       <div class="boss-hp-text mono">${c.boss.hp} / ${c.boss.max_hp} HP</div>
+      <div class="boss-timer mono" id="coop-deadline" data-until="${esc(c.boss.deadline_at)}" data-label="czas na pokonanie">⏳ –</div>
       <button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${g.me.balance >= c.boss.attack_cost ? '' : 'disabled'}>🗡️ Atakuj (-${c.boss.attack_cost})</button>
-      <div class="text-muted small">Nagroda: ${c.reward_pool} pkt + ${c.boss.defeat_bonus} premii/os.</div>
+      <div class="boss-kara text-muted">${karaTxt}</div>
     </div>` : `
     <div class="boss-fight boss-sleeping">
       <div class="boss-emoji">😴</div>
       <div class="boss-name">Boss śpi…</div>
       <div class="coop-bar"><div class="coop-bar-fill" style="width:${c.percent}%"></div></div>
       <div class="boss-hp-text mono">${c.total} / ${c.threshold} pkt (${c.percent}%)</div>
-      <div class="text-muted small">Nagroda: ${c.reward_pool} pkt · Twój wkład: ${c.my_contribution}</div>
+      <div class="boss-kara text-muted">Jak się obudzi: ${c.time_limit_days} dni robocze na pokonanie · ${karaTxt}</div>
     </div>`;
 
   const prevHtml = c.previous_result ? `
     <div class="coop-event ${c.previous_result.defeated ? '' : 'coop-event-bad'}">
-      ${c.previous_result.defeated ? '🏆' : '⏳'} Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? `pokonany! Premia +${c.previous_result.bonus} pkt/os.` : 'boss przeżył — nagroda i tak wypłacona.'}
+      ${c.previous_result.defeated ? '🏆' : '⏳'} Edycja #${c.previous_result.cycle}: ${esc(c.previous_result.boss_name)} ${c.previous_result.defeated ? `pokonany, +${c.previous_result.bonus} pkt premii/os.` : 'przeżył — nagroda i tak wypłacona.'}
     </div>` : '';
 
   el.innerHTML = `
@@ -838,9 +842,7 @@ function renderCoop(g) {
       ${rulesHtml}
       ${rightHtml}
     </div>
-    ${active ? `<span class="coop-deadline mono" id="coop-deadline" data-until="${esc(c.boss.deadline_at)}" data-label="czas na pokonanie">⏳ –</span>` : ''}
     <div class="coop-form boss-deposit-form">
-      <span class="text-muted small">${active ? 'Wpłaty nadal możliwe — dokładają się na poczet kolejnej edycji:' : 'Dorzuć do puli:'}</span>
       <input type="number" id="coop-amount" min="1" step="1" placeholder="ile pkt?" />
       <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>
     </div>

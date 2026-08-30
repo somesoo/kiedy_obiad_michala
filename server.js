@@ -1946,6 +1946,10 @@ function slCoopPayload(meId) {
     time_limit_days: Number(coop.time_limit_days),
     default_threshold: slCoopDefaultThreshold(),
     previous_result: previousResult,
+    // Konkretne liczby na "co będzie, jak wygracie/przegracie" — żeby UI mógł pokazać
+    // realną karę/nagrodę zamiast ogólnikowego opisu (patrz slCoopNextDifficulty).
+    next_on_win: slCoopNextDifficulty(coop, true),
+    next_on_loss: slCoopNextDifficulty(coop, false),
     boss: coop.status === 'event_active' || coop.boss_defeated_at ? {
       name: coop.boss_name,
       hp: Math.max(0, Number(coop.boss_hp)),

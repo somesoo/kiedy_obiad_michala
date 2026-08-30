@@ -356,12 +356,12 @@
 .coop-form button { padding: 8px 14px; font-size: 13px; }
 .coop-form button:disabled { opacity: 0.4; cursor: not-allowed; }
 .coop-event {
-  margin-top: 10px;
-  padding: 8px 10px;
+  margin-top: 4px;
+  padding: 4px 8px;
   background: rgba(245, 200, 66, 0.12);
   border: 1px solid var(--gold);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 11px;
 }
 .coop-list { margin-top: 10px; }
 .coop-row {
@@ -505,17 +505,17 @@
    (pasek + formularz w jednym rzędzie), żeby zmieścić się na jednym ekranie. */
 .coop-card {
   flex: 0 0 auto;
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   background: var(--surface);
   border: 1px solid var(--muted);
   border-radius: 10px;
-  padding: 8px 14px;
+  padding: 6px 12px;
 }
-.coop-card .coop-head { margin-bottom: 4px; }
+.coop-card .coop-head { margin-bottom: 2px; }
 .coop-card .coop-title {
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 1px;
 }
 .coop-card .coop-form input { width: 96px; flex: 0 0 96px; }
@@ -535,46 +535,52 @@
 .coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 .coop-chip .coop-amt { margin-left: 4px; }
 
-/* ── WALKA Z BOSSEM — dwie kolumny (instrukcja | walka), zwarta wysokość ── */
+/* ── WALKA Z BOSSEM — dwie kolumny (zasady | walka), zwarta wysokość ── */
 .boss-split {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  gap: 12px;
-  margin-top: 6px;
+  gap: 10px;
+  margin-top: 4px;
   align-items: center;
 }
 .boss-instructions p {
-  margin: 0 0 6px;
-  font-size: 12px;
-  line-height: 1.4;
+  margin: 0 0 3px;
+  font-size: 11px;
+  line-height: 1.35;
 }
 .boss-instructions p:last-child { margin-bottom: 0; }
 .boss-fight {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
+  gap: 2px;
+  padding: 5px 8px;
   background: var(--surface-alt);
   border: 1px solid var(--danger);
   border-radius: 10px;
 }
 .boss-fight.boss-sleeping { border-color: var(--muted); }
 .boss-fight.boss-sleeping .boss-emoji { opacity: 0.7; }
-.boss-emoji { font-size: 22px; line-height: 1; }
+.boss-emoji { font-size: 18px; line-height: 1; }
 .boss-name {
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
   text-align: center;
 }
-.boss-hp-bar { width: 100%; height: 9px; }
+.boss-hp-bar { width: 100%; height: 8px; }
 .boss-hp-fill { background: linear-gradient(90deg, var(--gold), var(--danger)); }
 .boss-hp-text { font-size: 10px; color: var(--text-muted); }
+.boss-timer {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.boss-kara { font-size: 9px; line-height: 1.3; text-align: center; }
 .btn-boss-attack {
-  margin-top: 2px;
-  padding: 6px 12px;
-  font-size: 12px;
+  margin-top: 1px;
+  padding: 4px 10px;
+  font-size: 11px;
   background: var(--danger);
   border-color: var(--danger);
 }
@@ -584,7 +590,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 6px;
 }
 .boss-deposit-form input { width: 90px; flex: 0 0 90px; }
 
@@ -599,14 +605,6 @@
 @keyframes sl-push-pulse {
   0%, 100% { transform: scale(1); filter: none; }
   50% { transform: scale(1.35); filter: drop-shadow(0 0 6px var(--danger)); }
-}
-
-/* ── LICZNIK OKNA CO-OP ── */
-.coop-deadline {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--gold);
 }
 
 /* ── OVERLAY: WGRYWANIE ZDJĘCIA PROFILOWEGO ── */
