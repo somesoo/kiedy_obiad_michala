@@ -1234,9 +1234,42 @@ const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
 // kilku dni zbierania (dzienny ruch to ~10–30 pkt).
 const SL_POWERUP_COSTS = { freeze: 30, curse: 50, double_move: 40, shield: 70 };
 const SL_POWERUP_TYPES = Object.keys(SL_POWERUP_COSTS);
-const SL_CURSE_VARIANTS = 3;           // liczba losowych wariantów klątwy (efekty TBD)
 // Typy ataków, które Shield potrafi zablokować (zużywa się przy pierwszym z nich).
 const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
+
+// ── KLĄTWA — 7 losowych wariantów ──
+// Wariant losujemy w momencie RZUCENIA klątwy (sl_effects.variant) i odpalamy go na
+// NASTĘPNYM ruchu ofiary. Warianty 1/2/5 zmieniają SPOSÓB poruszania się, więc muszą
+// zadziałać PRZED odpaleniem węży/drabin/bonusów (patrz slCurseAdjustRoll + invertBoard
+// w slResolveTileEffect) — inaczej gracz lądowałby na złym polu. Warianty 3/4/6/7
+// działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
+const SL_CURSE_VARIANTS = 7;
+const SL_CURSE_COIN_STEAL = 50; // ile monet zabiera Kieszonkowiec (wariant 3)
+const SL_CURSE_LABELS = {
+  1: '↩️ Odwrotny Ruch',
+  2: '➗ Rozdwojona Kostka',
+  3: '💰 Kieszonkowiec',
+  4: '📉 Chciwość',
+  5: '🔀 Odwrócone Zasady',
+  6: '🌀 Chaos',
+  7: '🚫 Bez Bonusu'
+};
+const SL_CURSE_DESCRIPTIONS = {
+  1: 'kość cofa zamiast pchać do przodu (np. rzut 4 = 4 pola W TYŁ)',
+  2: 'rzut liczy się w połowie, w dół (rzut 5 = ruch o 2 pola)',
+  3: `traci ${SL_CURSE_COIN_STEAL} monet na rzecz tego, kto rzucił klątwę`,
+  4: 'połowa punktów zdobytych tym ruchem przepada',
+  5: 'na ten ruch drabiny i węże zamieniają się rolami',
+  6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
+  7: 'pole bonusowe na ten ruch nie działa'
+};
+
+// Warianty 1/2 zmieniają wartość kości PRZED ruchem — reszta rzutów nie rusza.
+function slCurseAdjustRoll(variant, roll) {
+  if (variant === 1) return -roll;               // Odwrotny Ruch
+  if (variant === 2) return Math.floor(roll / 2); // Rozdwojona Kostka (w dół)
+  return roll;
+}
 
 // ── WYDARZENIE KOOPERACYJNE (co-op) ──
 const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 300;
@@ -1270,6 +1303,24 @@ const SL_COOP_PENALTY = parseInt(process.env.SNAKES_COOP_PENALTY, 10) || 100;
 // używane tylko raz, do zakotwiczenia cyklu #1; każdy kolejny cykl liczy się od niego.
 const SL_COOP_START_DOW = Number(process.env.SNAKES_COOP_START_DOW ?? 2); // wtorek
 const SL_COOP_START_HOUR = Number(process.env.SNAKES_COOP_START_HOUR ?? 13);
+
+// ── WALKA Z BOSSEM ──
+// Gdy pula przekroczy próg, budzi się losowy biurowy boss z paskiem HP. KAŻDY rzut
+// kostką (nie tylko kontrybutora) w trakcie eventu zadaje mu darmowe obrażenia — więc
+// zwykłe granie już "walczy". Dodatkowo każdy może dobić bossa ręcznym atakiem za
+// monety — realny sposób na wydawanie salda poza sklepem, nie tylko nagroda na końcu.
+// Pokonanie bossa PRZED rozliczeniem okna dorzuca każdemu kontrybutorowi premię ponad
+// zwykłą pulę nagród; jeśli czas minie, a boss przeżyje, zwykła nagroda i tak się należy
+// (próg padł), tylko premii za "zabicie" już nie ma — to jest ta dodatkowa zachęta.
+const SL_BOSS_NAMES = [
+  'Ksero-Golem', 'Duch Deadline\'u', 'Hydra Niekończących Się Maili',
+  'Excel Behemot', 'Automat do Kawy Zła', 'Syndrom Poniedziałku', 'Rozdzielacz Wi-Fi Zagłady'
+];
+const SL_BOSS_HP_MULTIPLIER = Number(process.env.SNAKES_BOSS_HP_MULTIPLIER || 2); // HP = próg × to
+const SL_BOSS_DICE_DAMAGE_MULT = Number(process.env.SNAKES_BOSS_DICE_DAMAGE_MULT || 3); // dmg = suma oczek × to
+const SL_BOSS_ATTACK_COST = parseInt(process.env.SNAKES_BOSS_ATTACK_COST, 10) || 20;    // koszt ręcznego ataku (monety)
+const SL_BOSS_ATTACK_DAMAGE = parseInt(process.env.SNAKES_BOSS_ATTACK_DAMAGE, 10) || 45; // obrażenia ręcznego ataku
+const SL_BOSS_DEFEAT_BONUS = parseInt(process.env.SNAKES_BOSS_DEFEAT_BONUS, 10) || 60;   // bonus pkt/monet na kontrybutora za zabicie
 
 // ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
 db.exec(`
@@ -1340,14 +1391,18 @@ db.exec(`
 
   -- Wydarzenie kooperacyjne: jedna aktywna „edycja" (cykl) zbiórki naraz.
   CREATE TABLE IF NOT EXISTS sl_coop (
-    cycle        INTEGER PRIMARY KEY,
-    threshold    INTEGER NOT NULL,
-    total        INTEGER DEFAULT 0,
-    status       TEXT DEFAULT 'collecting', -- 'collecting' | 'event_active' | 'completed'
-    reward_pool  INTEGER DEFAULT 0,
-    started_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    triggered_at DATETIME,
-    completed_at DATETIME
+    cycle            INTEGER PRIMARY KEY,
+    threshold        INTEGER NOT NULL,
+    total            INTEGER DEFAULT 0,
+    status           TEXT DEFAULT 'collecting', -- 'collecting' | 'event_active' | 'completed'
+    reward_pool      INTEGER DEFAULT 0,
+    started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    triggered_at     DATETIME,
+    completed_at     DATETIME,
+    boss_name        TEXT,
+    boss_max_hp      INTEGER DEFAULT 0,
+    boss_hp          INTEGER DEFAULT 0,
+    boss_defeated_at DATETIME
   );
 
   -- Wkłady graczy do puli (per cykl) — na ich podstawie liczymy nagrody.
@@ -1364,7 +1419,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sl_activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id  INTEGER REFERENCES players(id),
-    type       TEXT NOT NULL,   -- 'roll' | 'shop_buy' | 'shop_use' | 'coop_contribute' | 'knockback'
+    type       TEXT NOT NULL,   -- 'roll' | 'shop_buy' | 'shop_use' | 'coop_contribute' | 'knockback' | 'boss_hit'
     detail     TEXT NOT NULL,
     day        TEXT NOT NULL,   -- YYYY-MM-DD wg Europe/Warsaw (do grupowania/filtrowania)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -1379,6 +1434,12 @@ ensureColumn('sl_state', 'avatar_updated_at', 'DATETIME');
 // zapisanego w last_move_date; przy zmianie dnia licznik efektywnie wraca do zera
 // (patrz slRollsUsedToday), więc kolumna nie musi być sama w sobie zerowana o północy.
 ensureColumn('sl_state', 'rolls_today', 'INTEGER DEFAULT 0');
+
+// sl_coop: dołóż kolumny bossa dla wdrożeń sprzed walki z bossem.
+ensureColumn('sl_coop', 'boss_name', 'TEXT');
+ensureColumn('sl_coop', 'boss_max_hp', 'INTEGER DEFAULT 0');
+ensureColumn('sl_coop', 'boss_hp', 'INTEGER DEFAULT 0');
+ensureColumn('sl_coop', 'boss_defeated_at', 'DATETIME');
 
 // sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
 // jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
@@ -1591,36 +1652,14 @@ function slHasShield(playerId) {
   return !!slActiveShield(playerId);
 }
 
-// ── STUB KLĄTWY ──
-// Klątwa ma 3 losowe warianty. Wariant losujemy w momencie RZUCENIA klątwy i
-// zapisujemy w sl_effects.variant. Faktyczna logika efektu jest CELOWO zostawiona
-// jako placeholder do uzupełnienia — patrz TODO niżej. Wywoływana, gdy cel wykonuje
-// swój następny ruch (klątwa „na następną turę").
-function applyCurseEffect(variant, ctx) {
-  // ctx = { targetPlayerId, sourcePlayerId, state, rolls, movement }
-  // `movement` można zmodyfikować (np. cofnąć, wyzerować postęp) — zwróć zmieniony obiekt.
-  switch (variant) {
-    case 1:
-      // TODO(klątwa #1): zaimplementuj efekt wariantu 1 (np. „połowa punktów z ruchu").
-      break;
-    case 2:
-      // TODO(klątwa #2): zaimplementuj efekt wariantu 2 (np. „cofnij o X pól").
-      break;
-    case 3:
-      // TODO(klątwa #3): zaimplementuj efekt wariantu 3 (np. „pomiń pola bonusowe").
-      break;
-    default:
-      break;
-  }
-  // Placeholder: na razie klątwa nie zmienia ruchu — tylko zostaje odnotowana.
-  return ctx.movement;
-}
-
 // Rozstrzyga efekt pola dla JUŻ WYLICZONEJ pozycji lądowania (drabina/wąż/bonus).
-// Współdzielona przez zwykły ruch (slStepMove) i knockback — wypchnięci gracze
-// TEŻ odpalają węże/drabiny/bonusy swojego nowego pola, tak jak przy zwykłym rzucie.
-function slResolveTileEffect(landedAbs, board) {
-  let abs = landedAbs;
+// Współdzielona przez zwykły ruch (slStepMove), knockback i klątwę „Chaos" — każdy,
+// kto ląduje na nowym polu (nawet nie przez normalny rzut), odpala jego efekt tak samo.
+// `invertBoard` (klątwa „Odwrócone Zasady") sprawia, że drabiny działają jak węże i
+// odwrotnie na TEN JEDEN ruch: cel odbija się względem pola lądowania (2×landed - target),
+// więc drabina w górę o X pól staje się zjazdem w dół o X pól, i vice versa.
+function slResolveTileEffect(landedAbs, board, invertBoard = false) {
+  let abs = Math.max(0, landedAbs); // nie schodzimy poniżej startu (np. klątwa Odwrotny Ruch)
   let tilePoints = 0;
   let note = null;
   const landed = slTileOf(abs);
@@ -1630,9 +1669,15 @@ function slResolveTileEffect(landedAbs, board) {
       // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
       // zachowując bieżące okrążenie jako bazę.
       const base = abs - landed;
-      abs = base + tile.target;
+      let target = tile.target;
+      let kind = tile.kind;
+      if (invertBoard) {
+        target = Math.min(SL_BOARD_SIZE - 1, Math.max(0, 2 * landed - tile.target));
+        kind = tile.kind === 'ladder' ? 'snake' : 'ladder';
+      }
+      abs = base + target;
       if (abs < 0) abs = 0; // nie schodzimy poniżej startu
-      note = tile.kind;
+      note = kind;
     } else if (tile.kind === 'bonus') {
       tilePoints += tile.value;
       note = 'bonus';
@@ -1643,8 +1688,8 @@ function slResolveTileEffect(landedAbs, board) {
 
 // Wykonuje pojedynczy krok ruchu o `roll` pól, uwzględniając węże/drabiny/bonusy.
 // Zwraca { absAfter, tilePoints, note } dla tego kroku.
-function slStepMove(absBefore, roll, board) {
-  const resolved = slResolveTileEffect(absBefore + roll, board);
+function slStepMove(absBefore, roll, board, invertBoard = false) {
+  const resolved = slResolveTileEffect(absBefore + roll, board, invertBoard);
   return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note };
 }
 
@@ -1896,25 +1941,39 @@ function slCoopPayload(meId) {
     gap_hours: SL_COOP_GAP_HOURS,
     resolve_at: new Date(slCoopResolveMs(coop)).toISOString(),
     next_start_at: new Date(nextStartMs).toISOString(),
-    penalty_amount: SL_COOP_PENALTY
+    penalty_amount: SL_COOP_PENALTY,
+    boss: coop.status === 'event_active' || coop.boss_defeated_at ? {
+      name: coop.boss_name,
+      hp: Math.max(0, Number(coop.boss_hp)),
+      max_hp: Number(coop.boss_max_hp),
+      percent: Math.max(0, Math.min(100, Math.round((Number(coop.boss_hp) / Math.max(1, Number(coop.boss_max_hp))) * 100))),
+      defeated: !!coop.boss_defeated_at,
+      active: coop.status === 'event_active',
+      attack_cost: SL_BOSS_ATTACK_COST,
+      attack_damage: SL_BOSS_ATTACK_DAMAGE,
+      dice_damage_mult: SL_BOSS_DICE_DAMAGE_MULT,
+      defeat_bonus: SL_BOSS_DEFEAT_BONUS
+    } : null
   };
 }
 
-// ── STUB EVENTU BOSSOWEGO ──
-// Wołane, gdy pula przekroczy próg. Tu ma wylądować właściwa mechanika wydarzenia
-// (HP bossa, tury, obrażenia od rzutów graczy, faza itd.).
+// ── WALKA Z BOSSEM ──
+// Wołane, gdy pula przekroczy próg pierwszy raz w danym cyklu (patrz /coop/contribute).
+// Losuje bossa i ustawia mu HP proporcjonalne do progu — im większa pula, tym twardszy
+// przeciwnik, więc skalowanie zostaje sensowne niezależnie od tego, jak SNAKES_COOP_THRESHOLD
+// jest ustawiony w danym środowisku.
 function startCoopBossEvent(coop) {
-  // TODO(boss #1): zainicjuj bossa dla cyklu `coop.cycle` — np. HP = f(threshold),
-  // tabela sl_coop_boss, faza, czas trwania. Na razie event tylko zmienia status.
-  return { started: true, cycle: Number(coop.cycle) };
+  const name = SL_BOSS_NAMES[Math.floor(Math.random() * SL_BOSS_NAMES.length)];
+  const maxHp = Math.round(Number(coop.threshold) * SL_BOSS_HP_MULTIPLIER);
+  db.prepare('UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ? WHERE cycle = ?')
+    .run(name, maxHp, maxHp, coop.cycle);
+  return { started: true, cycle: Number(coop.cycle), boss_name: name, boss_max_hp: maxHp };
 }
 
-// Wołane przy zamykaniu eventu (na razie ręcznie przez admina — patrz endpoint niżej).
-// Docelowo powinno sprawdzać warunek zwycięstwa bossa.
+// Warunek zwycięstwa: HP bossa spadło do zera (od rzutów graczy lub ręcznych ataków —
+// patrz obsługa w POST /api/snakes/roll i /api/snakes/coop/attack).
 function resolveCoopBossEvent(coop) {
-  // TODO(boss #2): sprawdź warunek zwycięstwa (HP bossa <= 0 / limit czasu) i zwróć wynik.
-  // Placeholder: event zawsze uznajemy za wygrany, żeby dało się przetestować wypłatę nagród.
-  return { defeated: true, cycle: Number(coop.cycle) };
+  return { defeated: Number(coop.boss_hp) <= 0, cycle: Number(coop.cycle) };
 }
 
 // Podział nagród: 'proportional' (domyślnie) — wg udziału w puli; 'flat' — po równo.
@@ -1927,6 +1986,30 @@ function slCoopRewardSplit(contributors, rewardPool) {
   }
   const total = contributors.reduce((a, c) => a + c.amount, 0) || 1;
   return contributors.map(c => ({ ...c, reward: Math.round(rewardPool * (c.amount / total)) }));
+}
+
+// Zamyka event bossowy i wypłaca nagrody — wołane automatycznie, gdy HP bossa spadnie
+// do zera (podczas zwykłego rzutu lub ręcznego ataku), albo gdy minie czas rozliczenia,
+// a boss wciąż żyje (scheduler niżej). Pokonanie bossa dorzuca SL_BOSS_DEFEAT_BONUS na
+// KAŻDEGO kontrybutora ponad zwykłą pulę — to jest zachęta, żeby nie tylko wpłacać, ale
+// i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack), zanim czas się skończy.
+function slFinishBossEvent(coop, defeated) {
+  const contributors = slCoopContributors(coop.cycle);
+  const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
+  const bonus = defeated ? SL_BOSS_DEFEAT_BONUS : 0;
+  const payouts = slCoopRewardSplit(contributors, rewardPool).map(p => ({ ...p, reward: p.reward + bonus }));
+
+  for (const p of payouts) {
+    db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
+      .run(p.reward, p.reward, p.player_id);
+  }
+  db.prepare(`
+    UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP, boss_hp = 0
+      ${defeated ? ", boss_defeated_at = CURRENT_TIMESTAMP" : ''}
+    WHERE cycle = ?
+  `).run(coop.cycle);
+
+  return { cycle: Number(coop.cycle), boss_name: coop.boss_name, reward_pool: rewardPool, bonus, payouts, defeated };
 }
 
 // ── ROZLICZENIE OKNA CO-OP (kara za niedobitkę) ──
@@ -2119,9 +2202,41 @@ function slEmitCoopWindowResult(outcome) {
   }));
 }
 
+// Rozstrzyga event bossowy, jeśli minął czas rozliczenia okna, a boss WCIĄŻ żyje —
+// próg i tak padł, więc zwykła nagroda się należy, tylko bez premii za pokonanie bossa
+// (patrz slFinishBossEvent). Jeśli boss padł wcześniej (podczas gry), status jest już
+// 'completed' i ten kod nigdy się nie odpala — brak podwójnego rozliczenia.
+function slResolveBossTimeout(cycle) {
+  return transaction(() => {
+    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
+    if (!fresh || fresh.status !== 'event_active') return null;
+    return slFinishBossEvent(fresh, Number(fresh.boss_hp) <= 0);
+  });
+}
+
+function slEmitBossTimeout(outcome) {
+  slEmit('coop_completed', () => ({
+    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '⏳ **Czas eventu minął — boss przeżył.**',
+    embeds: [{
+      title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
+      url: SNAKES_URL,
+      description: outcome.defeated
+        ? `Kontrybutorzy dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
+        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów — bez premii za pokonanie bossa (nie zdążyliście go dobić na czas).`,
+      color: outcome.defeated ? 0x53D06B : 0x8E8E93
+    }]
+  }));
+}
+
 function startCoopWindowScheduler() {
   const tick = () => {
     const coop = slCurrentCoop(); // dogania przespane okna, jeśli trzeba
+    if (coop.status === 'event_active') {
+      if (Date.now() < slCoopResolveMs(coop)) return;
+      const outcome = slResolveBossTimeout(coop.cycle);
+      if (outcome) slEmitBossTimeout(outcome);
+      return;
+    }
     if (coop.status !== 'collecting') return;
     if (Date.now() < slCoopResolveMs(coop)) return;
     const outcome = slResolveCoopMiss(coop.cycle);
@@ -2303,33 +2418,43 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const rolls = doubleMove ? [d6(), d6()] : [d6()];
     if (doubleMove) consume(doubleMove.id);
 
+    const curseVariant = curse ? Number(curse.variant) : null;
+    // Warianty 1 (Odwrotny Ruch) i 2 (Rozdwojona Kostka) zmieniają wartość kości —
+    // muszą zadziałać PRZED odpaleniem węży/drabin/bonusów, inaczej gracz wylądowałby
+    // na złym polu. Wariant 5 (Odwrócone Zasady) odwraca role drabin/węży na ten ruch.
+    const effectiveRolls = rolls.map(r => slCurseAdjustRoll(curseVariant, r));
+    const invertBoard = curseVariant === 5;
+
     // Sekwencyjnie wykonaj kroki (każdy rzut oddzielnie, by węże/drabiny/bonusy
     // z każdego lądowania zadziałały poprawnie także przy podwójnym ruchu).
     let abs = Number(st.abs_pos);
     const from_abs = abs;
     let tilePoints = 0;
     const notes = [];
-    for (const roll of rolls) {
-      const step = slStepMove(abs, roll, board);
+    for (const roll of effectiveRolls) {
+      const step = slStepMove(abs, roll, board, invertBoard);
       abs = step.absAfter;
       tilePoints += step.tilePoints;
       if (step.note) notes.push(step.note);
     }
 
-    // CURSE: wariant wylosowany przy rzuceniu; efekt to STUB (placeholder do uzupełnienia).
-    let movement = { from_abs, to_abs: abs, tilePoints };
-    if (curse) {
-      movement = applyCurseEffect(Number(curse.variant), {
-        targetPlayerId: playerId,
-        sourcePlayerId: curse.source_player_id,
-        state: st,
-        rolls,
-        movement
-      }) || movement;
-      consume(curse.id);
-      notes.push(`curse${curse.variant}`);
-      abs = movement.to_abs;
-      tilePoints = movement.tilePoints;
+    let curseCoinSteal = 0;
+    if (curseVariant) {
+      notes.push(`curse${curseVariant}`);
+      if (curseVariant === 6) {
+        // CHAOS: po normalnym wylądowaniu, dodatkowy losowy doskok o 1–3 pola —
+        // ponownie odpalamy efekt pola (drabina/wąż/bonus), gdyby doskok w coś trafił.
+        const landedTile = slTileOf(abs);
+        const base = abs - landedTile;
+        const jitter = (1 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
+        const jitteredTile = Math.min(SL_BOARD_SIZE - 1, Math.max(0, landedTile + jitter));
+        const resolved = slResolveTileEffect(base + jitteredTile, board);
+        abs = resolved.abs;
+        tilePoints += resolved.tilePoints;
+        if (resolved.note) notes.push(resolved.note);
+      } else if (curseVariant === 7) {
+        tilePoints = 0; // BEZ BONUSU: pole bonusowe tego ruchu nie liczy się
+      }
     }
 
     // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
@@ -2338,14 +2463,29 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const knockback = slApplyKnockback(playerId, abs, board, nickname);
     if (knockback.length) notes.push('knockback');
 
-    // ── PUNKTACJA ──
+    // ── PUNKTACJA ── (pipPoints liczone od SUROWYCH rzutów, nie od skorygowanych
+    // klątwą — gracz i tak wyrzucił tyle oczek, klątwa psuje tylko ruch/zdobycz)
     const pipPoints = rolls.reduce((a, r) => a + r, 0) * SL_POINTS_PER_PIP;
     const distance = Math.max(0, abs - from_abs);
     const progressPoints = distance * SL_POINTS_PER_TILE;
     const oldLaps = Math.floor(from_abs / SL_BOARD_SIZE);
     const newLaps = Math.floor(abs / SL_BOARD_SIZE);
     const lapPoints = Math.max(0, newLaps - oldLaps) * SL_POINTS_PER_LAP;
-    const earned = pipPoints + progressPoints + lapPoints + tilePoints;
+    let earned = pipPoints + progressPoints + lapPoints + tilePoints;
+
+    if (curseVariant === 4) earned = Math.floor(earned / 2); // CHCIWOŚĆ: połowa zdobyczy przepada
+
+    if (curseVariant === 3) {
+      // KIESZONKOWIEC: zabiera monety z BIEŻĄCEGO salda (sprzed doliczenia `earned`)
+      // na rzecz tego, kto rzucił klątwę — symetrycznie do kradzieży przy knockbacku.
+      curseCoinSteal = Math.min(SL_CURSE_COIN_STEAL, Math.max(0, Number(st.balance)));
+      if (curseCoinSteal > 0 && curse.source_player_id) {
+        db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?')
+          .run(curseCoinSteal, curse.source_player_id);
+      }
+    }
+
+    if (curse) consume(curse.id);
 
     db.prepare(`
       INSERT INTO sl_moves (player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note)
@@ -2356,10 +2496,32 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       UPDATE sl_state
       SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?, last_move_date = ?, rolls_today = ?
       WHERE player_id = ?
-    `).run(abs, newLaps, earned, earned, today, moveSeq, playerId);
+    `).run(abs, newLaps, earned - curseCoinSteal, earned, today, moveSeq, playerId);
 
     slLogActivity(playerId, 'roll',
       `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`);
+    if (curseVariant) {
+      slLogActivity(playerId, 'roll',
+        `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} monet)` : ''}`);
+    }
+
+    // ── SZTURM NA BOSSA: jeśli trwa event bossowy, KAŻDY rzut zadaje mu obrażenia —
+    // normalna gra już "walczy", bez dodatkowej akcji. Liczone od SUROWYCH rzutów.
+    let bossHit = null;
+    const coopNow = slCurrentCoop();
+    if (coopNow.status === 'event_active' && Number(coopNow.boss_hp) > 0) {
+      const dmg = rolls.reduce((a, r) => a + r, 0) * SL_BOSS_DICE_DAMAGE_MULT;
+      const newHp = Math.max(0, Number(coopNow.boss_hp) - dmg);
+      db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coopNow.cycle);
+      slLogActivity(playerId, 'boss_hit',
+        `⚔️ Trafił ${coopNow.boss_name} na ${dmg} obrażeń (${rolls.join('+')} × ${SL_BOSS_DICE_DAMAGE_MULT}) — HP ${newHp}/${coopNow.boss_max_hp}`);
+      bossHit = { damage: dmg, boss_name: coopNow.boss_name, hp_left: newHp, max_hp: Number(coopNow.boss_max_hp), defeated: false };
+      if (newHp <= 0) {
+        const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coopNow.cycle);
+        bossHit.defeated = true;
+        bossHit.victory = slFinishBossEvent(fresh, true);
+      }
+    }
 
     return {
       frozen: false,
@@ -2372,8 +2534,12 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       earned,
       notes,
       curse_applied: !!curse,
+      curse_variant: curseVariant,
+      curse_label: curseVariant ? SL_CURSE_LABELS[curseVariant] : null,
+      curse_coin_steal: curseCoinSteal,
       double_move: !!doubleMove,
       knockback,
+      boss_hit: bossHit,
       rolls_used_today: moveSeq
     };
   });
@@ -2400,15 +2566,33 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dwa rzuty (${result.rolls.join(' + ')}) i pole **${result.to_tile}**.`);
     }
     if (result.knockback && result.knockback.length) {
-      const extraFor = k => k.clamped ? ' (dno planszy)'
-        : k.tile_effect === 'ladder' ? ' 🪜 i wjechał na drabinę!'
+      const extraFor = k => (k.tile_effect === 'ladder' ? ' 🪜 i wjechał na drabinę!'
         : k.tile_effect === 'snake' ? ' 🐍 i zjechał wężem niżej!'
         : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
-        : '';
+        : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} monet na rzecz ${k.stolen_by}` : '');
       slEmit('knockback', () => result.knockback.map((k, i) => i === 0
         ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.to_tile}**${extraFor(k)}.`
         : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.to_tile}**${extraFor(k)}.`
       ).join('\n'));
+    }
+    if (result.curse_variant) {
+      slEmit('powerup_curse', () =>
+        `💀 **${nickname}** dostał klątwę **${result.curse_label}** na tym ruchu: ${SL_CURSE_DESCRIPTIONS[result.curse_variant]}.`);
+    }
+    if (result.boss_hit) {
+      if (result.boss_hit.defeated) {
+        slEmit('coop_completed', () => ({
+          content: `🏆 **${result.boss_hit.boss_name} pokonany!**`,
+          embeds: [{
+            title: `Edycja #${result.boss_hit.victory.cycle}`,
+            url: SNAKES_URL,
+            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Kontrybutorzy dzielą **${result.boss_hit.victory.reward_pool} pkt** + premię za zabicie **${result.boss_hit.victory.bonus} pkt/os.**`,
+            color: 0x53D06B
+          }]
+        }));
+      }
+      // Pojedyncze trafienia bossa (bez finału) celowo NIE lecą na Discorda — spamowałyby
+      // kanał przy każdym rzucie podczas eventu.
     }
   }
 
@@ -2491,7 +2675,9 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
       }
     }
 
-    // Curse: losujemy wariant (1..SL_CURSE_VARIANTS) w momencie użycia — efekt to stub.
+    // Curse: losujemy wariant (patrz SL_CURSE_LABELS) już TERAZ, w momencie rzucenia —
+    // ale celowo NIE zdradzamy go celowi. Efekt (i jego opis) ujawnia się dopiero, gdy
+    // klątwa faktycznie odpali na następnym ruchu ofiary (patrz POST /api/snakes/roll).
     const variant = type === 'curse' ? (1 + Math.floor(Math.random() * SL_CURSE_VARIANTS)) : null;
 
     db.prepare(`
@@ -2516,7 +2702,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     slLogActivity(targetId, 'shop_use', `🛡️ Zablokował ${label} od ${nickname} tarczą`);
   } else if (needsTarget) {
     slLogActivity(playerId, 'shop_use', `Użył ${label} na ${targetNick}`);
-    slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${out.variant ? ` (wariant ${out.variant})` : ''}`);
+    slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${type === 'curse' ? ' — zobaczysz jaka, dopiero gdy odpali' : ''}`);
   } else {
     slLogActivity(playerId, 'shop_use', `Użył ${label}`);
   }
@@ -2528,7 +2714,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   } else if (type === 'freeze') {
     slEmit('powerup_freeze', () => `❄️ **${nickname}** zamroził **${targetNick}** — następna tura celu przepada.`);
   } else if (type === 'curse') {
-    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę (wariant ${out.variant}) na **${targetNick}**.`);
+    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
   } else if (type === 'shield') {
     slEmit('shield_block', () => `🛡️ **${nickname}** aktywował tarczę — najbliższy Freeze/Curse się od niego odbije.`);
   }
@@ -2537,7 +2723,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     success: true,
     applied_to: targetId,
     blocked: !!out.blocked,
-    curse_variant: out.variant, // dla klątwy: który wariant został wylosowany (efekt TBD)
+    curse_variant: out.variant, // wylosowany wariant (patrz SL_CURSE_LABELS) — efekt ujawnia się dopiero, gdy odpali
     state: slBuildState(playerId)
   });
 });
@@ -2574,17 +2760,18 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
 
     const updated = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
     let triggered = false;
-    // Próg przekroczony PIERWSZY RAZ w tym cyklu → rusza event bossowy (mechanika = stub).
+    let bossName = null;
+    // Próg przekroczony PIERWSZY RAZ w tym cyklu → budzi się boss.
     if (!updated.triggered_at && Number(updated.total) >= Number(updated.threshold)) {
       const rewardPool = Math.round(Number(updated.threshold) * SL_COOP_REWARD_MULTIPLIER);
       db.prepare(`
         UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
         WHERE cycle = ?
       `).run(rewardPool, updated.cycle);
-      startCoopBossEvent(updated);
+      bossName = startCoopBossEvent(updated).boss_name;
       triggered = true;
     }
-    return { poor: false, triggered, cycle: Number(updated.cycle), total: Number(updated.total), threshold: Number(updated.threshold) };
+    return { poor: false, triggered, cycle: Number(updated.cycle), total: Number(updated.total), threshold: Number(updated.threshold), boss_name: bossName };
   });
 
   if (out.poor) {
@@ -2597,13 +2784,68 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
       embeds: [{
         title: `Wydarzenie #${out.cycle} rusza!`,
         url: SNAKES_URL,
-        description: `Wspólnie uzbieraliście **${out.total}/${out.threshold}** pkt. Ostatnią cegiełkę dorzucił **${nickname}**.\nBoss się budzi… 👹`,
+        description: `Wspólnie uzbieraliście **${out.total}/${out.threshold}** pkt. Ostatnią cegiełkę dorzucił **${nickname}**.\n👹 Budzi się **${out.boss_name}**! Każdy rzut kostką go rani — a za monety można dobić go ręcznym atakiem.`,
         color: 0xF5C842
       }]
     }));
   }
 
   res.json({ success: true, triggered: !!out.triggered, state: slBuildState(playerId) });
+});
+
+// POST /api/snakes/coop/attack — ręczny atak na bossa za monety (SL_BOSS_ATTACK_COST).
+// Nie wymaga bycia kontrybutorem — to dodatkowy, opcjonalny sposób na wydawanie salda
+// w trakcie eventu, poza sklepem power-upów. Jeśli dobija bossa, od razu wypłaca nagrody
+// (patrz slFinishBossEvent) — identycznie jak wtedy, gdy dobicie przychodzi ze zwykłego rzutu.
+app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const nickname = req.player.nickname;
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active' || Number(coop.boss_hp) <= 0) return { notActive: true };
+    if (st.balance < SL_BOSS_ATTACK_COST) return { poor: true, balance: st.balance };
+
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(SL_BOSS_ATTACK_COST, playerId);
+    const newHp = Math.max(0, Number(coop.boss_hp) - SL_BOSS_ATTACK_DAMAGE);
+    db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
+    slLogActivity(playerId, 'boss_hit',
+      `🗡️ Zaatakował ${coop.boss_name} za ${SL_BOSS_ATTACK_COST} monet — ${SL_BOSS_ATTACK_DAMAGE} obrażeń (HP ${newHp}/${coop.boss_max_hp})`);
+
+    let victory = null;
+    if (newHp <= 0) {
+      const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
+      victory = slFinishBossEvent(fresh, true);
+    }
+    return {
+      notActive: false, poor: false, boss_name: coop.boss_name,
+      damage: SL_BOSS_ATTACK_DAMAGE, hp_left: newHp, max_hp: Number(coop.boss_max_hp), victory
+    };
+  });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: 'Żaden boss aktualnie nie walczy.' });
+  }
+  if (out.poor) {
+    return res.status(400).json({ error: `Za mało monet — atak kosztuje ${SL_BOSS_ATTACK_COST}, masz ${out.balance}.` });
+  }
+
+  if (out.victory) {
+    slEmit('coop_completed', () => ({
+      content: `🏆 **${out.boss_name} pokonany!**`,
+      embeds: [{
+        title: `Edycja #${out.victory.cycle}`,
+        url: SNAKES_URL,
+        description: `Ostateczny cios zadał **${nickname}**. Kontrybutorzy dzielą **${out.victory.reward_pool} pkt** + premię za zabicie **${out.victory.bonus} pkt/os.**`,
+        color: 0x53D06B
+      }]
+    }));
+  }
+  // Uwaga: pojedyncze ataki (jak pojedyncze rzuty) NIE lecą na Discorda — tylko finał
+  // eventu (pokonanie / koniec czasu), żeby nie zasypywać kanału.
+
+  res.json({ success: true, damage: out.damage, hp_left: out.hp_left, max_hp: out.max_hp, defeated: !!out.victory, state: slBuildState(playerId) });
 });
 
 // ── ENDPOINTY ADMINA (Snakes) ──
@@ -2728,46 +2970,38 @@ app.post('/api/snakes/admin/discord-test', async (req, res) => {
   }
 });
 
-// POST /api/snakes/admin/coop/complete { password } — zamknij wydarzenie i wypłać nagrody.
-// Docelowo domknie je sama mechanika bossa; na razie robi to admin (patrz stuby wyżej).
+// POST /api/snakes/admin/coop/complete { password, force? } — zamknij wydarzenie i wypłać
+// nagrody ręcznie. Normalnie robi to sama mechanika bossa (HP=0 przy rzucie/ataku, albo
+// timeout w schedulerze) — ten endpoint to głównie fallback na wypadek utkniętego eventu.
+// `force: true` domyka event NAWET jeśli boss żyje (bez premii za pokonanie — jak timeout).
 app.post('/api/snakes/admin/coop/complete', (req, res) => {
   if (!checkAdmin(req, res)) return;
+  const force = !!req.body.force;
 
   const out = transaction(() => {
     const coop = slCurrentCoop();
     if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
 
     const outcome = resolveCoopBossEvent(coop);
-    if (!outcome.defeated) return { notDefeated: true };
+    if (!outcome.defeated && !force) return { notDefeated: true };
 
-    const contributors = slCoopContributors(coop.cycle);
-    const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
-    const payouts = slCoopRewardSplit(contributors, rewardPool);
-
-    for (const p of payouts) {
-      db.prepare(
-        'UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?'
-      ).run(p.reward, p.reward, p.player_id);
-    }
-    db.prepare(`UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE cycle = ?`)
-      .run(coop.cycle);
-
-    return { notActive: false, cycle: Number(coop.cycle), reward_pool: rewardPool, payouts };
+    const result = slFinishBossEvent(coop, outcome.defeated);
+    return { notActive: false, ...result };
   });
 
   if (out.notActive) {
     return res.status(400).json({ error: `Żadne wydarzenie nie trwa (status: ${out.status}).` });
   }
   if (out.notDefeated) {
-    return res.status(400).json({ error: 'Boss jeszcze nie pokonany.' });
+    return res.status(400).json({ error: 'Boss jeszcze nie pokonany (dodaj force:true, żeby zamknąć mimo to — bez premii).' });
   }
 
   slEmit('coop_completed', () => ({
-    content: '🏆 **Wydarzenie co-op ukończone!**',
+    content: '🏆 **Wydarzenie co-op ukończone (ręcznie przez admina)!**',
     embeds: [{
-      title: `Boss #${out.cycle} pokonany`,
+      title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
       url: SNAKES_URL,
-      description: `Pula nagród: **${out.reward_pool}** pkt (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
+      description: `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
         out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n'),
       color: 0xC8F135
     }]

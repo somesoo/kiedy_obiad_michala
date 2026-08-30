@@ -546,6 +546,69 @@
 .coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 .coop-chip .coop-amt { margin-left: 4px; }
 
+/* ── WALKA Z BOSSEM — dwie kolumny (instrukcja | walka), zwarta wysokość ── */
+.boss-split {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+  margin-top: 6px;
+  align-items: center;
+}
+.boss-instructions p.boss-instructions-lead {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.boss-instructions ul {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.boss-fight {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+}
+.boss-emoji { font-size: 22px; line-height: 1; }
+.boss-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+}
+.boss-hp-bar { width: 100%; height: 9px; }
+.boss-hp-fill { background: linear-gradient(90deg, var(--gold), var(--danger)); }
+.boss-hp-text { font-size: 10px; color: var(--text-muted); }
+.btn-boss-attack {
+  margin-top: 2px;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.btn-boss-attack:disabled { opacity: 0.4; cursor: not-allowed; }
+.boss-deposit-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.boss-deposit-form input { width: 90px; flex: 0 0 90px; }
+
+@media (max-width: 700px) {
+  .boss-split { grid-template-columns: 1fr; }
+}
+
 /* ── KNOCKBACK — pulsujące podświetlenie wypchniętych pionków ── */
 .sl-pawn-pushed {
   animation: sl-push-pulse 0.4s ease-in-out 4;
