@@ -325,6 +325,7 @@
 }
 .coop-cycle { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
 .coop-total { color: var(--gold); font-size: 14px; }
+.coop-intro { margin-bottom: 8px; line-height: 1.4; }
 .coop-bar {
   height: 10px;
   background: var(--surface-alt);

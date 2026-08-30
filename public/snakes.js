@@ -560,7 +560,7 @@ function renderRollButton(g) {
     btn.textContent = frozen ? `🎲 Rzuć (uwaga: masz Freeze!)${countTxt}` : `🎲 Rzuć kostką${countTxt}`;
   } else {
     btn.disabled = true;
-    btn.textContent = '✅ Ruchy wykorzystane — wróć jutro';
+    btn.textContent = g.me.is_weekend ? '🌴 Weekend — wróć w poniedziałek' : '✅ Ruchy wykorzystane — wróć jutro';
   }
 }
 
@@ -621,7 +621,8 @@ function showRollResult(m) {
   if (m.curse_applied) noteTxt.push('💀 dopadła Cię klątwa!');
   if (m.knockback && m.knockback.length) {
     const names = m.knockback.map(k => esc(k.nickname)).join(', ');
-    noteTxt.push(`💥 wypchnąłeś: ${names}!`);
+    const coins = m.knockback.reduce((a, k) => a + (k.coins_stolen || 0), 0);
+    noteTxt.push(`💥 wypchnąłeś: ${names}!${coins > 0 ? ` (+${coins} 💰 zabranych)` : ''}`);
   }
 
   el.innerHTML = `
@@ -804,6 +805,7 @@ function renderCoop(g) {
       <span class="coop-title">🤝 WSPÓLNA PULA <span class="coop-cycle text-muted">· edycja #${c.cycle}</span></span>
       <span class="coop-total mono">${c.total} / ${c.threshold} (${c.percent}%)</span>
     </div>
+    <div class="coop-intro text-muted small">Dorzucaj punkty do wspólnej puli — gdy razem uzbieracie próg, budzi się boss i wszyscy, którzy wpłacili, dostają nagrodę. Nie zdążycie w tym oknie? Każdy traci trochę punktów, ale wpłaty i tak liczą się dalej do kolejnej edycji.</div>
     <div class="coop-bar"><div class="coop-bar-fill" style="width:${c.percent}%"></div></div>
     <div class="coop-body">
       <div class="coop-sub text-muted small">
@@ -926,6 +928,8 @@ function updateCountdown() {
   if (g && g.me.can_roll) {
     const countTxt = g.me.daily_rolls > 1 ? ` (${g.me.rolls_remaining_today}/${g.me.daily_rolls})` : '';
     textEl.textContent = `🎲 Masz ruch na dziś${countTxt}! Nowa doba za ${fmtHMS(toNext)}`;
+  } else if (g && g.me.is_weekend) {
+    textEl.textContent = `🌴 Weekend — w Snakes nie gramy. Wracamy w poniedziałek.`;
   } else {
     textEl.textContent = `🔒 Ruchy wykorzystane — nowe za ${fmtHMS(toNext)}`;
   }

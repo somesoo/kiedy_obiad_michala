@@ -1247,7 +1247,8 @@ const SL_COOP_REWARD_MULTIPLIER = Number(process.env.SNAKES_COOP_REWARD_MULTIPLI
 const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportional').toLowerCase();
 
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
-const SL_KNOCKBACK_TILES = 5;
+// Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
+const SL_KNOCKBACK_COIN_STEAL = 50;
 
 // Ile ruchów (rzutów) dziennie ma każdy gracz. Freeze blokuje JEDEN z nich (nie cały
 // dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
@@ -1658,51 +1659,68 @@ function slFindOccupant(tile, excludeIds) {
   return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
 }
 
-// Gracz, który ląduje na zajętym polu, wypycha okupanta o SL_KNOCKBACK_TILES pól
-// wstecz (liczone od WŁASNEJ pozycji okupanta, nie od pola lądowania). Dno planszy
-// (pole 0) jest twarde: cofnięcie poniżej zera przycinamy do 0, bez zawijania pętli.
-// Pole, na którym wypchnięty gracz WYLĄDOWAŁ, odpala węża/drabinę/bonus normalnie
-// (slResolveTileEffect) — jeśli to przerzuci go na KOLEJNE zajęte pole, kaskada leci
-// dalej stamtąd. Każde wypchnięcie trafia też do dziennika aktywności ofiary.
+// Gracz, który ląduje na zajętym polu, wypycha okupanta na START JEGO BIEŻĄCEGO
+// OKRĄŻENIA (pole 0 tego okrążenia, nie pole 0 planszy globalnie — kto jest na 2.
+// okrążeniu, wraca na start 2. okrążenia). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
+// monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
+// TO konkretne wypchnięcie — przy kaskadzie to nie zawsze roller: gdy wypchnięty gracz
+// sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej ofiary w łańcuchu.
+// Pole, na które trafia ofiara, odpala węża/drabinę/bonus normalnie (slResolveTileEffect)
+// — jeśli to przerzuci ją na KOLEJNE zajęte pole, kaskada leci dalej stamtąd. Każde
+// wypchnięcie trafia też do dziennika aktywności ofiary (i zbijającego, przy kradzieży).
 function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) {
   const pushedIds = new Set([rollerPlayerId]);
   const chain = [];
   let targetTile = slTileOf(landingAbsPos);
+  let pusherId = rollerPlayerId;
+  let pusherNickname = rollerNickname;
   for (let i = 0; i < 200; i++) { // bezpiecznik przeciw pętli nieskończonej
     const occ = slFindOccupant(targetTile, pushedIds);
     if (!occ) break;
     const fromAbs = Number(occ.abs_pos);
-    const rawTarget = Math.max(0, fromAbs - SL_KNOCKBACK_TILES);
-    const clamped = fromAbs - SL_KNOCKBACK_TILES < 0;
-    const resolved = slResolveTileEffect(rawTarget, board);
+    const lapStart = Math.floor(fromAbs / SL_BOARD_SIZE) * SL_BOARD_SIZE;
+    const resolved = slResolveTileEffect(lapStart, board);
     const toAbs = resolved.abs;
     const bonusPoints = resolved.tilePoints;
+
+    const victimRow = db.prepare('SELECT balance FROM sl_state WHERE player_id = ?').get(occ.player_id);
+    const stolen = Math.min(SL_KNOCKBACK_COIN_STEAL, Math.max(0, Number(victimRow.balance)));
 
     db.prepare(`
       UPDATE sl_state
       SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?
       WHERE player_id = ?
-    `).run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), bonusPoints, bonusPoints, occ.player_id);
+    `).run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), bonusPoints - stolen, bonusPoints, occ.player_id);
+
+    if (stolen > 0) {
+      db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?').run(stolen, pusherId);
+    }
 
     const entry = {
       player_id: occ.player_id,
       nickname: occ.nickname,
       from_tile: slTileOf(fromAbs),
       to_tile: slTileOf(toAbs),
-      clamped,
       tile_effect: resolved.note,
-      bonus_points: bonusPoints
+      bonus_points: bonusPoints,
+      coins_stolen: stolen,
+      stolen_by: pusherNickname
     };
     chain.push(entry);
 
-    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile}`];
-    if (clamped) bits.push('(dno planszy)');
+    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (start okrążenia)`];
     if (resolved.note === 'ladder') bits.push('🪜 i wjechał na drabinę!');
     if (resolved.note === 'snake') bits.push('🐍 i zjechał wężem niżej!');
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
-    slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${rollerNickname} ${bits.join(' ')}`);
+    if (stolen > 0) bits.push(`💰 stracił ${stolen} monet na rzecz ${pusherNickname}`);
+    slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`);
+    if (stolen > 0) {
+      slLogActivity(pusherId, 'knockback', `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} monet!`);
+    }
 
     pushedIds.add(occ.player_id);
+    pusherId = occ.player_id;
+    pusherNickname = occ.nickname;
     if (fromAbs === toAbs) break; // brak realnej zmiany pozycji — koniec kaskady
     targetTile = slTileOf(toAbs);
   }
@@ -2119,6 +2137,7 @@ startCoopWindowScheduler();
 function slBuildState(playerId) {
   const st = slEnsureState(playerId);
   const today = todayWaw();
+  const isWeekend = isWeekendStr(today);
   const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
   const rollsRemainingToday = Math.max(0, SL_DAILY_ROLLS - rollsUsedToday);
   return {
@@ -2135,7 +2154,8 @@ function slBuildState(playerId) {
       rolls_used_today: rollsUsedToday,
       rolls_remaining_today: rollsRemainingToday,
       daily_rolls: SL_DAILY_ROLLS,
-      can_roll: rollsRemainingToday > 0 && !!st.has_avatar,
+      is_weekend: isWeekend,
+      can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend,
       has_shield: slHasShield(playerId),
       has_avatar: !!st.has_avatar,
       avatar_url: slAvatarUrl(playerId, st.avatar_updated_at)
@@ -2238,6 +2258,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   // żeby nawet nie próbować rzutu — klient i tak trzyma gracza na ekranie uploadu.
   if (!slEnsureState(playerId).has_avatar) {
     return res.status(403).json({ error: 'Wgraj najpierw zdjęcie profilowe, żeby móc zagrać.', avatar_required: true });
+  }
+
+  // Bramka: w weekend nie gramy — dokładnie jak w Wordle.
+  if (isWeekendStr(today)) {
+    return res.status(400).json({ error: 'W weekend nie gramy — wróć w poniedziałek.', is_weekend: true });
   }
 
   const result = transaction(() => {

@@ -32,14 +32,14 @@
       <div class="countdown-bar" id="countdown-bar"></div>
       <div class="countdown-text" id="countdown-text">ładowanie...</div>
     </div>
-    <div class="season-ribbon" id="season-ribbon">🐍 Jedna wspólna plansza · jeden ruch dziennie · graj bez końca i zbieraj punkty</div>
+    <div class="season-ribbon" id="season-ribbon">🐍 Jedna wspólna plansza · dwa ruchy dziennie (pon–pt) · graj bez końca i zbieraj punkty</div>
   </header>
 
   <!-- REJESTRACJA / LOGOWANIE -->
   <div class="overlay" id="login-overlay">
     <div class="login-card">
       <h2>Dołącz do gry</h2>
-      <p class="login-sub">Podaj swój nick — to samo konto co w Office Wordle. Codziennie jeden rzut kostką na wspólnej planszy węży i drabin.</p>
+      <p class="login-sub">Podaj swój nick — to samo konto co w Office Wordle. Codziennie (od poniedziałku do piątku) dwa rzuty kostką na wspólnej planszy węży i drabin.</p>
       <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
       <button class="btn-primary" id="btn-login">Wchodzę w to</button>
       <div class="login-error" id="login-error"></div>
@@ -70,8 +70,9 @@
       <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty.</p>
       <ol>
         <li><strong>Zdjęcie profilowe — wymagane.</strong> Zanim zagrasz, wgraj zdjęcie (swoje albo dowolne inne) — to Twój pionek na planszy, okrągły awatar widoczny dla wszystkich. Najedź na czyjeś zdjęcie myszką, żeby zobaczyć nick. Bez zdjęcia nie da się rzucić kostką.</li>
-        <li><strong>Jeden ruch dziennie.</strong> Raz na dobę (czasu Warszawy) klikasz <strong>„Rzuć kostką"</strong>. Po ruchu jesteś zablokowany do następnego dnia — dokładnie jak hasło dnia w Wordle.</li>
+        <li><strong>Dwa ruchy dziennie, tylko w dni robocze.</strong> Od poniedziałku do piątku (czasu Warszawy) masz <strong>dwa rzuty kostką</strong> — klikasz <strong>„Rzuć kostką"</strong> tyle razy, ile Ci zostało. Po wykorzystaniu obu jesteś zablokowany do następnego dnia. W sobotę i niedzielę gra stoi — jak w Wordle, w weekend nie rzucamy.</li>
         <li><strong>Drabiny i węże.</strong> Wejdziesz na drabinę 🪜 — wskakujesz wyżej. Wdepniesz na węża 🐍 — zjeżdżasz w dół. Pola bonusowe ⭐ dają dodatkowe punkty bez ruchu. Na planszy <strong>każdy wąż i każda drabina ma narysowaną linię</strong> od pola startowego do docelowego: drabiny to proste, zielone linie w górę, węże to czerwone, wijące się krzywe w dół — od razu widać, dokąd prowadzą.</li>
+        <li><strong>Wypychanie.</strong> Wylądujesz na polu zajętym przez kogoś innego — wypychasz go na <strong>początek jego bieżącego okrążenia</strong> i zabierasz mu 50 monet (tyle, ile ma — jeśli ma mniej, zabierasz resztę). Wypchnięty gracz normalnie odpala węże, drabiny i bonusy na polu, na które wylądował — czasem to i tak dobry deal.</li>
         <li><strong>Punkty.</strong> Zdobywasz je za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus). Punkty się kumulują i budują <strong>leaderboard</strong>.</li>
         <li><strong>Power-upy (za punkty, nie losowo).</strong> W sklepie kupujesz:
           <ul>
@@ -155,7 +156,7 @@
 
   <!-- FOOTER -->
   <footer class="site-footer">
-    <span class="bank-info">🐍 Nieskończona pętla · jeden ruch dziennie · punkty się kumulują</span>
+    <span class="bank-info">🐍 Nieskończona pętla · dwa ruchy dziennie (pon–pt) · punkty się kumulują</span>
     <span class="footer-copy text-muted">made with ❤️ i poranną kawą</span>
   </footer>
 
