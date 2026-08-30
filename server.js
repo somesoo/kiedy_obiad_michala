@@ -2875,6 +2875,39 @@ app.get('/api/snakes/admin/settings', (req, res) => {
   });
 });
 
+// POST /api/snakes/admin/reset { password } — twardy reset CAŁEJ gry Snakes do stanu
+// zerowego: każdy gracz wraca na pole 0 z saldem/punktami 0, ekwipunkiem power-upów
+// wyczyszczonym i bez oczekujących efektów (Freeze/Curse/Shield/Double Move). Historia
+// ruchów i dziennik aktywności są kasowane, a pula co-op wraca do świeżej edycji #1
+// (nowe okno zakotwiczone od teraz — patrz slCoopFirstAnchorMs). Gracze i ich AWATARY
+// (pionki) NIE są ruszane — konta w Snakes zostają, tylko ich postęp w grze wraca do zera.
+// Wordle jest kompletnie nietknięte (osobne tabele). Nieodwracalne — potwierdzenie
+// (i podwójne potwierdzenie w UI) leży po stronie panelu admina.
+app.post('/api/snakes/admin/reset', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const out = transaction(() => {
+    const playersAffected = Number(db.prepare('SELECT COUNT(*) AS c FROM sl_state').get().c);
+    db.exec(`
+      UPDATE sl_state SET abs_pos = 0, laps = 0, balance = 0, total_points = 0,
+        last_move_date = NULL, rolls_today = 0;
+      DELETE FROM sl_moves;
+      DELETE FROM sl_inventory;
+      DELETE FROM sl_effects;
+      DELETE FROM sl_activity;
+      DELETE FROM sl_coop_contributions;
+      DELETE FROM sl_coop;
+    `);
+    // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
+    // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).
+    return { players_affected: playersAffected, coop: slCoopPayload(null) };
+  });
+
+  slEmit('coop_completed', () => '🔄 **Admin zresetował grę Snakes & Ladders** — wszyscy wracają na start z zerowym kontem.');
+
+  res.json({ success: true, ...out });
+});
+
 // GET /api/snakes/admin/players — lista graczy z ich stanem w Snakes & Ladders
 // (tylko ci, którzy mieli już z grą kontakt — sl_state powstaje leniwie przy pierwszym
 // zapytaniu o stan). Do wyboru gracza w akcjach admina niżej.

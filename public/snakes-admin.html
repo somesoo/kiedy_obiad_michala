@@ -133,6 +133,20 @@
         <h3>⚙️ KONFIGURACJA</h3>
         <div class="adm-stat" id="cfg-info">–</div>
       </div>
+
+      <div class="adm-card" style="border-color: var(--danger)">
+        <h3 style="color: var(--danger)">⚠️ RESET GRY</h3>
+        <div class="adm-note">
+          Zeruje CAŁĄ grę Snakes: każdy gracz wraca na pole 0 z saldem, punktami,
+          ekwipunkiem power-upów i oczekującymi efektami wyzerowanymi. Historia ruchów
+          i dziennik aktywności są kasowane, a pula co-op/boss wraca do świeżej edycji #1.
+          Gracze, ich pionki i zdjęcia profilowe <strong>zostają</strong> — resetuje się tylko
+          postęp w grze. Wordle jest nietknięte. <strong>Tej operacji nie da się cofnąć.</strong>
+        </div>
+        <div class="adm-actions">
+          <button class="btn-danger" id="btn-game-reset">🔄 Zresetuj grę do zera</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -379,6 +393,22 @@
         cfg.coop = res.coop;
         renderInfo();
         showToast(`👹 ${res.boss_name} obudzony — edycja #${res.cycle} rusza!`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-game-reset').addEventListener('click', async () => {
+      if (!confirm('Zresetować CAŁĄ grę Snakes? Każdy gracz wraca na pole 0 z zerowym saldem, punktami i ekwipunkiem. Historia i pula co-op/boss też się kasują. Pionki i zdjęcia zostają. Tej operacji NIE da się cofnąć.')) return;
+      const typed = prompt('Wpisz RESET, żeby potwierdzić:');
+      if (typed !== 'RESET') {
+        showToast('Anulowano — nic nie zresetowano.');
+        return;
+      }
+      try {
+        const res = await api('POST', '/api/snakes/admin/reset', { password: pass });
+        showToast(`🔄 Zresetowano grę — ${res.players_affected} graczy wraca na start.`);
+        await loadSettings();
       } catch (e) {
         showToast(e.message);
       }
