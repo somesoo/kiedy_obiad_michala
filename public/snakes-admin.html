@@ -18,7 +18,9 @@
     .ev-name { font-size: 13px; }
     .ev-key { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); display: block; }
     .ev-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
-    .adm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .adm-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .adm-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .adm-actions input[type=number] { background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 8px; color: var(--text-primary); padding: 6px 8px; }
     .adm-note { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
     .adm-warn { color: var(--gold); }
     .adm-stat { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
@@ -69,14 +71,46 @@
       </div>
 
       <div class="adm-card">
-        <h3>🤝 WYDARZENIE KOOPERACYJNE</h3>
+        <h3>🤝 WYDARZENIE KOOPERACYJNE / 👹 BOSS</h3>
         <div class="adm-stat" id="coop-info">–</div>
-        <div class="adm-note" style="margin-top:8px">
-          Mechanika bossa jest na razie zaślepką (stuby <code>startCoopBossEvent</code> /
-          <code>resolveCoopBossEvent</code> w server.js). Przycisk niżej domyka trwające
-          wydarzenie i wypłaca nagrody kontrybutorom wg skonfigurowanego podziału.
+        <div id="boss-info"></div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Podnieś próg</strong> — działa od razu na bieżący cykl (jeśli wciąż zbiera)
+          i zapisuje się jako domyślny dla wszystkich kolejnych edycji.
         </div>
         <div class="adm-actions">
+          <input type="number" id="coop-threshold-input" min="1" step="1" placeholder="nowy próg" style="width:110px" />
+          <button class="btn-ghost" id="btn-coop-threshold">Zapisz próg</button>
+        </div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Przyspiesz harmonogram</strong> — cofa start bieżącego cyklu o tyle godzin,
+          czyli rozliczenie (i start kolejnego okna) nadejdzie szybciej. Nie rusza puli ani progu.
+        </div>
+        <div class="adm-actions">
+          <input type="number" id="coop-speedup-input" min="0.1" step="0.5" placeholder="ile godzin" style="width:110px" />
+          <button class="btn-ghost" id="btn-coop-speedup">Przyspiesz</button>
+        </div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Wymuś start bossa</strong> — natychmiast dobija próg i budzi bossa, bez
+          czekania na realne wpłaty (tylko gdy cykl wciąż zbiera). Realne wpłaty nadal
+          liczą się normalnie do podziału nagród.
+        </div>
+        <div class="adm-actions">
+          <button class="btn-ghost" id="btn-coop-force-trigger">👹 Wymuś start bossa teraz</button>
+        </div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Zamknij wydarzenie</strong> — domyka trwającą walkę i wypłaca nagrody.
+          Zaznacz „mimo że boss żyje”, żeby zamknąć bez pokonania (bez premii, jak przy
+          normalnym upływie czasu).
+        </div>
+        <div class="adm-actions">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <input type="checkbox" id="coop-force-checkbox" /> mimo że boss żyje
+          </label>
           <button class="btn-ghost" id="btn-coop-complete">Zamknij wydarzenie i wypłać nagrody</button>
         </div>
       </div>
@@ -232,11 +266,39 @@
         : `<span class="adm-warn">⚠️ Brak webhooka — ustaw <code>SNAKES_DISCORD_WEBHOOK_URL</code> (albo <code>DISCORD_WEBHOOK_URL</code>) w .env. Przełączniki zapiszą się, ale nic nie poleci.</span>`;
     }
 
+    function fmtDate(iso) {
+      try {
+        return new Date(iso).toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'short' });
+      } catch {
+        return iso;
+      }
+    }
+
     function renderInfo() {
       const c = cfg.coop;
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong> · pula: ${c.total}/${c.threshold} (${c.percent}%)<br>` +
-        `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}`;
+        `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}<br>` +
+        `Start cyklu: ${fmtDate(c.started_at)} · rozliczenie: ${fmtDate(c.resolve_at)} · kolejne okno: ${fmtDate(c.next_start_at)}<br>` +
+        `Domyślny próg (nowe cykle): <strong>${c.default_threshold}</strong>`;
+
+      const bossEl = document.getElementById('boss-info');
+      if (c.boss) {
+        const b = c.boss;
+        bossEl.innerHTML = `
+          <div class="adm-note" style="margin-top:10px">
+            👹 <strong>${esc(b.name)}</strong> — HP ${b.hp}/${b.max_hp} (${b.percent}%)
+            ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : b.active ? ' · <strong>WALKA TRWA</strong>' : ''}<br>
+            Obrażenia od kości: oczka × ${b.dice_damage_mult} · ręczny atak: ${b.attack_cost} monet za ${b.attack_damage} obr. · premia za zabicie: +${b.defeat_bonus} pkt/os.
+          </div>`;
+      } else {
+        bossEl.innerHTML = `<div class="adm-note" style="margin-top:10px">Boss śpi — pula wciąż się zbiera, nikt jeszcze nie obudził bossa w tej edycji.</div>`;
+      }
+
+      document.getElementById('coop-threshold-input').value = c.threshold;
+      document.getElementById('btn-coop-force-trigger').disabled = c.status !== 'collecting';
+      document.getElementById('btn-coop-complete').disabled = c.status !== 'event_active';
+
       document.getElementById('cfg-info').innerHTML =
         `Plansza: ${cfg.board.cols}×${cfg.board.rows} = ${cfg.board.size} pól<br>` +
         `Koszty power-upów: ` + Object.entries(cfg.powerup_costs).map(([k, v]) => `${esc(k)} ${v}`).join(' · ');
@@ -266,10 +328,57 @@
     });
 
     document.getElementById('btn-coop-complete').addEventListener('click', async () => {
+      const force = document.getElementById('coop-force-checkbox').checked;
       try {
-        const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass });
-        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — wypłacono ${res.reward_pool} pkt`);
+        const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass, force });
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt`);
         await loadSettings();
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-coop-threshold').addEventListener('click', async () => {
+      const threshold = parseInt(document.getElementById('coop-threshold-input').value, 10);
+      if (!Number.isInteger(threshold) || threshold <= 0) {
+        showToast('Podaj dodatnią liczbę całkowitą.');
+        return;
+      }
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/config', { password: pass, threshold });
+        cfg.coop = res.coop;
+        renderInfo();
+        showToast(res.threshold_changed
+          ? `✅ Próg bieżącego cyklu i domyślny ustawiony na ${threshold}`
+          : `✅ Domyślny próg dla przyszłych cykli ustawiony na ${threshold} (bieżący cykl już nie zbiera, więc jego progu nie ruszono)`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-coop-speedup').addEventListener('click', async () => {
+      const hours = Number(document.getElementById('coop-speedup-input').value);
+      if (!Number.isFinite(hours) || hours <= 0) {
+        showToast('Podaj dodatnią liczbę godzin.');
+        return;
+      }
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/config', { password: pass, speed_up_hours: hours });
+        cfg.coop = res.coop;
+        renderInfo();
+        showToast(`⏩ Harmonogram przyspieszony o ${hours}h`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-coop-force-trigger').addEventListener('click', async () => {
+      if (!confirm('Wymusić start bossa teraz, dobijając próg sztucznie?')) return;
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/force-trigger', { password: pass });
+        cfg.coop = res.coop;
+        renderInfo();
+        showToast(`👹 ${res.boss_name} obudzony — edycja #${res.cycle} rusza!`);
       } catch (e) {
         showToast(e.message);
       }

@@ -1852,11 +1852,19 @@ function slLeaderboard(meId) {
 // Po przekroczeniu progu rusza event „bossowy" (mechanika = stub do uzupełnienia),
 // a po jego zakończeniu kontrybutorzy dostają nagrody wg wybranego podziału.
 
+// Domyślny próg dla NOWYCH cykli — admin może go podmienić na stałe (patrz
+// POST /api/snakes/admin/coop/config), bez tego trzeba by grzebać w .env i restartować.
+// Zmiana dotyczy tylko przyszłych cykli; bieżący ma już swój próg zapisany w wierszu.
+function slCoopDefaultThreshold() {
+  const override = parseInt(slMetaGet('coop_threshold_override'), 10);
+  return Number.isInteger(override) && override > 0 ? override : SL_COOP_THRESHOLD;
+}
+
 // Wstawia nowy cykl co-op zakotwiczony w podanej chwili (epoch ms) jako started_at.
 function slCoopInsertCycle(cycle, startMs) {
   db.prepare(`
     INSERT INTO sl_coop (cycle, threshold, started_at) VALUES (?, ?, datetime(?, 'unixepoch'))
-  `).run(cycle, SL_COOP_THRESHOLD, Math.floor(startMs / 1000));
+  `).run(cycle, slCoopDefaultThreshold(), Math.floor(startMs / 1000));
   return db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
 }
 
@@ -1939,9 +1947,11 @@ function slCoopPayload(meId) {
     contributors,
     window_days: SL_COOP_WINDOW_DAYS,
     gap_hours: SL_COOP_GAP_HOURS,
+    started_at: new Date(slCoopCycleStartMs(coop)).toISOString(),
     resolve_at: new Date(slCoopResolveMs(coop)).toISOString(),
     next_start_at: new Date(nextStartMs).toISOString(),
     penalty_amount: SL_COOP_PENALTY,
+    default_threshold: slCoopDefaultThreshold(),
     boss: coop.status === 'event_active' || coop.boss_defeated_at ? {
       name: coop.boss_name,
       hp: Math.max(0, Number(coop.boss_hp)),
@@ -3004,6 +3014,93 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
       description: `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
         out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n'),
       color: 0xC8F135
+    }]
+  }));
+
+  res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/coop/config { password, threshold?, speed_up_hours? } — kontrola
+// admina nad tym, co jest zaplanowane dla co-opu/bossa: podniesienie progu i/lub
+// przesunięcie harmonogramu do przodu (rozliczenie/start nowego okna szybciej).
+// `threshold` ustawia próg BIEŻĄCEGO cyklu (tylko gdy status='collecting' — dla
+// 'event_active'/'completed' nagroda już jest zamrożona w reward_pool) ORAZ zapisuje
+// go jako domyślny dla WSZYSTKICH przyszłych cykli (patrz slCoopDefaultThreshold).
+// `speed_up_hours` cofa started_at bieżącego cyklu o tyle godzin — bez zmiany progu/puli,
+// tylko przyspiesza moment rozliczenia (i/lub startu bossa dla widoku "co jest zaplanowane").
+app.post('/api/snakes/admin/coop/config', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const threshold = req.body.threshold != null ? parseInt(req.body.threshold, 10) : null;
+  const speedUpHours = req.body.speed_up_hours != null ? Number(req.body.speed_up_hours) : null;
+
+  if (threshold != null && (!Number.isInteger(threshold) || threshold <= 0)) {
+    return res.status(400).json({ error: 'Próg musi być dodatnią liczbą całkowitą.' });
+  }
+  if (speedUpHours != null && (!Number.isFinite(speedUpHours) || speedUpHours <= 0)) {
+    return res.status(400).json({ error: 'Liczba godzin przyspieszenia musi być dodatnia.' });
+  }
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+    let thresholdChanged = false;
+
+    if (threshold != null) {
+      slMetaSet('coop_threshold_override', threshold); // dotyczy przyszłych cykli
+      if (coop.status === 'collecting') {
+        db.prepare('UPDATE sl_coop SET threshold = ? WHERE cycle = ?').run(threshold, coop.cycle);
+        thresholdChanged = true;
+      }
+    }
+
+    if (speedUpHours != null) {
+      const shiftMs = Math.round(speedUpHours * 3600 * 1000);
+      const newStartMs = slCoopCycleStartMs(coop) - shiftMs;
+      db.prepare(`UPDATE sl_coop SET started_at = datetime(?, 'unixepoch') WHERE cycle = ?`)
+        .run(Math.floor(newStartMs / 1000), coop.cycle);
+    }
+
+    return { cycle: Number(coop.cycle), threshold_changed: thresholdChanged, coop: slCoopPayload(null) };
+  });
+
+  res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/coop/force-trigger { password } — natychmiast dobija bieżący
+// cykl do progu i budzi bossa, bez czekania na realne wpłaty graczy. Wpłaty od
+// prawdziwych kontrybutorów (jeśli jakieś już są) nadal liczą się normalnie do podziału
+// nagród — to tylko "sztuczne" dobicie samego progu (total), do testów/pokazówki.
+app.post('/api/snakes/admin/coop/force-trigger', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+    if (coop.status !== 'collecting') return { notCollecting: true, status: coop.status };
+
+    const threshold = Number(coop.threshold);
+    if (Number(coop.total) < threshold) {
+      db.prepare('UPDATE sl_coop SET total = ? WHERE cycle = ?').run(threshold, coop.cycle);
+    }
+    const rewardPool = Math.round(threshold * SL_COOP_REWARD_MULTIPLIER);
+    db.prepare(`
+      UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
+      WHERE cycle = ?
+    `).run(rewardPool, coop.cycle);
+    const bossInfo = startCoopBossEvent({ cycle: coop.cycle, threshold });
+
+    return { notCollecting: false, cycle: Number(coop.cycle), boss_name: bossInfo.boss_name, coop: slCoopPayload(null) };
+  });
+
+  if (out.notCollecting) {
+    return res.status(400).json({ error: `Nie można wymusić startu — cykl jest już w statusie "${out.status}".` });
+  }
+
+  slEmit('coop_milestone', () => ({
+    content: '🤝 **Pula co-op osiągnęła próg (wymuszone przez admina)!**',
+    embeds: [{
+      title: `Wydarzenie #${out.cycle} rusza!`,
+      url: SNAKES_URL,
+      description: `👹 Budzi się **${out.boss_name}**!`,
+      color: 0xF5C842
     }]
   }));
 
