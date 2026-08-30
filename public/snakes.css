@@ -325,7 +325,6 @@
 }
 .coop-cycle { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
 .coop-total { color: var(--gold); font-size: 14px; }
-.coop-intro { margin-bottom: 8px; line-height: 1.4; }
 .coop-bar {
   height: 10px;
   background: var(--surface-alt);
@@ -338,7 +337,6 @@
   background: linear-gradient(90deg, var(--accent-dim), var(--accent));
   transition: width 0.5s ease;
 }
-.coop-sub { margin-top: 6px; }
 .coop-form {
   display: flex;
   gap: 8px;
@@ -520,16 +518,7 @@
   font-size: 13px;
   letter-spacing: 1px;
 }
-.coop-card .coop-body {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 6px;
-}
-.coop-card .coop-body > .coop-sub { flex: 1; margin-top: 0; }
-.coop-card .coop-form { margin-top: 0; flex: 0 0 auto; }
 .coop-card .coop-form input { width: 96px; flex: 0 0 96px; }
-.coop-card .coop-event { margin-top: 0; flex: 1; }
 .coop-chips {
   display: flex;
   flex-wrap: wrap;
@@ -554,20 +543,12 @@
   margin-top: 6px;
   align-items: center;
 }
-.boss-instructions p.boss-instructions-lead {
-  margin: 0 0 4px;
-  color: var(--text-primary);
+.boss-instructions p {
+  margin: 0 0 6px;
   font-size: 12px;
+  line-height: 1.4;
 }
-.boss-instructions ul {
-  margin: 0;
-  padding-left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-  line-height: 1.35;
-}
+.boss-instructions p:last-child { margin-bottom: 0; }
 .boss-fight {
   display: flex;
   flex-direction: column;
@@ -578,6 +559,8 @@
   border: 1px solid var(--danger);
   border-radius: 10px;
 }
+.boss-fight.boss-sleeping { border-color: var(--muted); }
+.boss-fight.boss-sleeping .boss-emoji { opacity: 0.7; }
 .boss-emoji { font-size: 22px; line-height: 1; }
 .boss-name {
   font-family: 'Space Grotesk', sans-serif;

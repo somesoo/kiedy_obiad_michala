@@ -85,8 +85,9 @@
         </div>
 
         <div class="adm-note" style="margin-top:12px">
-          <strong>Przyspiesz harmonogram</strong> — cofa start bieżącego cyklu o tyle godzin,
-          czyli rozliczenie (i start kolejnego okna) nadejdzie szybciej. Nie rusza puli ani progu.
+          <strong>Przyspiesz termin walki</strong> — cofa termin pokonania AKTYWNEGO bossa
+          o tyle godzin (działa tylko, gdy boss właśnie walczy — zbiórka nie ma już terminu).
+          Nie rusza puli ani progu.
         </div>
         <div class="adm-actions">
           <input type="number" id="coop-speedup-input" min="0.1" step="0.5" placeholder="ile godzin" style="width:110px" />
@@ -293,8 +294,9 @@
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong> · pula: ${c.total}/${c.threshold} (${c.percent}%)<br>` +
         `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}<br>` +
-        `Start cyklu: ${fmtDate(c.started_at)} · rozliczenie: ${fmtDate(c.resolve_at)} · kolejne okno: ${fmtDate(c.next_start_at)}<br>` +
-        `Domyślny próg (nowe cykle): <strong>${c.default_threshold}</strong>`;
+        `Start edycji: ${fmtDate(c.started_at)} · limit na pokonanie bossa: <strong>${c.time_limit_days} dni robocze</strong><br>` +
+        `Bazowy próg (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
+        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? `pokonany, +${c.previous_result.bonus} pkt premii/os.` : 'nie zdążono, bez premii'}` : '');
 
       const bossEl = document.getElementById('boss-info');
       if (c.boss) {
@@ -302,7 +304,8 @@
         bossEl.innerHTML = `
           <div class="adm-note" style="margin-top:10px">
             👹 <strong>${esc(b.name)}</strong> — HP ${b.hp}/${b.max_hp} (${b.percent}%)
-            ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : b.active ? ' · <strong>WALKA TRWA</strong>' : ''}<br>
+            ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : b.active ? ' · <strong>WALKA TRWA</strong>' : ''}
+            ${b.active && b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
             Obrażenia od kości: oczka × ${b.dice_damage_mult} · ręczny atak: ${b.attack_cost} monet za ${b.attack_damage} obr. · premia za zabicie: +${b.defeat_bonus} pkt/os.
           </div>`;
       } else {
@@ -345,7 +348,7 @@
       const force = document.getElementById('coop-force-checkbox').checked;
       try {
         const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass, force });
-        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt`);
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt. Edycja #${res.next_cycle.cycle}: próg ${res.next_cycle.threshold}, ${res.next_cycle.time_limit_days} dni na pokonanie.`);
         await loadSettings();
       } catch (e) {
         showToast(e.message);

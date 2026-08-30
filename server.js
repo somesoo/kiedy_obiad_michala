@@ -347,6 +347,20 @@ function isWeekendStr(dateStr) {
   return dow === 0 || dow === 6; // niedziela / sobota
 }
 
+// (Snakes & Ladders) Dodaje `days` DNI ROBOCZYCH (pon–pt, czasu Warszawy) do danej
+// chwili — weekendy są całkowicie pomijane, więc licznik "nie płynie" w sobotę/niedzielę.
+// Używane do terminu pokonania bossa w wydarzeniu co-op (patrz slFinishBossEvent).
+function addBusinessDaysMs(fromMs, days) {
+  let ms = fromMs;
+  let remaining = days;
+  while (remaining > 0) {
+    ms += 24 * 60 * 60 * 1000;
+    const p = warsawParts(new Date(ms));
+    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) remaining--;
+  }
+  return ms;
+}
+
 // Ile dni roboczych (pon–pt) minęło od WORD_START do dateStr włącznie
 function businessDaysElapsed(dateStr) {
   const [sy, sm, sd] = WORD_START.split('-').map(Number);
@@ -1287,22 +1301,21 @@ const SL_KNOCKBACK_COIN_STEAL = 50;
 // dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
 const SL_DAILY_ROLLS = 2;
 
-// ── OKNO CO-OP + KARA ──
-// Cykliczne "okno" na osiągnięcie progu puli, zakotwiczone w konkretnym dniu tygodnia
-// i godzinie (czasu Warszawy) — domyślnie start wtorek 13:00. Okno trwa WINDOW_DAYS
-// (domyślnie 7) i ROZLICZA SIĘ (kara, jeśli próg nie padł) GAP_HOURS przed kolejnym
-// startem (domyślnie 4h) — czyli domyślnie: start wt. 13:00, rozliczenie wt. 09:00
-// (tydzień później), 4h przerwy na obejrzenie wyników, kolejny start wt. 13:00.
-// Ponieważ WINDOW_DAYS to pełne dni, dzień tygodnia startu nigdy nie dryfuje.
-const SL_COOP_WINDOW_DAYS = Number(process.env.SNAKES_COOP_WINDOW_DAYS || 7);
-const SL_COOP_WINDOW_MS = SL_COOP_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-const SL_COOP_GAP_HOURS = Number(process.env.SNAKES_COOP_GAP_HOURS || 4);
-const SL_COOP_GAP_MS = SL_COOP_GAP_HOURS * 60 * 60 * 1000;
-const SL_COOP_PENALTY = parseInt(process.env.SNAKES_COOP_PENALTY, 10) || 100;
-// Dzień tygodnia (0=niedziela..6=sobota, JS getUTCDay) i godzina PIERWSZEGO okna —
-// używane tylko raz, do zakotwiczenia cyklu #1; każdy kolejny cykl liczy się od niego.
-const SL_COOP_START_DOW = Number(process.env.SNAKES_COOP_START_DOW ?? 2); // wtorek
-const SL_COOP_START_HOUR = Number(process.env.SNAKES_COOP_START_HOUR ?? 13);
+// ── ESKALACJA TRUDNOŚCI CO-OP ──
+// Zbiórka (status 'collecting') NIE MA już terminu ani kary — trwa, aż próg padnie,
+// można wpłacać zawsze. Limit czasu dotyczy WYŁĄCZNIE walki z bossem: gdy próg padnie,
+// boss budzi się z określoną liczbą DNI ROBOCZYCH na pokonanie (weekendy się nie liczą
+// do odliczania — patrz addBusinessDaysMs). Po rozstrzygnięciu (wygrana lub czas minął)
+// KOLEJNA edycja rusza NATYCHMIAST — próg i czas na pokonanie zmieniają się zależnie
+// od wyniku:
+//   • wygrana: próg × GROWTH (trudniej), czas × SHRINK, ale nie mniej niż MIN_TIME_DAYS
+//   • przegrana (czas minął, boss przeżył): próg i czas łagodnieją o RELIEF_FACTOR,
+//     ale nigdy poniżej/powyżej wartości bazowej (BASE) — to tylko "odbicie", nie reset.
+const SL_COOP_BASE_TIME_DAYS = Number(process.env.SNAKES_COOP_BASE_TIME_DAYS || 5);
+const SL_COOP_MIN_TIME_DAYS = Number(process.env.SNAKES_COOP_MIN_TIME_DAYS || 2);
+const SL_COOP_THRESHOLD_GROWTH = Number(process.env.SNAKES_COOP_THRESHOLD_GROWTH || 1.2);
+const SL_COOP_TIME_SHRINK = Number(process.env.SNAKES_COOP_TIME_SHRINK || 0.8);
+const SL_COOP_RELIEF_FACTOR = Number(process.env.SNAKES_COOP_RELIEF_FACTOR || 0.9); // próg ×0.9, czas ÷0.9
 
 // ── WALKA Z BOSSEM ──
 // Gdy pula przekroczy próg, budzi się losowy biurowy boss z paskiem HP. KAŻDY rzut
@@ -1402,7 +1415,9 @@ db.exec(`
     boss_name        TEXT,
     boss_max_hp      INTEGER DEFAULT 0,
     boss_hp          INTEGER DEFAULT 0,
-    boss_defeated_at DATETIME
+    boss_defeated_at DATETIME,
+    time_limit_days  INTEGER DEFAULT 5,   -- dni robocze na pokonanie TEGO bossa
+    boss_deadline_at DATETIME             -- policzone przy wybudzeniu (patrz addBusinessDaysMs)
   );
 
   -- Wkłady graczy do puli (per cykl) — na ich podstawie liczymy nagrody.
@@ -1440,6 +1455,8 @@ ensureColumn('sl_coop', 'boss_name', 'TEXT');
 ensureColumn('sl_coop', 'boss_max_hp', 'INTEGER DEFAULT 0');
 ensureColumn('sl_coop', 'boss_hp', 'INTEGER DEFAULT 0');
 ensureColumn('sl_coop', 'boss_defeated_at', 'DATETIME');
+ensureColumn('sl_coop', 'time_limit_days', 'INTEGER DEFAULT 5');
+ensureColumn('sl_coop', 'boss_deadline_at', 'DATETIME');
 
 // sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
 // jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
@@ -1860,52 +1877,22 @@ function slCoopDefaultThreshold() {
   return Number.isInteger(override) && override > 0 ? override : SL_COOP_THRESHOLD;
 }
 
-// Wstawia nowy cykl co-op zakotwiczony w podanej chwili (epoch ms) jako started_at.
-function slCoopInsertCycle(cycle, startMs) {
+// Wstawia nowy cykl co-op — rusza NATYCHMIAST (started_at = teraz, domyślnie w schemacie),
+// z podanym progiem i limitem dni roboczych na pokonanie bossa, gdy ten padnie.
+function slCoopInsertCycle(cycle, threshold, timeLimitDays) {
   db.prepare(`
-    INSERT INTO sl_coop (cycle, threshold, started_at) VALUES (?, ?, datetime(?, 'unixepoch'))
-  `).run(cycle, slCoopDefaultThreshold(), Math.floor(startMs / 1000));
+    INSERT INTO sl_coop (cycle, threshold, time_limit_days) VALUES (?, ?, ?)
+  `).run(cycle, threshold, timeLimitDays);
   return db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
 }
 
-// Najbliższa chwila (epoch ms) odpowiadająca SL_COOP_START_DOW/HOUR w Europe/Warsaw,
-// licząc od teraz — używana WYŁĄCZNIE do zakotwiczenia zupełnie pierwszego cyklu.
-function slCoopFirstAnchorMs() {
-  const p = warsawParts();
-  let y = Number(p.y), m = Number(p.mo), d = Number(p.d);
-  for (let i = 0; i < 8; i++) {
-    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-    if (dow === SL_COOP_START_DOW) {
-      const candidateMs = warsawWallTimeToMs(y, m, d, SL_COOP_START_HOUR);
-      if (candidateMs > Date.now()) return candidateMs;
-    }
-    const next = new Date(Date.UTC(y, m - 1, d) + 86400000);
-    y = next.getUTCFullYear(); m = next.getUTCMonth() + 1; d = next.getUTCDate();
-  }
-  return Date.now(); // nie powinno się zdarzyć — 8 dni pokrywa pełny tydzień
-}
-
-// Epoch ms startu danego cyklu. SQLite CURRENT_TIMESTAMP/datetime() są w UTC bez 'Z' —
-// trzeba to jawnie dopisać przy parsowaniu.
-function slCoopCycleStartMs(coop) {
-  return Date.parse(coop.started_at.replace(' ', 'T') + 'Z');
-}
-
-// Zwraca bieżący cykl co-op, w razie potrzeby doszczepiając kolejne — cykle są
-// zakotwiczone w stałym harmonogramie tygodniowym (patrz SL_COOP_* wyżej), więc
-// dzień/godzina startu NIGDY nie dryfuje, niezależnie od tego, kiedy faktycznie
-// wykona się ten insert. Pętla "dogania" ewentualne przespane okna (np. po dłuższym
-// downtime serwera) — dociąga tyle cykli, ile trzeba, aż trafi na aktualnie trwający.
+// Zwraca bieżący cykl co-op — zbiórka nie ma już terminu (patrz nagłówek sekcji), więc
+// wystarczy ostatni wiersz; jeśli baza jest zupełnie pusta, zakłada świeży cykl #1
+// z wartościami bazowymi (próg z ewentualnego override'u admina, czas z SL_COOP_BASE_TIME_DAYS).
 function slCurrentCoop() {
-  let coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
-  if (!coop) {
-    coop = slCoopInsertCycle(1, slCoopFirstAnchorMs());
-  }
-  let guard = 0;
-  while (Date.now() >= slCoopCycleStartMs(coop) + SL_COOP_WINDOW_MS && guard++ < 1000) {
-    coop = slCoopInsertCycle(coop.cycle + 1, slCoopCycleStartMs(coop) + SL_COOP_WINDOW_MS);
-  }
-  return coop;
+  const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
+  if (coop) return coop;
+  return slCoopInsertCycle(1, slCoopDefaultThreshold(), SL_COOP_BASE_TIME_DAYS);
 }
 
 function slCoopContributors(cycle) {
@@ -1922,18 +1909,29 @@ function slCoopContributors(cycle) {
   }));
 }
 
-// Chwila rozliczenia (kara, jeśli próg nie padł) — GAP_HOURS przed kolejnym startem.
-function slCoopResolveMs(coop) {
-  return slCoopCycleStartMs(coop) + SL_COOP_WINDOW_MS - SL_COOP_GAP_MS;
-}
-
 function slCoopPayload(meId) {
   const coop = slCurrentCoop();
   const contributors = slCoopContributors(coop.cycle);
   const mine = meId ? (contributors.find(c => c.player_id === meId) || { amount: 0 }).amount : 0;
   const total = Number(coop.total);
   const threshold = Number(coop.threshold);
-  const nextStartMs = slCoopCycleStartMs(coop) + SL_COOP_WINDOW_MS;
+
+  // Poprzednia edycja (jeśli już się rozstrzygnęła) — do krótkiego podsumowania "co się
+  // stało ostatnio i dlatego trudność jest taka, jaka jest" w UI zaraz po sukcesji.
+  let previousResult = null;
+  if (coop.cycle > 1) {
+    const prev = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle - 1);
+    if (prev && prev.completed_at) {
+      previousResult = {
+        cycle: Number(prev.cycle),
+        boss_name: prev.boss_name,
+        defeated: !!prev.boss_defeated_at,
+        reward_pool: Number(prev.reward_pool),
+        bonus: prev.boss_defeated_at ? SL_BOSS_DEFEAT_BONUS : 0
+      };
+    }
+  }
+
   return {
     cycle: Number(coop.cycle),
     total,
@@ -1945,13 +1943,9 @@ function slCoopPayload(meId) {
     reward_split: SL_COOP_REWARD_SPLIT,
     my_contribution: mine,
     contributors,
-    window_days: SL_COOP_WINDOW_DAYS,
-    gap_hours: SL_COOP_GAP_HOURS,
-    started_at: new Date(slCoopCycleStartMs(coop)).toISOString(),
-    resolve_at: new Date(slCoopResolveMs(coop)).toISOString(),
-    next_start_at: new Date(nextStartMs).toISOString(),
-    penalty_amount: SL_COOP_PENALTY,
+    time_limit_days: Number(coop.time_limit_days),
     default_threshold: slCoopDefaultThreshold(),
+    previous_result: previousResult,
     boss: coop.status === 'event_active' || coop.boss_defeated_at ? {
       name: coop.boss_name,
       hp: Math.max(0, Number(coop.boss_hp)),
@@ -1959,6 +1953,8 @@ function slCoopPayload(meId) {
       percent: Math.max(0, Math.min(100, Math.round((Number(coop.boss_hp) / Math.max(1, Number(coop.boss_max_hp))) * 100))),
       defeated: !!coop.boss_defeated_at,
       active: coop.status === 'event_active',
+      deadline_at: coop.boss_deadline_at ? new Date(coop.boss_deadline_at.replace(' ', 'T') + 'Z').toISOString() : null,
+      time_limit_days: Number(coop.time_limit_days),
       attack_cost: SL_BOSS_ATTACK_COST,
       attack_damage: SL_BOSS_ATTACK_DAMAGE,
       dice_damage_mult: SL_BOSS_DICE_DAMAGE_MULT,
@@ -1969,15 +1965,18 @@ function slCoopPayload(meId) {
 
 // ── WALKA Z BOSSEM ──
 // Wołane, gdy pula przekroczy próg pierwszy raz w danym cyklu (patrz /coop/contribute).
-// Losuje bossa i ustawia mu HP proporcjonalne do progu — im większa pula, tym twardszy
-// przeciwnik, więc skalowanie zostaje sensowne niezależnie od tego, jak SNAKES_COOP_THRESHOLD
-// jest ustawiony w danym środowisku.
+// Losuje bossa, ustawia mu HP proporcjonalne do progu i liczy termin pokonania —
+// coop.time_limit_days DNI ROBOCZYCH od teraz (weekendy nie liczą się do odliczania,
+// patrz addBusinessDaysMs). `coop` musi mieć aktualne `threshold`/`time_limit_days`/`cycle`.
 function startCoopBossEvent(coop) {
   const name = SL_BOSS_NAMES[Math.floor(Math.random() * SL_BOSS_NAMES.length)];
   const maxHp = Math.round(Number(coop.threshold) * SL_BOSS_HP_MULTIPLIER);
-  db.prepare('UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ? WHERE cycle = ?')
-    .run(name, maxHp, maxHp, coop.cycle);
-  return { started: true, cycle: Number(coop.cycle), boss_name: name, boss_max_hp: maxHp };
+  const deadlineMs = addBusinessDaysMs(Date.now(), Number(coop.time_limit_days));
+  db.prepare(`
+    UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ?, boss_deadline_at = datetime(?, 'unixepoch')
+    WHERE cycle = ?
+  `).run(name, maxHp, maxHp, Math.floor(deadlineMs / 1000), coop.cycle);
+  return { started: true, cycle: Number(coop.cycle), boss_name: name, boss_max_hp: maxHp, deadline_ms: deadlineMs };
 }
 
 // Warunek zwycięstwa: HP bossa spadło do zera (od rzutów graczy lub ręcznych ataków —
@@ -1998,11 +1997,38 @@ function slCoopRewardSplit(contributors, rewardPool) {
   return contributors.map(c => ({ ...c, reward: Math.round(rewardPool * (c.amount / total)) }));
 }
 
-// Zamyka event bossowy i wypłaca nagrody — wołane automatycznie, gdy HP bossa spadnie
-// do zera (podczas zwykłego rzutu lub ręcznego ataku), albo gdy minie czas rozliczenia,
-// a boss wciąż żyje (scheduler niżej). Pokonanie bossa dorzuca SL_BOSS_DEFEAT_BONUS na
-// KAŻDEGO kontrybutora ponad zwykłą pulę — to jest zachęta, żeby nie tylko wpłacać, ale
-// i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack), zanim czas się skończy.
+// Próg/czas KOLEJNEJ edycji na podstawie wyniku tej: wygrana = trudniej i szybciej
+// (× GROWTH / × SHRINK); przegrana (czas minął) = odrobinę łatwiej (RELIEF_FACTOR)
+// — "delikatna pomoc", żeby ekipa mogła się odbić, a nie utknąć na niemożliwym progu.
+// W obie strony trzymamy się widełek [BASE .. wynik poprzedniej edycji] — porażka
+// nigdy nie schodzi PONIŻEJ progu bazowego ani nie wydłuża czasu PONAD bazowy.
+function slCoopNextDifficulty(coop, defeated) {
+  const threshold = Number(coop.threshold);
+  const timeLimit = Number(coop.time_limit_days);
+  const base = slCoopDefaultThreshold();
+  if (defeated) {
+    // Trudniej: zaokrąglenia ZAWSZE w stronę większej trudności (próg w górę, czas w
+    // dół), żeby zaokrąglenie nigdy przypadkiem nie ułatwiło kolejnej edycji.
+    return {
+      threshold: Math.ceil(threshold * SL_COOP_THRESHOLD_GROWTH),
+      time_limit_days: Math.max(SL_COOP_MIN_TIME_DAYS, Math.floor(timeLimit * SL_COOP_TIME_SHRINK))
+    };
+  }
+  // Łatwiej: zaokrąglenia ZAWSZE w stronę większej ulgi (próg w dół, czas w górę) —
+  // inaczej przy małych wartościach czasu (dni) zaokrąglenie potrafi "utknąć" i ulga
+  // z porażki nigdy realnie nie nadejdzie.
+  return {
+    threshold: Math.max(base, Math.floor(threshold * SL_COOP_RELIEF_FACTOR)),
+    time_limit_days: Math.min(SL_COOP_BASE_TIME_DAYS, Math.ceil(timeLimit / SL_COOP_RELIEF_FACTOR))
+  };
+}
+
+// Zamyka event bossowy, wypłaca nagrody i OD RAZU otwiera kolejną edycję (trudniejszą
+// po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty). Wołane
+// automatycznie, gdy HP bossa spadnie do zera (zwykły rzut lub ręczny atak), albo gdy
+// minie termin (scheduler niżej), a boss wciąż żyje. Pokonanie bossa dorzuca
+// SL_BOSS_DEFEAT_BONUS na KAŻDEGO kontrybutora ponad zwykłą pulę — to zachęta, żeby nie
+// tylko wpłacać, ale i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack).
 function slFinishBossEvent(coop, defeated) {
   const contributors = slCoopContributors(coop.cycle);
   const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
@@ -2019,37 +2045,13 @@ function slFinishBossEvent(coop, defeated) {
     WHERE cycle = ?
   `).run(coop.cycle);
 
-  return { cycle: Number(coop.cycle), boss_name: coop.boss_name, reward_pool: rewardPool, bonus, payouts, defeated };
-}
+  const next = slCoopNextDifficulty(coop, defeated);
+  const nextCoop = slCoopInsertCycle(coop.cycle + 1, next.threshold, next.time_limit_days);
 
-// ── ROZLICZENIE OKNA CO-OP (kara za niedobitkę) ──
-// Wołane co minutę (patrz scheduler niżej). Działa TYLKO gdy bieżący cykl wciąż zbiera
-// ('collecting') i minęła jego chwila rozliczenia (GAP_HOURS przed kolejnym startem).
-// Jeśli próg już padł kiedykolwiek (status poszedł dalej niż 'collecting'), zegar
-// rozliczenia nic tu nie robi — ten cykl idzie swoją dotychczasową ścieżką (walka
-// z bossem → wypłata nagród przez admina), a wpłaty do puli są WCIĄŻ możliwe
-// (patrz endpoint /coop/contribute — to jest "backup mechanizm" na zawsze otwartą
-// zbiórkę). Kolejny cykl i tak otworzy się automatycznie o zaplanowanej porze
-// (slCurrentCoop), niezależnie od tego, czy tu doszło do kary.
-function slResolveCoopMiss(cycle) {
-  return transaction(() => {
-    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
-    if (!fresh || fresh.status !== 'collecting') return null; // już rozstrzygnięte/próg padł
-
-    const players = db.prepare('SELECT player_id FROM sl_state').all();
-    const upd = db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?');
-    for (const p of players) upd.run(SL_COOP_PENALTY, p.player_id);
-
-    db.prepare(`UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE cycle = ?`)
-      .run(fresh.cycle);
-
-    return {
-      cycle: Number(fresh.cycle),
-      total: Number(fresh.total),
-      threshold: Number(fresh.threshold),
-      players_affected: players.length
-    };
-  });
+  return {
+    cycle: Number(coop.cycle), boss_name: coop.boss_name, reward_pool: rewardPool, bonus, payouts, defeated,
+    next_cycle: { cycle: Number(nextCoop.cycle), threshold: next.threshold, time_limit_days: next.time_limit_days }
+  };
 }
 
 // ══ DISCORD — SZYNA ZDARZEŃ ══
@@ -2074,7 +2076,6 @@ const SL_EVENT_DEFAULTS = {
   knockback:          true,
   coop_milestone:     true,
   coop_completed:     true,
-  coop_window_result: true,
   leaderboard_daily:  true
 };
 
@@ -2087,8 +2088,7 @@ const SL_EVENT_LABELS = {
   double_move:        'Użycie Double Move',
   knockback:          'Wypchnięcie z zajętego pola (i efekt domina)',
   coop_milestone:     'Pula co-op przekroczyła próg',
-  coop_completed:     'Wydarzenie co-op ukończone (nagrody wypłacone)',
-  coop_window_result: 'Koniec okna co-op — cel nieosiągnięty, kara nałożona',
+  coop_completed:     'Wydarzenie co-op ukończone (nagrody wypłacone, kolejna edycja rusza)',
   leaderboard_daily:  'Dzienne podsumowanie rankingu'
 };
 
@@ -2193,29 +2193,14 @@ function startSnakesDiscordScheduler() {
 }
 startSnakesDiscordScheduler();
 
-// ── SCHEDULER OKNA CO-OP ──
-// Działa ZAWSZE (niezależnie od webhooka Discorda) — kara punktowa to realny efekt
-// w grze, nie tylko powiadomienie. slEmit sam pomija wysyłkę, gdy webhook nie jest
-// skonfigurowany, więc bezpiecznie wołamy go bezwarunkowo. Tick co minutę + jedno
-// sprawdzenie od razu przy starcie, żeby samo-naprawić się po restarcie serwera,
-// który przespał moment zamknięcia okna (analogicznie do harmonogramu Wordle/Discorda).
-function slEmitCoopWindowResult(outcome) {
-  slEmit('coop_window_result', () => ({
-    content: '❌ **Cel co-op tego okna NIE został osiągnięty.**',
-    embeds: [{
-      title: `Edycja #${outcome.cycle} — kara`,
-      url: SNAKES_URL,
-      description: `Pula zatrzymała się na **${outcome.total}/${outcome.threshold}** pkt.\n` +
-        `Każdy gracz traci **${SL_COOP_PENALTY} pkt** (dotyczy ${outcome.players_affected} ${outcome.players_affected === 1 ? 'osoby' : 'osób'}). Nowe okno (${SL_COOP_WINDOW_DAYS} dni) właśnie się rozpoczyna.`,
-      color: 0xE85D4A
-    }]
-  }));
-}
-
-// Rozstrzyga event bossowy, jeśli minął czas rozliczenia okna, a boss WCIĄŻ żyje —
-// próg i tak padł, więc zwykła nagroda się należy, tylko bez premii za pokonanie bossa
-// (patrz slFinishBossEvent). Jeśli boss padł wcześniej (podczas gry), status jest już
-// 'completed' i ten kod nigdy się nie odpala — brak podwójnego rozliczenia.
+// ── SCHEDULER TERMINU WALKI Z BOSSEM ──
+// Zbiórka ('collecting') nie ma już terminu — jedyny zegar dotyczy AKTYWNEJ walki:
+// jeśli minie boss_deadline_at, a boss wciąż żyje, próg i tak padł (należy się zwykła
+// nagroda), więc rozliczamy jak przegraną i OD RAZU startuje kolejna, łagodniejsza
+// edycja (patrz slFinishBossEvent). Jeśli boss padł wcześniej w grze, status jest już
+// 'completed' i ten kod nigdy się nie odpala — brak podwójnego rozliczenia. Działa
+// ZAWSZE (niezależnie od webhooka) — slEmit sam pomija wysyłkę, gdy webhook nie jest
+// skonfigurowany. Tick co minutę + raz od razu przy starcie (samo-naprawa po restarcie).
 function slResolveBossTimeout(cycle) {
   return transaction(() => {
     const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
@@ -2226,37 +2211,34 @@ function slResolveBossTimeout(cycle) {
 
 function slEmitBossTimeout(outcome) {
   slEmit('coop_completed', () => ({
-    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '⏳ **Czas eventu minął — boss przeżył.**',
+    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '⏳ **Czas minął — boss przeżył.**',
     embeds: [{
       title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
       url: SNAKES_URL,
-      description: outcome.defeated
+      description: (outcome.defeated
         ? `Kontrybutorzy dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
-        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów — bez premii za pokonanie bossa (nie zdążyliście go dobić na czas).`,
+        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów — bez premii za pokonanie bossa (nie zdążyliście go dobić na czas).`
+      ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: próg **${outcome.next_cycle.threshold}** pkt, **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie bossa.`,
       color: outcome.defeated ? 0x53D06B : 0x8E8E93
     }]
   }));
 }
 
-function startCoopWindowScheduler() {
+function startCoopBossDeadlineScheduler() {
   const tick = () => {
-    const coop = slCurrentCoop(); // dogania przespane okna, jeśli trzeba
-    if (coop.status === 'event_active') {
-      if (Date.now() < slCoopResolveMs(coop)) return;
-      const outcome = slResolveBossTimeout(coop.cycle);
-      if (outcome) slEmitBossTimeout(outcome);
-      return;
-    }
-    if (coop.status !== 'collecting') return;
-    if (Date.now() < slCoopResolveMs(coop)) return;
-    const outcome = slResolveCoopMiss(coop.cycle);
-    if (outcome) slEmitCoopWindowResult(outcome);
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active') return;
+    if (!coop.boss_deadline_at) return;
+    const deadlineMs = Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z');
+    if (Date.now() < deadlineMs) return;
+    const outcome = slResolveBossTimeout(coop.cycle);
+    if (outcome) slEmitBossTimeout(outcome);
   };
   tick();
   setInterval(tick, 60_000);
-  console.log(`Snakes/Co-op: start ${SL_COOP_START_DOW}/${SL_COOP_START_HOUR}:00, okno ${SL_COOP_WINDOW_DAYS} dni, rozliczenie ${SL_COOP_GAP_HOURS}h przed kolejnym startem, kara: ${SL_COOP_PENALTY} pkt/gracza`);
+  console.log(`Snakes/Co-op: eskalacja trudności — próg ×${SL_COOP_THRESHOLD_GROWTH} i czas ×${SL_COOP_TIME_SHRINK} po wygranej (min. ${SL_COOP_MIN_TIME_DAYS} dni robocze), ulga ×${SL_COOP_RELIEF_FACTOR} po porażce.`);
 }
-startCoopWindowScheduler();
+startCoopBossDeadlineScheduler();
 
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
 function slBuildState(playerId) {
@@ -2879,7 +2861,7 @@ app.get('/api/snakes/admin/settings', (req, res) => {
 // zerowego: każdy gracz wraca na pole 0 z saldem/punktami 0, ekwipunkiem power-upów
 // wyczyszczonym i bez oczekujących efektów (Freeze/Curse/Shield/Double Move). Historia
 // ruchów i dziennik aktywności są kasowane, a pula co-op wraca do świeżej edycji #1
-// (nowe okno zakotwiczone od teraz — patrz slCoopFirstAnchorMs). Gracze i ich AWATARY
+// z bazowym progiem/czasem (patrz slCurrentCoop). Gracze i ich AWATARY
 // (pionki) NIE są ruszane — konta w Snakes zostają, tylko ich postęp w grze wraca do zera.
 // Wordle jest kompletnie nietknięte (osobne tabele). Nieodwracalne — potwierdzenie
 // (i podwójne potwierdzenie w UI) leży po stronie panelu admina.
@@ -3055,12 +3037,12 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
 
 // POST /api/snakes/admin/coop/config { password, threshold?, speed_up_hours? } — kontrola
 // admina nad tym, co jest zaplanowane dla co-opu/bossa: podniesienie progu i/lub
-// przesunięcie harmonogramu do przodu (rozliczenie/start nowego okna szybciej).
-// `threshold` ustawia próg BIEŻĄCEGO cyklu (tylko gdy status='collecting' — dla
-// 'event_active'/'completed' nagroda już jest zamrożona w reward_pool) ORAZ zapisuje
-// go jako domyślny dla WSZYSTKICH przyszłych cykli (patrz slCoopDefaultThreshold).
-// `speed_up_hours` cofa started_at bieżącego cyklu o tyle godzin — bez zmiany progu/puli,
-// tylko przyspiesza moment rozliczenia (i/lub startu bossa dla widoku "co jest zaplanowane").
+// przyspieszenie terminu AKTYWNEJ walki (zbiórka nie ma już terminu — nie ma czego
+// przyspieszać, dopóki boss śpi). `threshold` ustawia próg BIEŻĄCEGO cyklu (tylko gdy
+// status='collecting' — dla 'event_active'/'completed' nagroda już jest zamrożona
+// w reward_pool) ORAZ zapisuje go jako bazowy dla WSZYSTKICH przyszłych cykli (patrz
+// slCoopDefaultThreshold). `speed_up_hours` cofa termin pokonania bossa (boss_deadline_at)
+// o tyle godzin — działa tylko gdy boss właśnie walczy (status='event_active').
 app.post('/api/snakes/admin/coop/config', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const threshold = req.body.threshold != null ? parseInt(req.body.threshold, 10) : null;
@@ -3075,8 +3057,14 @@ app.post('/api/snakes/admin/coop/config', (req, res) => {
 
   const out = transaction(() => {
     const coop = slCurrentCoop();
-    let thresholdChanged = false;
 
+    // Walidacja PRZED jakimkolwiek zapisem — żeby błąd na jednym polu nie zostawił
+    // drugiego już zacommitowanego (transaction() commituje też przy zwykłym return).
+    if (speedUpHours != null && !(coop.status === 'event_active' && coop.boss_deadline_at)) {
+      return { notActive: true, cycle: Number(coop.cycle), status: coop.status };
+    }
+
+    let thresholdChanged = false;
     if (threshold != null) {
       slMetaSet('coop_threshold_override', threshold); // dotyczy przyszłych cykli
       if (coop.status === 'collecting') {
@@ -3085,15 +3073,22 @@ app.post('/api/snakes/admin/coop/config', (req, res) => {
       }
     }
 
+    let deadlineSped = false;
     if (speedUpHours != null) {
       const shiftMs = Math.round(speedUpHours * 3600 * 1000);
-      const newStartMs = slCoopCycleStartMs(coop) - shiftMs;
-      db.prepare(`UPDATE sl_coop SET started_at = datetime(?, 'unixepoch') WHERE cycle = ?`)
-        .run(Math.floor(newStartMs / 1000), coop.cycle);
+      const currentDeadlineMs = Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z');
+      const newDeadlineMs = currentDeadlineMs - shiftMs;
+      db.prepare(`UPDATE sl_coop SET boss_deadline_at = datetime(?, 'unixepoch') WHERE cycle = ?`)
+        .run(Math.floor(newDeadlineMs / 1000), coop.cycle);
+      deadlineSped = true;
     }
 
-    return { cycle: Number(coop.cycle), threshold_changed: thresholdChanged, coop: slCoopPayload(null) };
+    return { notActive: false, cycle: Number(coop.cycle), threshold_changed: thresholdChanged, deadline_sped: deadlineSped, coop: slCoopPayload(null) };
   });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: `Nie ma czego przyspieszać — boss nie walczy teraz (status: ${out.status}).` });
+  }
 
   res.json({ success: true, ...out });
 });
@@ -3118,7 +3113,7 @@ app.post('/api/snakes/admin/coop/force-trigger', (req, res) => {
       UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
       WHERE cycle = ?
     `).run(rewardPool, coop.cycle);
-    const bossInfo = startCoopBossEvent({ cycle: coop.cycle, threshold });
+    const bossInfo = startCoopBossEvent(coop);
 
     return { notCollecting: false, cycle: Number(coop.cycle), boss_name: bossInfo.boss_name, coop: slCoopPayload(null) };
   });

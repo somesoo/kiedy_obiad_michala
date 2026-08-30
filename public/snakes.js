@@ -788,96 +788,68 @@ function slCoopChipsHtml(c) {
     : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nic nie dorzucił — bądź pierwszy!</span></div>`;
 }
 
+// Dwie kolumny, niska wysokość: po lewej zasady w dwóch zdaniach (stałe, niezależnie
+// od fazy), po prawej sam "boss" — śpiący pasek postępu w trakcie zbiórki, albo pasek
+// HP + przycisk ataku, gdy już walczy. Zbiórka nie ma terminu (zawsze można wpłacać —
+// pasek na dole), termin dotyczy WYŁĄCZNIE aktywnej walki (patrz coop-deadline).
 function renderCoop(g) {
   const c = g.coop;
   if (!c) return;
   const el = document.getElementById('coop-panel');
   if (!el) return;
 
-  if (c.status === 'event_active' && c.boss) {
-    renderBossPanel(el, g, c);
-    return;
-  }
+  const active = c.status === 'event_active' && c.boss && c.boss.active;
 
-  const splitLabel = c.reward_split === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu';
+  const rulesHtml = `
+    <div class="boss-instructions text-muted small">
+      <p>Wpłacajcie wspólnie do puli — gdy padnie próg, budzi się boss z limitem czasu na pokonanie go (liczą się tylko dni robocze).</p>
+      <p>Zdążycie: próg i tempo rosną na kolejną rundę. Nie zdążycie: robi się odrobinę łatwiej.</p>
+    </div>`;
 
-  let statusNote = '';
-  let deadlineTarget, deadlineLabel;
-  if (c.status === 'collecting') {
-    deadlineTarget = c.resolve_at; deadlineLabel = 'rozliczenie za';
-  } else if (c.goal_met) {
-    statusNote = `<div class="coop-event">🏆 <strong>Cel osiągnięty!</strong>${c.boss && c.boss.defeated ? ` ${esc(c.boss.name)} pokonany — nagrody wypłacone.` : ' Czekamy na nowe okno.'}</div>`;
-    deadlineTarget = c.next_start_at; deadlineLabel = 'nowe okno za';
-  } else {
-    statusNote = `<div class="coop-event coop-event-bad">❌ <strong>Próg nieosiągnięty</strong> — każdy stracił ${c.penalty_amount} pkt.</div>`;
-    deadlineTarget = c.next_start_at; deadlineLabel = 'nowe okno za';
-  }
+  const rightHtml = active ? `
+    <div class="boss-fight">
+      <div class="boss-emoji">👹</div>
+      <div class="boss-name">${esc(c.boss.name)}</div>
+      <div class="coop-bar boss-hp-bar"><div class="coop-bar-fill boss-hp-fill" style="width:${c.boss.percent}%"></div></div>
+      <div class="boss-hp-text mono">${c.boss.hp} / ${c.boss.max_hp} HP</div>
+      <button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${g.me.balance >= c.boss.attack_cost ? '' : 'disabled'}>🗡️ Atakuj (-${c.boss.attack_cost})</button>
+      <div class="text-muted small">Nagroda: ${c.reward_pool} pkt + ${c.boss.defeat_bonus} premii/os.</div>
+    </div>` : `
+    <div class="boss-fight boss-sleeping">
+      <div class="boss-emoji">😴</div>
+      <div class="boss-name">Boss śpi…</div>
+      <div class="coop-bar"><div class="coop-bar-fill" style="width:${c.percent}%"></div></div>
+      <div class="boss-hp-text mono">${c.total} / ${c.threshold} pkt (${c.percent}%)</div>
+      <div class="text-muted small">Nagroda: ${c.reward_pool} pkt · Twój wkład: ${c.my_contribution}</div>
+    </div>`;
+
+  const prevHtml = c.previous_result ? `
+    <div class="coop-event ${c.previous_result.defeated ? '' : 'coop-event-bad'}">
+      ${c.previous_result.defeated ? '🏆' : '⏳'} Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? `pokonany! Premia +${c.previous_result.bonus} pkt/os.` : 'boss przeżył — nagroda i tak wypłacona.'}
+    </div>` : '';
 
   el.innerHTML = `
     <div class="coop-head">
       <span class="coop-title">🤝 WSPÓLNA PULA <span class="coop-cycle text-muted">· edycja #${c.cycle}</span></span>
-      <span class="coop-total mono">${c.total} / ${c.threshold} (${c.percent}%)</span>
+      <span class="coop-total mono">${active ? `${c.boss.hp} / ${c.boss.max_hp} HP` : `${c.total} / ${c.threshold} (${c.percent}%)`}</span>
     </div>
-    <div class="coop-intro text-muted small">Dorzucaj punkty do wspólnej puli — gdy razem uzbieracie próg, budzi się boss i wszyscy, którzy wpłacili, dostają nagrodę. Nie zdążycie w tym oknie? Każdy traci trochę punktów, ale wpłaty i tak liczą się dalej do kolejnej edycji.</div>
-    <div class="coop-bar"><div class="coop-bar-fill" style="width:${c.percent}%"></div></div>
-    <div class="coop-body">
-      <div class="coop-sub text-muted small">
-        Nagrody: <strong>${c.reward_pool} pkt</strong> · podział ${splitLabel} · Twój wkład: <strong>${c.my_contribution}</strong>
-        · kara za niedobicie: <strong>-${c.penalty_amount} pkt</strong>/gracza
-      </div>
-      <div class="coop-form">
-        <input type="number" id="coop-amount" min="1" step="1" placeholder="ile pkt?" />
-        <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>
-      </div>
-    </div>
-    ${statusNote}
-    <span class="coop-deadline mono" id="coop-deadline" data-until="${esc(deadlineTarget)}" data-label="${esc(deadlineLabel)}">⏳ –</span>
-    ${slCoopChipsHtml(c)}`;
-  updateCoopDeadline();
-}
-
-// Panel walki z bossem — dwie kolumny, niska wysokość: po lewej krótka instrukcja
-// mechaniki, po prawej sam pasek HP + przycisk ataku. Wpłaty do puli zostają możliwe
-// (dokładają się na poczet kolejnej edycji), stąd wąski pasek z formularzem na dole.
-function renderBossPanel(el, g, c) {
-  const b = c.boss;
-  const canAttack = g.me.balance >= b.attack_cost;
-  el.innerHTML = `
-    <div class="coop-head">
-      <span class="coop-title">👹 WALKA Z BOSSEM <span class="coop-cycle text-muted">· edycja #${c.cycle}</span></span>
-      <span class="coop-total mono">${b.hp} / ${b.max_hp} HP</span>
-    </div>
+    ${prevHtml}
     <div class="boss-split">
-      <div class="boss-instructions text-muted small">
-        <p class="boss-instructions-lead"><strong>${esc(b.name)}</strong> obudził się — pula przekroczyła próg!</p>
-        <ul>
-          <li>🎲 Każdy Twój rzut kostką zadaje mu obrażenia (oczka × ${b.dice_damage_mult}).</li>
-          <li>🗡️ Ręczny atak: ${b.attack_cost} monet za ${b.attack_damage} obrażeń.</li>
-          <li>🏆 Zabijecie go na czas → +${b.defeat_bonus} pkt premii/os., oprócz zwykłej puli.</li>
-          <li>⏳ Nie zdążycie → pula i tak się wypłaca, tylko bez premii.</li>
-        </ul>
-      </div>
-      <div class="boss-fight">
-        <div class="boss-emoji">👹</div>
-        <div class="boss-name">${esc(b.name)}</div>
-        <div class="coop-bar boss-hp-bar"><div class="coop-bar-fill boss-hp-fill" style="width:${b.percent}%"></div></div>
-        <div class="boss-hp-text mono">${b.hp} / ${b.max_hp} HP</div>
-        <button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${canAttack ? '' : 'disabled'}>🗡️ Atakuj (-${b.attack_cost})</button>
-        ${!canAttack ? `<div class="text-muted small">Brakuje monet (masz ${g.me.balance}/${b.attack_cost}).</div>` : ''}
-      </div>
+      ${rulesHtml}
+      ${rightHtml}
     </div>
+    ${active ? `<span class="coop-deadline mono" id="coop-deadline" data-until="${esc(c.boss.deadline_at)}" data-label="czas na pokonanie">⏳ –</span>` : ''}
     <div class="coop-form boss-deposit-form">
-      <span class="text-muted small">Wpłaty nadal możliwe — dokładają się na poczet kolejnej edycji:</span>
+      <span class="text-muted small">${active ? 'Wpłaty nadal możliwe — dokładają się na poczet kolejnej edycji:' : 'Dorzuć do puli:'}</span>
       <input type="number" id="coop-amount" min="1" step="1" placeholder="ile pkt?" />
       <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>
     </div>
-    <span class="coop-deadline mono" id="coop-deadline" data-until="${esc(c.resolve_at)}" data-label="rozliczenie za">⏳ –</span>
     ${slCoopChipsHtml(c)}`;
   updateCoopDeadline();
 }
 
-// Odświeża licznik czasu (wołane co sekundę z updateCountdown) — cel odliczania zależy
-// od fazy (rozliczenie w trakcie zbiórki, start nowego okna po jej zamknięciu).
+// Odświeża licznik czasu do pokonania bossa (wołane co sekundę z updateCountdown) —
+// no-op, gdy boss nie walczy (element #coop-deadline wtedy w ogóle nie istnieje).
 function updateCoopDeadline() {
   const el = document.getElementById('coop-deadline');
   if (!el) return;
