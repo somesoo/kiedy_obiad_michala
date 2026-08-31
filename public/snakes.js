@@ -560,7 +560,14 @@ function renderRollButton(g) {
     btn.textContent = frozen ? `🎲 Rzuć (uwaga: masz Freeze!)${countTxt}` : `🎲 Rzuć kostką${countTxt}`;
   } else {
     btn.disabled = true;
-    btn.textContent = g.me.is_weekend ? '🌴 Weekend — wróć w poniedziałek' : '✅ Ruchy wykorzystane — wróć jutro';
+    if (g.me.is_weekend) {
+      btn.textContent = '🌴 Weekend — wróć w poniedziałek';
+    } else if (g.me.on_cooldown) {
+      const waitSecs = Math.max(0, Math.round((Date.parse(g.me.cooldown_until) - Date.now()) / 1000));
+      btn.textContent = waitSecs > 0 ? `⏳ Kolejny ruch za ${fmtHMS(waitSecs)}` : '⏳ Już za chwilę…';
+    } else {
+      btn.textContent = '✅ Ruchy wykorzystane — wróć jutro';
+    }
   }
 }
 
@@ -958,6 +965,8 @@ function secondsUntilMidnight() {
   return 24 * 3600 - (h * 3600 + mi * 60 + s);
 }
 
+let cooldownRefreshInFlight = false;
+
 function updateCountdown() {
   const g = state.game;
   const toNext = secondsUntilMidnight();
@@ -968,10 +977,24 @@ function updateCountdown() {
     textEl.textContent = `🎲 Masz ruch na dziś${countTxt}! Nowa doba za ${fmtHMS(toNext)}`;
   } else if (g && g.me.is_weekend) {
     textEl.textContent = `🌴 Weekend — w Snakes nie gramy. Wracamy w poniedziałek.`;
+  } else if (g && g.me.on_cooldown) {
+    const waitSecs = Math.round((Date.parse(g.me.cooldown_until) - Date.now()) / 1000);
+    if (waitSecs <= 0) {
+      // Cooldown minął w tle (klient tyka co sekundę, serwer o tym nie wie) —
+      // dociągamy świeży stan, żeby przycisk odblokował się bez odświeżania strony.
+      if (!cooldownRefreshInFlight) {
+        cooldownRefreshInFlight = true;
+        loadState().finally(() => { cooldownRefreshInFlight = false; });
+      }
+      textEl.textContent = `⏳ Kolejny ruch już dostępny — odświeżam…`;
+    } else {
+      textEl.textContent = `⏳ Kolejny ruch za ${fmtHMS(waitSecs)} (${g.me.rolls_remaining_today}/${g.me.daily_rolls} zostało dziś)`;
+    }
   } else {
     textEl.textContent = `🔒 Ruchy wykorzystane — nowe za ${fmtHMS(toNext)}`;
   }
   if (barEl) barEl.style.width = ((1 - toNext / 86400) * 100) + '%';
+  if (g) renderRollButton(g);
   updateCoopDeadline();
 }
 
