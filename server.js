@@ -384,12 +384,25 @@ function dateForIndex(n) {
 // Godzina, o której pojawia się nowe hasło (czasu Warszawy). Do tej godziny wisi wczorajsze.
 const NEW_WORD_HOUR = parseInt(process.env.WORDLE_NEW_WORD_HOUR, 10) || 8;
 
+// Twardy, jednorazowy koniec CAŁEJ gry (nie dobowy reset) — po tej chwili wpisywanie jest
+// zablokowane NA STAŁE, niezależnie od dnia tygodnia/godziny, a UI pokazuje ranking końcowy
+// zamiast planszy. Domyślnie 2026-08-31 16:00 czasu Warszawy (offset +02:00 — CEST latem);
+// jeśli trzeba to kiedyś przesunąć/wyłączyć, nadpisz WORDLE_GAME_END_AT w .env (puste = brak końca).
+const GAME_END_AT = process.env.WORDLE_GAME_END_AT || '2026-08-31T16:00:00+02:00';
+function gameHasEnded() {
+  return !!GAME_END_AT && Date.now() >= Date.parse(GAME_END_AT);
+}
+
 // Które hasło jest teraz aktualne i w jakiej fazie:
 //  - 'live'    : hasło dnia gra się (08:00 → północ) — można wpisywać
 //  - 'expired' : północ → 08:00, wisi jeszcze wczorajsze hasło, ale wpisywanie zamknięte
 //  - 'weekend' : sobota/niedziela — przerwa
+//  - 'ended'   : gra zakończona na stałe (patrz GAME_END_AT) — wpisywanie zablokowane na zawsze
 // Zwraca { phase, index, date } (index/date = null poza dniami z hasłem).
 function activePuzzle() {
+  if (gameHasEnded()) {
+    return { phase: 'ended', index: null, date: null };
+  }
   const p = warsawParts();
   const today = `${p.y}-${p.mo}-${p.d}`;
   const hour = Number(p.h);
@@ -464,6 +477,7 @@ function seasonInfo() {
     phase: ap.phase,
     day_number: idx,
     is_weekend: ap.phase === 'weekend',
+    is_ended: ap.phase === 'ended',
     new_word_hour: NEW_WORD_HOUR,
     remaining_words: db.prepare('SELECT COUNT(*) AS c FROM words WHERE order_index > ?').get(supply).c,
     total_words: db.prepare('SELECT COUNT(*) AS c FROM words').get().c,
@@ -562,6 +576,7 @@ function buildGameState(player) {
     phase: info.phase,
     day_number: info.day_number,
     is_weekend: info.is_weekend,
+    is_ended: info.is_ended,
     supply_exhausted: info.supply_exhausted,
     new_word_hour: info.new_word_hour,
     remaining_words: info.remaining_words,
@@ -669,7 +684,9 @@ app.get('/api/wordle/today', authPlayer, (req, res) => {
 app.post('/api/wordle/guess', authPlayer, (req, res) => {
   const ap = activePuzzle();
   if (ap.phase !== 'live') {
-    const msg = ap.phase === 'weekend'
+    const msg = ap.phase === 'ended'
+      ? 'Gra zakończona — dziękujemy za udział! Zobacz ranking końcowy.'
+      : ap.phase === 'weekend'
       ? 'Weekend — hasła gramy od poniedziałku do piątku'
       : `Wpisywanie zamknięte o północy — nowe hasło o ${NEW_WORD_HOUR}:00`;
     return res.status(400).json({ error: msg });
@@ -864,7 +881,12 @@ app.get('/api/wordle/daily', (req, res) => {
   const word = currentWord();
 
   if (!word) {
-    return res.json({ day_number: day, has_word: false, is_weekend: isWeekendStr(todayWaw()), entries: [], total: 0 });
+    return res.json({
+      day_number: day, has_word: false,
+      is_weekend: isWeekendStr(todayWaw()),
+      is_ended: activePuzzle().phase === 'ended',
+      entries: [], total: 0
+    });
   }
 
   // Zwycięzcy najpierw (mniej prób = wyżej), potem przegrani. Punkty jako rozstrzygnięcie remisu.

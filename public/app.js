@@ -154,6 +154,23 @@ function renderGame() {
   if (!g) { area.innerHTML = ''; return; }
 
   if (!g.has_word) {
+    if (g.is_ended) {
+      area.innerHTML = `
+        <div class="empty-state season-ended-state">
+          <div class="season-over-emoji">🏆</div>
+          <h3>Gra zakończona!</h3>
+          <p class="text-muted">Dziękujemy za udział — wpisywanie haseł jest już zamknięte na stałe. Oto ranking końcowy:</p>
+          <div class="sidebar-card leaderboard-card leaderboard-card-center" style="text-align:left;width:100%;max-width:480px;margin:16px auto 0">
+            <div class="sidebar-card-header">
+              <h3>🏆 RANKING KOŃCOWY</h3>
+              <span class="text-muted small" id="players-count-center"></span>
+            </div>
+            <div id="leaderboard-list-center"></div>
+          </div>
+        </div>`;
+      loadLeaderboard();
+      return;
+    }
     if (g.is_weekend) {
       area.innerHTML = `
         <div class="empty-state">
@@ -408,16 +425,18 @@ function populateSeasonSelect(data) {
   sel.value = desired === data.current_season ? '' : desired;
 }
 
+// Renderuje do #leaderboard-list (prawy sidebar, zawsze obecny) ORAZ, jeśli akurat
+// istnieje, do #leaderboard-list-center — tam ląduje ranking końcowy pokazywany
+// na środku po zakończeniu gry (patrz renderGame → g.is_ended).
 function renderLeaderboard(data) {
-  const list = document.getElementById('leaderboard-list');
-  document.getElementById('players-count').textContent = `${data.total_players} graczy`;
+  const countTxt = `${data.total_players} graczy`;
+  document.getElementById('players-count').textContent = countTxt;
+  const countCenterEl = document.getElementById('players-count-center');
+  if (countCenterEl) countCenterEl.textContent = countTxt;
 
-  if (!data.leaderboard.length) {
-    list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie zagrał w tym sezonie</div>';
-    return;
-  }
-
-  list.innerHTML = data.leaderboard.map(p => {
+  const html = !data.leaderboard.length
+    ? '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie zagrał w tym sezonie</div>'
+    : data.leaderboard.map(p => {
     const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
     const meClass = p.is_me ? ' is-me' : '';
     const avg = p.avg_attempts != null ? p.avg_attempts.toFixed(1) : '–';
@@ -438,6 +457,10 @@ function renderLeaderboard(data) {
         </div>
       </div>`;
   }).join('');
+
+  document.getElementById('leaderboard-list').innerHTML = html;
+  const listCenterEl = document.getElementById('leaderboard-list-center');
+  if (listCenterEl) listCenterEl.innerHTML = html;
 }
 
 // ── RANKING DNIA ──
@@ -456,7 +479,9 @@ function renderDaily(data) {
 
   if (!data.has_word) {
     countEl.textContent = '';
-    const msg = data.is_weekend
+    const msg = data.is_ended
+      ? 'Gra zakończona — zobacz ranking końcowy na środku. 🏆'
+      : data.is_weekend
       ? 'Weekend — ranking wróci w poniedziałek. 💤'
       : 'Dziś nie ma hasła.';
     list.innerHTML = `<div class="text-muted small" style="padding:12px 4px">${msg}</div>`;
@@ -553,6 +578,11 @@ function updateCountdown() {
   const barEl = document.getElementById('countdown-bar');
   const textEl = document.getElementById('countdown-text');
 
+  if (g && g.is_ended) {
+    textEl.textContent = `🏆 Gra zakończona — dziękujemy za udział!`;
+    if (barEl) barEl.style.width = '100%';
+    return;
+  }
   if (g && g.is_weekend) {
     textEl.textContent = `💤 Weekend — nowe hasło za ${fmtHMS(toNext)}`;
   } else if (g && g.phase === 'expired') {
