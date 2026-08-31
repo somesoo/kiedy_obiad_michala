@@ -562,11 +562,13 @@ function renderRollButton(g) {
     btn.disabled = true;
     if (g.me.is_weekend) {
       btn.textContent = '🌴 Weekend — wróć w poniedziałek';
-    } else if (g.me.on_cooldown) {
-      const waitSecs = Math.max(0, Math.round((Date.parse(g.me.cooldown_until) - Date.now()) / 1000));
-      btn.textContent = waitSecs > 0 ? `⏳ Kolejny ruch za ${fmtHMS(waitSecs)}` : '⏳ Już za chwilę…';
-    } else {
+    } else if (left === 0) {
       btn.textContent = '✅ Ruchy wykorzystane — wróć jutro';
+    } else if (!g.me.office_open) {
+      btn.textContent = `🏢 Gramy ${g.me.office_start_hour}:00–${g.me.office_end_hour}:00 — wróć o ${g.me.office_start_hour}:00`;
+    } else {
+      // Zostaje już tylko brak zdjęcia profilowego — planszę i tak zasłania ekran uploadu.
+      btn.textContent = '📸 Wgraj zdjęcie, żeby zagrać';
     }
   }
 }
@@ -967,7 +969,7 @@ function secondsUntilMidnight() {
   return 24 * 3600 - (h * 3600 + mi * 60 + s);
 }
 
-let cooldownRefreshInFlight = false;
+let openRefreshInFlight = false;
 
 function updateCountdown() {
   const g = state.game;
@@ -976,21 +978,26 @@ function updateCountdown() {
   const barEl = document.getElementById('countdown-bar');
   if (g && g.me.can_roll) {
     const countTxt = g.me.daily_rolls > 1 ? ` (${g.me.rolls_remaining_today}/${g.me.daily_rolls})` : '';
-    textEl.textContent = `🎲 Masz ruch na dziś${countTxt}! Nowa doba za ${fmtHMS(toNext)}`;
+    const closeSecs = g.me.office_closes_at
+      ? Math.max(0, Math.round((Date.parse(g.me.office_closes_at) - Date.now()) / 1000))
+      : null;
+    textEl.textContent = closeSecs != null
+      ? `🎲 Masz ruch${countTxt}! Biuro zamyka się za ${fmtHMS(closeSecs)}`
+      : `🎲 Masz ruch na dziś${countTxt}! Nowa doba za ${fmtHMS(toNext)}`;
   } else if (g && g.me.is_weekend) {
     textEl.textContent = `🌴 Weekend — w Snakes nie gramy. Wracamy w poniedziałek.`;
-  } else if (g && g.me.on_cooldown) {
-    const waitSecs = Math.round((Date.parse(g.me.cooldown_until) - Date.now()) / 1000);
+  } else if (g && g.me.rolls_remaining_today > 0 && !g.me.office_open) {
+    const waitSecs = Math.round((Date.parse(g.me.next_move_at) - Date.now()) / 1000);
     if (waitSecs <= 0) {
-      // Cooldown minął w tle (klient tyka co sekundę, serwer o tym nie wie) —
+      // Okno otworzyło się w tle (klient tyka co sekundę, serwer o tym nie wie) —
       // dociągamy świeży stan, żeby przycisk odblokował się bez odświeżania strony.
-      if (!cooldownRefreshInFlight) {
-        cooldownRefreshInFlight = true;
-        loadState().finally(() => { cooldownRefreshInFlight = false; });
+      if (!openRefreshInFlight) {
+        openRefreshInFlight = true;
+        loadState().finally(() => { openRefreshInFlight = false; });
       }
-      textEl.textContent = `⏳ Kolejny ruch już dostępny — odświeżam…`;
+      textEl.textContent = `⏳ Biuro już otwarte — odświeżam…`;
     } else {
-      textEl.textContent = `⏳ Kolejny ruch za ${fmtHMS(waitSecs)} (${g.me.rolls_remaining_today}/${g.me.daily_rolls} zostało dziś)`;
+      textEl.textContent = `🏢 Biuro zamknięte — gramy ${g.me.office_start_hour}:00–${g.me.office_end_hour}:00. Otwarcie za ${fmtHMS(waitSecs)} (${g.me.rolls_remaining_today}/${g.me.daily_rolls} ruchów czeka)`;
     }
   } else {
     textEl.textContent = `🔒 Ruchy wykorzystane — nowe za ${fmtHMS(toNext)}`;

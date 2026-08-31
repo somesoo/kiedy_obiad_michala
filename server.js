@@ -1300,9 +1300,44 @@ const SL_KNOCKBACK_COIN_STEAL = 50;
 // Ile ruchów (rzutów) dziennie ma każdy gracz. Freeze blokuje JEDEN z nich (nie cały
 // dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
 const SL_DAILY_ROLLS = 3;
-// Minimalny odstęp między dwoma kolejnymi ruchami TEGO SAMEGO gracza — nie da się
-// zużyć wszystkich dziennych ruchów naraz, trzeba na nie poczekać w ciągu dnia.
-const SL_MOVE_COOLDOWN_MS = Number(process.env.SNAKES_MOVE_COOLDOWN_HOURS || 3) * 60 * 60 * 1000;
+// Między ruchami NIE MA odstępu — gracz sam decyduje, jak rozłożyć swoje trzy rzuty
+// w ciągu dnia (choćby wszystkie pod rząd). Jedyne ograniczenie to okno godzin biurowych.
+
+// ── GODZINY BIUROWE ──
+// To gra biurowa: rzucać można wyłącznie w oknie SL_PLAY_START_HOUR–SL_PLAY_END_HOUR
+// (czasu Warszawy, dni robocze). Po 16:00 niewykorzystane ruchy przepadają.
+const SL_PLAY_START_HOUR = Number(process.env.SNAKES_PLAY_START_HOUR || 8);
+const SL_PLAY_END_HOUR = Number(process.env.SNAKES_PLAY_END_HOUR || 16);
+
+// Czy w danej chwili okno gry jest otwarte (dzień roboczy + godzina w zakresie).
+function slOfficeOpenAt(ms = Date.now()) {
+  const p = warsawParts(new Date(ms));
+  if (isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) return false;
+  const h = Number(p.h);
+  return h >= SL_PLAY_START_HOUR && h < SL_PLAY_END_HOUR;
+}
+
+// Najbliższa chwila (epoch ms), w której okno gry jest otwarte: samo `fromMs`, jeśli
+// właśnie trwa, inaczej godzina otwarcia najbliższego dnia roboczego. Dni przeglądamy
+// od kotwicy w południe, żeby zmiana czasu (CET/CEST) nie przesunęła nam doby.
+function slNextOpenMs(fromMs = Date.now()) {
+  if (slOfficeOpenAt(fromMs)) return fromMs;
+  const p0 = warsawParts(new Date(fromMs));
+  let anchor = warsawWallTimeToMs(Number(p0.y), Number(p0.mo), Number(p0.d), 12);
+  for (let i = 0; i < 14; i++) {
+    const p = warsawParts(new Date(anchor));
+    const openMs = warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_START_HOUR);
+    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`) && openMs > fromMs) return openMs;
+    anchor += 24 * 60 * 60 * 1000;
+  }
+  return fromMs;
+}
+
+// Godzina zamknięcia okna dla dnia, w którym wypada `ms` (epoch ms).
+function slOfficeCloseMs(ms = Date.now()) {
+  const p = warsawParts(new Date(ms));
+  return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_END_HOUR);
+}
 
 // ── ESKALACJA TRUDNOŚCI CO-OP ──
 // Zbiórka (status 'collecting') NIE MA już terminu ani kary — trwa, aż próg padnie,
@@ -1352,7 +1387,7 @@ db.exec(`
     balance           INTEGER DEFAULT 0,   -- punkty do wydania w sklepie
     total_points      INTEGER DEFAULT 0,   -- suma zdobytych punktów (leaderboard)
     last_move_date    TEXT,                -- YYYY-MM-DD (Europe/Warsaw) ostatniego ruchu
-    last_move_at      DATETIME,            -- dokładny moment ostatniego ruchu (odstęp SL_MOVE_COOLDOWN_MS)
+    last_move_at      DATETIME,            -- dokładny moment ostatniego ruchu (zapis, nie blokada)
     has_avatar        INTEGER DEFAULT 0,   -- 1 = ma zdjęcie profilowe (wymagane do gry)
     avatar_updated_at DATETIME,            -- kiedy ostatnio wgrał/zmienił zdjęcie
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -1457,8 +1492,8 @@ ensureColumn('sl_state', 'avatar_updated_at', 'DATETIME');
 // zapisanego w last_move_date; przy zmianie dnia licznik efektywnie wraca do zera
 // (patrz slRollsUsedToday), więc kolumna nie musi być sama w sobie zerowana o północy.
 ensureColumn('sl_state', 'rolls_today', 'INTEGER DEFAULT 0');
-// Dokładny moment ostatniego ruchu — do odmierzania SL_MOVE_COOLDOWN_MS między ruchami
-// (rolls_today/last_move_date same w sobie nie mówią, ILE czasu minęło od ostatniego).
+// Dokładny moment ostatniego ruchu — sam w sobie niczego nie blokuje (odstęp między
+// ruchami zniknął), zostaje jako ślad w danych i pod ewentualne statystyki.
 ensureColumn('sl_state', 'last_move_at', 'DATETIME');
 
 // sl_coop: dołóż kolumny bossa dla wdrożeń sprzed walki z bossem.
@@ -2276,21 +2311,13 @@ function startCoopBossDeadlineScheduler() {
 startCoopBossDeadlineScheduler();
 
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
-// Chwila (epoch ms), w której odblokuje się kolejny ruch tego gracza — 0, jeśli nigdy
-// jeszcze nie ruszał się (last_move_at puste), więc cooldown mu nie grozi.
-function slMoveCooldownUntilMs(st) {
-  if (!st.last_move_at) return 0;
-  return Date.parse(st.last_move_at.replace(' ', 'T') + 'Z') + SL_MOVE_COOLDOWN_MS;
-}
-
 function slBuildState(playerId) {
   const st = slEnsureState(playerId);
   const today = todayWaw();
   const isWeekend = isWeekendStr(today);
   const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
   const rollsRemainingToday = Math.max(0, SL_DAILY_ROLLS - rollsUsedToday);
-  const cooldownUntilMs = slMoveCooldownUntilMs(st);
-  const onCooldown = cooldownUntilMs > Date.now();
+  const officeOpen = slOfficeOpenAt();
   return {
     board: slBoardPayload(),
     players: slPlayersPayload(playerId),
@@ -2306,10 +2333,12 @@ function slBuildState(playerId) {
       rolls_remaining_today: rollsRemainingToday,
       daily_rolls: SL_DAILY_ROLLS,
       is_weekend: isWeekend,
-      on_cooldown: onCooldown,
-      cooldown_until: onCooldown ? new Date(cooldownUntilMs).toISOString() : null,
-      move_cooldown_hours: SL_MOVE_COOLDOWN_MS / 3600000,
-      can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend && !onCooldown,
+      office_open: officeOpen,
+      office_start_hour: SL_PLAY_START_HOUR,
+      office_end_hour: SL_PLAY_END_HOUR,
+      office_closes_at: officeOpen ? new Date(slOfficeCloseMs()).toISOString() : null,
+      next_move_at: new Date(slNextOpenMs()).toISOString(),
+      can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend && officeOpen,
       has_shield: slHasShield(playerId),
       has_avatar: !!st.has_avatar,
       avatar_url: slAvatarUrl(playerId, st.avatar_updated_at)
@@ -2419,19 +2448,21 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     return res.status(400).json({ error: 'W weekend nie gramy — wróć w poniedziałek.', is_weekend: true });
   }
 
+  // Bramka: gra biurowa — rzucamy tylko w godzinach pracy (czasu Warszawy).
+  if (!slOfficeOpenAt()) {
+    return res.status(400).json({
+      error: `Rzucamy tylko w godzinach ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 — to gra biurowa.`,
+      office_closed: true,
+      next_open: new Date(slNextOpenMs()).toISOString()
+    });
+  }
+
   const result = transaction(() => {
     const st = slEnsureState(playerId);
     // rolls_today liczy się dla dnia zapisanego w last_move_date — inny dzień = licznik
     // efektywnie na zero, bez potrzeby osobnego resetu o północy.
     const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
     if (rollsUsedToday >= SL_DAILY_ROLLS) return { locked: true };
-
-    // Odstęp SL_MOVE_COOLDOWN_MS od POPRZEDNIEGO ruchu — nie da się zużyć wszystkich
-    // dziennych ruchów naraz, trzeba na nie poczekać w ciągu dnia.
-    const cooldownUntilMs = slMoveCooldownUntilMs(st);
-    if (cooldownUntilMs > Date.now()) {
-      return { cooldown: true, cooldown_until: new Date(cooldownUntilMs).toISOString() };
-    }
     const moveSeq = rollsUsedToday + 1;
 
     // Zbierz oczekujące efekty na tym graczu (tarcza nie jest efektem na turę — pomijamy).
@@ -2591,15 +2622,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   });
 
   if (result.locked) {
-    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${SL_DAILY_ROLLS} ruchy — wróć jutro (doba wg czasu Warszawy).` });
-  }
-  if (result.cooldown) {
-    const waitMin = Math.ceil((Date.parse(result.cooldown_until) - Date.now()) / 60000);
-    return res.status(400).json({
-      error: `Kolejny ruch dopiero za ${waitMin} min — między ruchami musi minąć ${SL_MOVE_COOLDOWN_MS / 3600000}h.`,
-      cooldown: true,
-      cooldown_until: result.cooldown_until
-    });
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${SL_DAILY_ROLLS} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.` });
   }
 
   // ── ZDARZENIA DISCORD ──
@@ -3026,9 +3049,7 @@ app.post('/api/snakes/admin/players/:id/grant-move', (req, res) => {
     if (used <= 0) return { already_full: true };
     db.prepare('DELETE FROM sl_moves WHERE player_id = ? AND move_date = ? AND move_seq = ?')
       .run(playerId, date, used);
-    // Zerujemy też last_move_at, żeby przyznany ruch dało się od razu wykorzystać —
-    // inaczej wciąż blokowałby go cooldown odmierzany od ostatniego PRAWDZIWEGO ruchu.
-    db.prepare('UPDATE sl_state SET rolls_today = ?, last_move_at = NULL WHERE player_id = ?').run(used - 1, playerId);
+    db.prepare('UPDATE sl_state SET rolls_today = ? WHERE player_id = ?').run(used - 1, playerId);
     return { already_full: false, rolls_used_today: used - 1 };
   });
 
@@ -3213,5 +3234,6 @@ app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
   // Znacznik wersji w logach — po deployu widać w `pm2 logs`, czy wstał nowy kod.
   console.log(`Bonus za szybkość: pierwsze ${SPEED_BONUS_PLACES} osób dnia (+${SPEED_BONUS_PLACES}…+1 pkt)`);
+  console.log(`Snakes: ${SL_DAILY_ROLLS} ruchy dziennie, do wykorzystania ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 (pon–pt, Europe/Warsaw), bez odstępu między ruchami`);
   startDiscordScheduler();
 });
