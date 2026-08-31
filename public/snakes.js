@@ -807,12 +807,12 @@ function renderCoop(g) {
 
   const active = c.status === 'event_active' && c.boss && c.boss.active;
   const karaTxt = c.next_on_loss.threshold < c.threshold
-    ? `spóźnienie → próg ${c.next_on_loss.threshold}`
-    : `próg na minimum`;
+    ? `atak → próg spadnie do ${c.next_on_loss.threshold}`
+    : `atak → próg bez zmian (na minimum)`;
 
   const barPct = active ? c.boss.percent : c.percent;
   const statTxt = active ? `${c.boss.hp}/${c.boss.max_hp} HP` : `${c.total}/${c.threshold} pkt`;
-  const nameTxt = active ? esc(c.boss.name) : 'Boss śpi';
+  const nameTxt = active ? esc(c.boss.name) : 'Boss nadchodzi';
 
   const timerHtml = active
     ? `<span class="boss-timer mono" id="coop-deadline" data-until="${esc(c.boss.deadline_at)}" data-label="">⏳ –</span>`
@@ -824,12 +824,14 @@ function renderCoop(g) {
        <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>`;
 
   const prevTxt = c.previous_result
-    ? `<span class="coop-prev">${c.previous_result.defeated ? '🏆' : '⏳'} #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} ${c.previous_result.defeated ? `pokonany +${c.previous_result.bonus}` : 'przeżył'}</span>`
+    ? `<span class="coop-prev">${c.previous_result.defeated
+        ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany +${c.previous_result.bonus}`
+        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, -${c.previous_result.timeout_penalty} monet każdemu`}</span>`
     : '';
 
   el.innerHTML = `
     <div class="coop-row-main">
-      <span class="coop-emoji">${active ? '👹' : '😴'}</span>
+      <span class="coop-emoji">${active ? '👹' : '👀'}</span>
       <span class="coop-name">${nameTxt}</span>
       <div class="coop-bar-flex"><div class="coop-bar"><div class="coop-bar-fill${active ? ' boss-hp-fill' : ''}" style="width:${barPct}%"></div></div></div>
       <span class="coop-stat mono">${statTxt}</span>
@@ -837,7 +839,7 @@ function renderCoop(g) {
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>🤝 Wpłacajcie do puli → boss z limitem czasu · wygrana=trudniej, porażka=łatwiej</span>
+      <span>🤝 Wpłacajcie do puli — gdy padnie próg, budzi się boss. Zaatakuje i zabierze ${c.timeout_penalty} monet każdemu, jeśli go nie pokonacie na czas — pokonacie? nagroda i od razu kolejny, trudniejszy.</span>
       <span class="coop-kara">${karaTxt}</span>
       ${prevTxt}
     </div>
@@ -1030,9 +1032,6 @@ function showToast(msg) {
 
 // ── HOW IT WORKS ──
 document.getElementById('btn-how').addEventListener('click', () => {
-  document.getElementById('how-it-works').style.display = 'flex';
-});
-document.getElementById('btn-how-desktop').addEventListener('click', () => {
   document.getElementById('how-it-works').style.display = 'flex';
 });
 document.getElementById('how-close').addEventListener('click', () => {

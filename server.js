@@ -1337,6 +1337,10 @@ const SL_BOSS_DICE_DAMAGE_MULT = Number(process.env.SNAKES_BOSS_DICE_DAMAGE_MULT
 const SL_BOSS_ATTACK_COST = parseInt(process.env.SNAKES_BOSS_ATTACK_COST, 10) || 20;    // koszt ręcznego ataku (monety)
 const SL_BOSS_ATTACK_DAMAGE = parseInt(process.env.SNAKES_BOSS_ATTACK_DAMAGE, 10) || 45; // obrażenia ręcznego ataku
 const SL_BOSS_DEFEAT_BONUS = parseInt(process.env.SNAKES_BOSS_DEFEAT_BONUS, 10) || 60;   // bonus pkt/monet na kontrybutora za zabicie
+// Jeśli boss NIE zostanie pokonany na czas, "atakuje" i zabiera tyle monet KAŻDEMU
+// graczowi (nie tylko kontrybutorom) — realna stawka za zignorowanie walki, nie tylko
+// łagodniejszy próg na następną rundę. Nigdy nie schodzi poniżej salda gracza (0 min).
+const SL_BOSS_TIMEOUT_PENALTY = parseInt(process.env.SNAKES_BOSS_TIMEOUT_PENALTY, 10) || 50;
 
 // ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
 db.exec(`
@@ -1934,7 +1938,8 @@ function slCoopPayload(meId) {
         boss_name: prev.boss_name,
         defeated: !!prev.boss_defeated_at,
         reward_pool: Number(prev.reward_pool),
-        bonus: prev.boss_defeated_at ? SL_BOSS_DEFEAT_BONUS : 0
+        bonus: prev.boss_defeated_at ? SL_BOSS_DEFEAT_BONUS : 0,
+        timeout_penalty: prev.boss_defeated_at ? 0 : SL_BOSS_TIMEOUT_PENALTY
       };
     }
   }
@@ -1953,6 +1958,7 @@ function slCoopPayload(meId) {
     time_limit_days: Number(coop.time_limit_days),
     default_threshold: slCoopDefaultThreshold(),
     previous_result: previousResult,
+    timeout_penalty: SL_BOSS_TIMEOUT_PENALTY,
     // Konkretne liczby na "co będzie, jak wygracie/przegracie" — żeby UI mógł pokazać
     // realną karę/nagrodę zamiast ogólnikowego opisu (patrz slCoopNextDifficulty).
     next_on_win: slCoopNextDifficulty(coop, true),
@@ -2034,12 +2040,14 @@ function slCoopNextDifficulty(coop, defeated) {
   };
 }
 
-// Zamyka event bossowy, wypłaca nagrody i OD RAZU otwiera kolejną edycję (trudniejszą
+// Zamyka event bossowy, wypłaca nagrody/karę i OD RAZU otwiera kolejną edycję (trudniejszą
 // po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty). Wołane
 // automatycznie, gdy HP bossa spadnie do zera (zwykły rzut lub ręczny atak), albo gdy
 // minie termin (scheduler niżej), a boss wciąż żyje. Pokonanie bossa dorzuca
 // SL_BOSS_DEFEAT_BONUS na KAŻDEGO kontrybutora ponad zwykłą pulę — to zachęta, żeby nie
 // tylko wpłacać, ale i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack).
+// Nie pokonanie na czas = boss "atakuje": zabiera SL_BOSS_TIMEOUT_PENALTY monet
+// KAŻDEMU graczowi (nie tylko kontrybutorom) — realna stawka za bierność.
 function slFinishBossEvent(coop, defeated) {
   const contributors = slCoopContributors(coop.cycle);
   const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
@@ -2050,6 +2058,20 @@ function slFinishBossEvent(coop, defeated) {
     db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
       .run(p.reward, p.reward, p.player_id);
   }
+
+  let playersAttacked = 0;
+  if (!defeated) {
+    const allPlayers = db.prepare('SELECT player_id, balance FROM sl_state').all();
+    const upd = db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?');
+    for (const p of allPlayers) {
+      const taken = Math.min(SL_BOSS_TIMEOUT_PENALTY, Math.max(0, Number(p.balance)));
+      if (taken > 0) {
+        upd.run(taken, p.player_id);
+        playersAttacked++;
+      }
+    }
+  }
+
   db.prepare(`
     UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP, boss_hp = 0
       ${defeated ? ", boss_defeated_at = CURRENT_TIMESTAMP" : ''}
@@ -2061,6 +2083,8 @@ function slFinishBossEvent(coop, defeated) {
 
   return {
     cycle: Number(coop.cycle), boss_name: coop.boss_name, reward_pool: rewardPool, bonus, payouts, defeated,
+    timeout_penalty: defeated ? 0 : SL_BOSS_TIMEOUT_PENALTY,
+    players_attacked: playersAttacked,
     next_cycle: { cycle: Number(nextCoop.cycle), threshold: next.threshold, time_limit_days: next.time_limit_days }
   };
 }
@@ -2222,15 +2246,15 @@ function slResolveBossTimeout(cycle) {
 
 function slEmitBossTimeout(outcome) {
   slEmit('coop_completed', () => ({
-    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '⏳ **Czas minął — boss przeżył.**',
+    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '💥 **Czas minął — boss zaatakował!**',
     embeds: [{
       title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
       url: SNAKES_URL,
       description: (outcome.defeated
         ? `Kontrybutorzy dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
-        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów — bez premii za pokonanie bossa (nie zdążyliście go dobić na czas).`
+        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów. Nie zdążyliście dobić bossa na czas — zaatakował i zabrał **${outcome.timeout_penalty} monet** każdemu graczowi (dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
       ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: próg **${outcome.next_cycle.threshold}** pkt, **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie bossa.`,
-      color: outcome.defeated ? 0x53D06B : 0x8E8E93
+      color: outcome.defeated ? 0x53D06B : 0xE85D4A
     }]
   }));
 }
@@ -3066,7 +3090,7 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
     embeds: [{
       title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
       url: SNAKES_URL,
-      description: `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
+      description: `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).${out.timeout_penalty ? ` Boss zaatakował — zabrał **${out.timeout_penalty} monet** każdemu graczowi (${out.players_attacked}).` : ''}\n\n` +
         out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n'),
       color: 0xC8F135
     }]

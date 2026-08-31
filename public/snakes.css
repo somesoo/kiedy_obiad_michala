@@ -40,7 +40,13 @@
   align-items: baseline;
 }
 .mini-head .text-muted { font-size: 9px; font-weight: 400; }
-.mini-rules { width: 100%; font-size: 11px; padding: 6px 0; }
+
+/* ── PRZYCISK ZASAD W GÓRNYM PASKU ──
+   #btn-how dziedziczy .btn-how-mobile ze wspólnego style.css (domyślnie ukryty,
+   widoczny tylko < 1000px — Wordle ma tam swój odpowiednik). W Snakes to JEDYNE
+   wejście do zasad (panel boczny go nie ma), więc nadpisujemy selektorem po ID
+   (nie istnieje w DOM Wordle, więc nic mu nie grozi), żeby był widoczny zawsze. */
+#btn-how { display: inline-block; }
 
 /* ── KOLUMNA PLANSZY ── */
 .col-game {
