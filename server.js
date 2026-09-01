@@ -1838,8 +1838,11 @@ function slFindOccupant(tile, excludeIds) {
 // do tyłu (nie na start okrążenia ani planszy — jeśli to zeszłoby poniżej pola 0,
 // ofiara staje na polu 0). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
 // monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
-// TO konkretne wypchnięcie — przy kaskadzie to nie zawsze roller: gdy wypchnięty gracz
-// sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej ofiary w łańcuchu.
+// TO konkretne wypchnięcie — tak samo jak każdy inny zarobek w grze (rzut kostką, nagroda
+// za bossa, pole bonusowe), skradzione monety liczą się RÓWNIEŻ jako punkty do rankingu,
+// nie tylko saldo do wydania w sklepie. Przy kaskadzie zbijający to nie zawsze roller:
+// gdy wypchnięty gracz sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej
+// ofiary w łańcuchu.
 // Pole, na które trafia ofiara, odpala węża/drabinę/bonus normalnie (slResolveTileEffect)
 // — jeśli to przerzuci ją na KOLEJNE zajęte pole, kaskada leci dalej stamtąd. Każde
 // wypchnięcie trafia też do dziennika aktywności ofiary (i zbijającego, przy kradzieży).
@@ -1871,7 +1874,8 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     `).run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), bonusPoints - stolen, bonusPoints, occ.player_id);
 
     if (stolen > 0) {
-      db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?').run(stolen, pusherId);
+      db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
+        .run(stolen, stolen, pusherId);
     }
 
     const entry = {
@@ -1905,6 +1909,37 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
   return chain;
 }
 
+// ── MIGRACJA (jednorazowa): retroaktywne dogranie punktów za kradzieże przy
+// wypchnięciu sprzed naprawy total_points wyżej w slApplyKnockback — do tej pory
+// skradzione monety trafiały tylko na balance, nigdy na total_points (ranking).
+// Nie ma osobnej, ustrukturyzowanej tabeli z historią kradzieży — jedyny ślad to
+// wolny tekst w sl_activity ("💰 Zbiłeś X i zgarnąłeś N monet!"), więc parsujemy
+// go regexem. Zabezpieczone znacznikiem w sl_meta — leci raz, kolejne restarty
+// serwera to no-op (patrz też migracja układu planszy wyżej, ten sam wzorzec).
+(function backfillKnockbackPoints() {
+  if (slMetaGet('knockback_points_backfilled') === '1') return;
+  const rows = db.prepare(
+    `SELECT player_id, detail FROM sl_activity WHERE type = 'knockback' AND detail LIKE '%zgarnąłeś%monet%'`
+  ).all();
+  const totals = new Map();
+  for (const row of rows) {
+    const match = row.detail.match(/zgarnąłeś (\d+) monet/);
+    if (!match) continue;
+    const amount = Number(match[1]);
+    totals.set(row.player_id, (totals.get(row.player_id) || 0) + amount);
+  }
+  if (totals.size > 0) {
+    transaction(() => {
+      const upd = db.prepare('UPDATE sl_state SET total_points = total_points + ? WHERE player_id = ?');
+      for (const [playerId, amount] of totals) {
+        if (amount > 0) upd.run(amount, playerId);
+      }
+    });
+    const totalAmount = [...totals.values()].reduce((a, b) => a + b, 0);
+    console.log(`Snakes & Ladders: dograno retroaktywnie ${totalAmount} pkt za kradzieże przy wypchnięciu (${totals.size} graczy)`);
+  }
+  slMetaSet('knockback_points_backfilled', '1');
+})();
 
 
 // Buduje publiczny opis planszy (do rysowania w UI).
