@@ -1843,6 +1843,8 @@ function slFindOccupant(tile, excludeIds) {
 // Pole, na które trafia ofiara, odpala węża/drabinę/bonus normalnie (slResolveTileEffect)
 // — jeśli to przerzuci ją na KOLEJNE zajęte pole, kaskada leci dalej stamtąd. Każde
 // wypchnięcie trafia też do dziennika aktywności ofiary (i zbijającego, przy kradzieży).
+// Pole 0 (start planszy/okrążenia) jest bezpieczne — stojących tam graczy NIE da się
+// wypchnąć, więc kaskada urywa się, gdy trafi na kogoś stojącego akurat na starcie.
 function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) {
   const pushedIds = new Set([rollerPlayerId]);
   const chain = [];
@@ -1850,6 +1852,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
   let pusherId = rollerPlayerId;
   let pusherNickname = rollerNickname;
   for (let i = 0; i < 200; i++) { // bezpiecznik przeciw pętli nieskończonej
+    if (targetTile === 0) break; // pole 0 jest bezpieczne — nikogo stamtąd nie wypychamy
     const occ = slFindOccupant(targetTile, pushedIds);
     if (!occ) break;
     const fromAbs = Number(occ.abs_pos);
