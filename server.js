@@ -1942,7 +1942,9 @@ function slPlayersPayload(meId) {
       moved_today: rollsUsedToday >= SL_DAILY_ROLLS,
       rolls_used_today: rollsUsedToday,
       rolls_remaining_today: Math.max(0, SL_DAILY_ROLLS - rollsUsedToday),
-      has_shield: shielded.has(r.player_id),
+      // Tarcza jest widoczna TYLKO u siebie — innym graczom nie zdradzamy, kto ma
+      // tarczę, żeby dało się kogoś zaskoczyć Freeze/Curse (patrz też slBuildState → me).
+      has_shield: (meId && r.player_id === meId) ? shielded.has(r.player_id) : false,
       is_me: meId ? r.player_id === meId : false
     };
   });
@@ -2572,8 +2574,18 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       `).run(playerId, today, moveSeq, st.abs_pos, st.abs_pos);
       db.prepare('UPDATE sl_state SET last_move_date = ?, rolls_today = ?, last_move_at = CURRENT_TIMESTAMP WHERE player_id = ?')
         .run(today, moveSeq, playerId);
-      slLogActivity(playerId, 'roll', `❄️ Zamrożony — ruch ${moveSeq}/${SL_DAILY_ROLLS} dzisiaj przepadł.`);
-      return { frozen: true, source: freeze.source_player_id, rolls_used_today: moveSeq };
+      // Freeze ujawnia się DOPIERO teraz — w momencie faktycznej aktywacji, nie kiedy
+      // ktoś go kupił/użył na kogoś (patrz POST /api/snakes/shop/use, gdzie celowo nie
+      // ma żadnego wpisu dla freeze).
+      const freezeSource = freeze.source_player_id
+        ? db.prepare('SELECT nickname FROM players WHERE id = ?').get(freeze.source_player_id)
+        : null;
+      const freezeSourceNick = freezeSource ? freezeSource.nickname : null;
+      slLogActivity(playerId, 'roll', `❄️ Zamrożony${freezeSourceNick ? ` przez ${freezeSourceNick}` : ''} — ruch ${moveSeq}/${SL_DAILY_ROLLS} dzisiaj przepadł.`);
+      if (freeze.source_player_id) {
+        slLogActivity(freeze.source_player_id, 'shop_use', `❄️ Twój Freeze na ${nickname} właśnie odpalił!`);
+      }
+      return { frozen: true, source: freeze.source_player_id, source_nickname: freezeSourceNick, rolls_used_today: moveSeq };
     }
 
     // DOUBLE MOVE: dwa rzuty w jednej turze.
@@ -2712,7 +2724,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
   // ── ZDARZENIA DISCORD ──
   if (result.frozen) {
-    slEmit('roll_result', () => `❄️ **${nickname}** próbował rzucić, ale jest zamrożony — tura przepada.`);
+    // Ujawniamy "kto kogo zamroził" DOPIERO teraz — Freeze nie ma żadnej zapowiedzi
+    // przy użyciu, tylko przy faktycznej aktywacji (patrz POST /api/snakes/shop/use).
+    slEmit('powerup_freeze', () => result.source_nickname
+      ? `❄️ **${result.source_nickname}** zamroził **${nickname}** — właśnie odpalił, tura przepada.`
+      : `❄️ **${nickname}** próbował rzucić, ale jest zamrożony — tura przepada.`);
   } else {
     slEmit('roll_result', () => {
       const dice = result.rolls.join(' + ');
@@ -2858,10 +2874,15 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   }
 
   // ── DZIENNIK AKTYWNOŚCI (obie strony, gdy dotyczy) ──
+  // Freeze celowo NIE trafia tu do dziennika, gdy tylko czeka jako pending — nikt (nawet
+  // cel) nie ma widzieć, że został zamrożony, dopóki faktycznie nie kliknie "rzuć" i się
+  // o tym nie przekona (patrz POST /api/snakes/roll, gdzie dopiero wtedy to się loguje).
   const label = SL_POWERUP_LABELS[type];
   if (out.blocked) {
     slLogActivity(playerId, 'shop_use', `${label} na ${targetNick} zablokowany tarczą`);
     slLogActivity(targetId, 'shop_use', `🛡️ Zablokował ${label} od ${nickname} tarczą`);
+  } else if (type === 'freeze') {
+    // brak wpisu — patrz komentarz wyżej
   } else if (needsTarget) {
     slLogActivity(playerId, 'shop_use', `Użył ${label} na ${targetNick}`);
     slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${type === 'curse' ? ' — zobaczysz jaka, dopiero gdy odpali' : ''}`);
@@ -2870,11 +2891,10 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   }
 
   // ── ZDARZENIA DISCORD ──
+  // Freeze celowo nie ma tu emisji — dopiero gdy odpali (patrz POST /api/snakes/roll).
   if (out.blocked) {
     slEmit('shield_block', () =>
       `🛡️ **${targetNick}** zablokował tarczą ${type === 'freeze' ? 'Freeze' : 'Curse'} od **${nickname}**! Tarcza zużyta.`);
-  } else if (type === 'freeze') {
-    slEmit('powerup_freeze', () => `❄️ **${nickname}** zamroził **${targetNick}** — następna tura celu przepada.`);
   } else if (type === 'curse') {
     slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
   }
