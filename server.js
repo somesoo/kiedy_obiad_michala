@@ -2833,8 +2833,6 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     slEmit('powerup_freeze', () => `❄️ **${nickname}** zamroził **${targetNick}** — następna tura celu przepada.`);
   } else if (type === 'curse') {
     slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
-  } else if (type === 'shield') {
-    slEmit('shield_block', () => `🛡️ **${nickname}** aktywował tarczę — najbliższy Freeze/Curse się od niego odbije.`);
   }
 
   res.json({
