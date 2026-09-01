@@ -473,8 +473,10 @@ function currentWord() {
 }
 
 // ── SEZON (miesiąc kalendarzowy) ──
+// Po zakończeniu gry (GAME_END_AT) sezon zamraża się na miesiącu, w którym gra się skończyła —
+// nie ma "przełączenia" na kolejny miesiąc, ranking końcowy zostaje na stałe.
 function currentSeasonId() {
-  const p = warsawParts();
+  const p = gameHasEnded() ? warsawParts(new Date(Date.parse(GAME_END_AT))) : warsawParts();
   return `${p.y}-${p.mo}`; // 'YYYY-MM'
 }
 function seasonMonthLabel(id) {
@@ -489,11 +491,12 @@ function isTestPeriod() {
 }
 // Granice bieżącego sezonu jako daty 'YYYY-MM-DD' [first, nextFirst)
 function seasonBounds() {
-  const p = warsawParts();
-  const first = `${p.y}-${p.mo}-01`;
-  let y = Number(p.y), m = Number(p.mo) + 1;
-  if (m > 12) { m = 1; y++; }
-  const nextFirst = `${y}-${String(m).padStart(2, '0')}-01`;
+  const id = currentSeasonId();
+  const [y, m] = id.split('-').map(Number);
+  const first = `${id}-01`;
+  let ny = y, nm = m + 1;
+  if (nm > 12) { nm = 1; ny++; }
+  const nextFirst = `${ny}-${String(nm).padStart(2, '0')}-01`;
   return { first, nextFirst };
 }
 
