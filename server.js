@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 31535;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
 
 // Pierwszy dzień gry (hasło o order_index = 1). Hasła lecą tylko w dni robocze (pon–pt),
@@ -40,6 +40,10 @@ function maxAttemptsFor(wordLength) {
 
 const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+
+// Zdjęcia profilowe Snakes — wymagane do gry, serwowane statycznie spod /avatars/<id>.jpg.
+const avatarsDir = path.join(__dirname, 'public', 'avatars');
+if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
 
 const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
 
@@ -319,12 +323,42 @@ function todayWaw() {
   return `${p.y}-${p.mo}-${p.d}`;
 }
 
+// Odwrotność warsawParts: epoch ms odpowiadający podanej godzinie ściennej w
+// Europe/Warsaw dla danej daty (Y-M-D). Iteracyjnie koryguje różnicę stref (CET/CEST),
+// aż warsawParts(wynik) faktycznie pokaże żądaną godzinę — zbiega w 1-2 krokach.
+function warsawWallTimeToMs(y, m, d, hour) {
+  const wantedUtc = Date.UTC(y, m - 1, d, hour, 0, 0);
+  let guessMs = wantedUtc;
+  for (let i = 0; i < 3; i++) {
+    const p = warsawParts(new Date(guessMs));
+    const shownUtc = Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d), Number(p.h), Number(p.mi), Number(p.s));
+    const diff = wantedUtc - shownUtc;
+    if (diff === 0) break;
+    guessMs += diff;
+  }
+  return guessMs;
+}
+
 // ── DNI ROBOCZE / NUMER HASŁA ──
 // Weekend rozpoznajemy z daty kalendarzowej (na północach UTC — DST nie ma znaczenia).
 function isWeekendStr(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
   return dow === 0 || dow === 6; // niedziela / sobota
+}
+
+// (Snakes & Ladders) Dodaje `days` DNI ROBOCZYCH (pon–pt, czasu Warszawy) do danej
+// chwili — weekendy są całkowicie pomijane, więc licznik "nie płynie" w sobotę/niedzielę.
+// Używane do terminu pokonania bossa w wydarzeniu co-op (patrz slFinishBossEvent).
+function addBusinessDaysMs(fromMs, days) {
+  let ms = fromMs;
+  let remaining = days;
+  while (remaining > 0) {
+    ms += 24 * 60 * 60 * 1000;
+    const p = warsawParts(new Date(ms));
+    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) remaining--;
+  }
+  return ms;
 }
 
 // Ile dni roboczych (pon–pt) minęło od WORD_START do dateStr włącznie
@@ -1205,9 +1239,2023 @@ app.post('/api/admin/discord-test', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// ── SNAKES & LADDERS (Węże i Drabiny) — nieskończona pętla, 1 ruch dziennie ──
+// ══════════════════════════════════════════════════════════════════════════
+// Osobny tryb gry, w pełni addytywny wobec Wordle: współdzieli tabelę `players`
+// (logowanie tokenem X-Token), ale trzyma swój stan w tabelach `sl_*`.
+//
+// Zasady w skrócie:
+//  • Jedna WSPÓLNA plansza dla wszystkich (49 pól = 7×7, indeks 0..48), zapętlona —
+//    po ostatnim polu wraca się na start i liczy kolejne okrążenie (brak „mety").
+//  • Każdy gracz ma DOKŁADNIE JEDEN ruch dziennie (blokada jak w Wordle: unikalny
+//    wpis (player_id, move_date) w `sl_moves`; doba wg strefy Europe/Warsaw).
+//  • Ruch jest wyzwalany przez gracza (klik „Rzuć kostką"), nie automatyczny.
+//  • Punkty = wartość rzutu + pola bonusowe + postęp po planszy (przebyty dystans
+//    i ukończone okrążenia). Punkty się kumulują (leaderboard) i są walutą sklepu.
+//  • Power-upy kupowane za punkty (NIE losowe dropy): Freeze, Curse (3 warianty),
+//    Double Move oraz Shield (obrona — blokuje najbliższy Freeze/Curse).
+//  • Wydarzenie kooperacyjne: gracze dorzucają punkty do wspólnej puli; po przekroczeniu
+//    progu rusza event „bossowy", a po jego ukończeniu kontrybutorzy dostają nagrody.
+
+const SL_BOARD_COLS = 7;                     // szerokość planszy w polach
+const SL_BOARD_ROWS = 7;                     // wysokość planszy w polach
+const SL_BOARD_SIZE = SL_BOARD_COLS * SL_BOARD_ROWS;  // 49 pól (indeks 0..48), potem pętla
+const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
+const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
+const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
+
+// Koszty power-upów (w punktach). Shield jest droższy od Freeze/Curse — to kontra
+// na cudzy atak, więc ma kosztować więcej niż sam atak, ale zostaje w zasięgu
+// kilku dni zbierania (dzienny ruch to ~10–30 pkt).
+const SL_POWERUP_COSTS = { freeze: 30, curse: 50, double_move: 40, shield: 70 };
+const SL_POWERUP_TYPES = Object.keys(SL_POWERUP_COSTS);
+// Typy ataków, które Shield potrafi zablokować (zużywa się przy pierwszym z nich).
+const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
+
+// ── KLĄTWA — 7 losowych wariantów ──
+// Wariant losujemy w momencie RZUCENIA klątwy (sl_effects.variant) i odpalamy go na
+// NASTĘPNYM ruchu ofiary. Warianty 1/2/5 zmieniają SPOSÓB poruszania się, więc muszą
+// zadziałać PRZED odpaleniem węży/drabin/bonusów (patrz slCurseAdjustRoll + invertBoard
+// w slResolveTileEffect) — inaczej gracz lądowałby na złym polu. Warianty 3/4/6/7
+// działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
+const SL_CURSE_VARIANTS = 7;
+const SL_CURSE_COIN_STEAL = 50; // ile monet zabiera Kieszonkowiec (wariant 3)
+const SL_CURSE_LABELS = {
+  1: '↩️ Odwrotny Ruch',
+  2: '➗ Rozdwojona Kostka',
+  3: '💰 Kieszonkowiec',
+  4: '📉 Chciwość',
+  5: '🔀 Odwrócone Zasady',
+  6: '🌀 Chaos',
+  7: '🚫 Bez Bonusu'
+};
+const SL_CURSE_DESCRIPTIONS = {
+  1: 'kość cofa zamiast pchać do przodu (np. rzut 4 = 4 pola W TYŁ)',
+  2: 'rzut liczy się w połowie, w dół (rzut 5 = ruch o 2 pola)',
+  3: `traci ${SL_CURSE_COIN_STEAL} monet na rzecz tego, kto rzucił klątwę`,
+  4: 'połowa punktów zdobytych tym ruchem przepada',
+  5: 'na ten ruch drabiny i węże zamieniają się rolami',
+  6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
+  7: 'pole bonusowe na ten ruch nie działa'
+};
+
+// Warianty 1/2 zmieniają wartość kości PRZED ruchem — reszta rzutów nie rusza.
+function slCurseAdjustRoll(variant, roll) {
+  if (variant === 1) return -roll;               // Odwrotny Ruch
+  if (variant === 2) return Math.floor(roll / 2); // Rozdwojona Kostka (w dół)
+  return roll;
+}
+
+// ── WYDARZENIE KOOPERACYJNE (co-op) ──
+const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 300;
+// Pula nagród = próg × mnożnik. >1 oznacza, że wspólny wysiłek zwraca się z nawiązką.
+const SL_COOP_REWARD_MULTIPLIER = Number(process.env.SNAKES_COOP_REWARD_MULTIPLIER || 1.5);
+// 'proportional' = proporcjonalnie do wkładu (domyślnie — kto dołożył więcej, dostaje więcej),
+// 'flat' = po równo między wszystkich kontrybutorów.
+const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportional').toLowerCase();
+
+// ── KNOCKBACK (wypychanie z zajętego pola) ──
+// Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
+const SL_KNOCKBACK_COIN_STEAL = 50;
+
+// Ile ruchów (rzutów) dziennie ma każdy gracz. Freeze blokuje JEDEN z nich (nie cały
+// dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
+const SL_DAILY_ROLLS = 3;
+// Między ruchami NIE MA odstępu — gracz sam decyduje, jak rozłożyć swoje trzy rzuty
+// w ciągu dnia (choćby wszystkie pod rząd). Jedyne ograniczenie to okno godzin biurowych.
+
+// ── GODZINY BIUROWE ──
+// To gra biurowa: rzucać można wyłącznie w oknie SL_PLAY_START_HOUR–SL_PLAY_END_HOUR
+// (czasu Warszawy, dni robocze). Po 16:00 niewykorzystane ruchy przepadają.
+const SL_PLAY_START_HOUR = Number(process.env.SNAKES_PLAY_START_HOUR || 8);
+const SL_PLAY_END_HOUR = Number(process.env.SNAKES_PLAY_END_HOUR || 16);
+
+// Czy w danej chwili okno gry jest otwarte (dzień roboczy + godzina w zakresie).
+function slOfficeOpenAt(ms = Date.now()) {
+  const p = warsawParts(new Date(ms));
+  if (isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) return false;
+  const h = Number(p.h);
+  return h >= SL_PLAY_START_HOUR && h < SL_PLAY_END_HOUR;
+}
+
+// Najbliższa chwila (epoch ms), w której okno gry jest otwarte: samo `fromMs`, jeśli
+// właśnie trwa, inaczej godzina otwarcia najbliższego dnia roboczego. Dni przeglądamy
+// od kotwicy w południe, żeby zmiana czasu (CET/CEST) nie przesunęła nam doby.
+function slNextOpenMs(fromMs = Date.now()) {
+  if (slOfficeOpenAt(fromMs)) return fromMs;
+  const p0 = warsawParts(new Date(fromMs));
+  let anchor = warsawWallTimeToMs(Number(p0.y), Number(p0.mo), Number(p0.d), 12);
+  for (let i = 0; i < 14; i++) {
+    const p = warsawParts(new Date(anchor));
+    const openMs = warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_START_HOUR);
+    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`) && openMs > fromMs) return openMs;
+    anchor += 24 * 60 * 60 * 1000;
+  }
+  return fromMs;
+}
+
+// Godzina zamknięcia okna dla dnia, w którym wypada `ms` (epoch ms).
+function slOfficeCloseMs(ms = Date.now()) {
+  const p = warsawParts(new Date(ms));
+  return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_END_HOUR);
+}
+
+// ── ESKALACJA TRUDNOŚCI CO-OP ──
+// Zbiórka (status 'collecting') NIE MA już terminu ani kary — trwa, aż próg padnie,
+// można wpłacać zawsze. Limit czasu dotyczy WYŁĄCZNIE walki z bossem: gdy próg padnie,
+// boss budzi się z określoną liczbą DNI ROBOCZYCH na pokonanie (weekendy się nie liczą
+// do odliczania — patrz addBusinessDaysMs). Po rozstrzygnięciu (wygrana lub czas minął)
+// KOLEJNA edycja rusza NATYCHMIAST — próg i czas na pokonanie zmieniają się zależnie
+// od wyniku:
+//   • wygrana: próg × GROWTH (trudniej), czas × SHRINK, ale nie mniej niż MIN_TIME_DAYS
+//   • przegrana (czas minął, boss przeżył): próg i czas łagodnieją o RELIEF_FACTOR,
+//     ale nigdy poniżej/powyżej wartości bazowej (BASE) — to tylko "odbicie", nie reset.
+const SL_COOP_BASE_TIME_DAYS = Number(process.env.SNAKES_COOP_BASE_TIME_DAYS || 5);
+const SL_COOP_MIN_TIME_DAYS = Number(process.env.SNAKES_COOP_MIN_TIME_DAYS || 2);
+const SL_COOP_THRESHOLD_GROWTH = Number(process.env.SNAKES_COOP_THRESHOLD_GROWTH || 1.2);
+const SL_COOP_TIME_SHRINK = Number(process.env.SNAKES_COOP_TIME_SHRINK || 0.8);
+const SL_COOP_RELIEF_FACTOR = Number(process.env.SNAKES_COOP_RELIEF_FACTOR || 0.9); // próg ×0.9, czas ÷0.9
+
+// ── WALKA Z BOSSEM ──
+// Gdy pula przekroczy próg, budzi się losowy biurowy boss z paskiem HP. KAŻDY rzut
+// kostką (nie tylko kontrybutora) w trakcie eventu zadaje mu darmowe obrażenia — więc
+// zwykłe granie już "walczy". Dodatkowo każdy może dobić bossa ręcznym atakiem za
+// monety — realny sposób na wydawanie salda poza sklepem, nie tylko nagroda na końcu.
+// Pokonanie bossa PRZED rozliczeniem okna dorzuca każdemu kontrybutorowi premię ponad
+// zwykłą pulę nagród; jeśli czas minie, a boss przeżyje, zwykła nagroda i tak się należy
+// (próg padł), tylko premii za "zabicie" już nie ma — to jest ta dodatkowa zachęta.
+const SL_BOSS_NAMES = [
+  'Ksero-Golem', 'Duch Deadline\'u', 'Hydra Niekończących Się Maili',
+  'Excel Behemot', 'Automat do Kawy Zła', 'Syndrom Poniedziałku', 'Rozdzielacz Wi-Fi Zagłady'
+];
+const SL_BOSS_HP_MULTIPLIER = Number(process.env.SNAKES_BOSS_HP_MULTIPLIER || 2); // HP = próg × to
+const SL_BOSS_DICE_DAMAGE_MULT = Number(process.env.SNAKES_BOSS_DICE_DAMAGE_MULT || 3); // dmg = suma oczek × to
+const SL_BOSS_ATTACK_COST = parseInt(process.env.SNAKES_BOSS_ATTACK_COST, 10) || 20;    // koszt ręcznego ataku (monety)
+const SL_BOSS_ATTACK_DAMAGE = parseInt(process.env.SNAKES_BOSS_ATTACK_DAMAGE, 10) || 45; // obrażenia ręcznego ataku
+const SL_BOSS_DEFEAT_BONUS = parseInt(process.env.SNAKES_BOSS_DEFEAT_BONUS, 10) || 60;   // bonus pkt/monet na kontrybutora za zabicie
+// Jeśli boss NIE zostanie pokonany na czas, "atakuje" i zabiera tyle monet KAŻDEMU
+// graczowi (nie tylko kontrybutorom) — realna stawka za zignorowanie walki, nie tylko
+// łagodniejszy próg na następną rundę. Nigdy nie schodzi poniżej salda gracza (0 min).
+const SL_BOSS_TIMEOUT_PENALTY = parseInt(process.env.SNAKES_BOSS_TIMEOUT_PENALTY, 10) || 50;
+
+// ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
+db.exec(`
+  -- Stan gracza w Wężach i Drabinach
+  CREATE TABLE IF NOT EXISTS sl_state (
+    player_id         INTEGER PRIMARY KEY REFERENCES players(id),
+    abs_pos           INTEGER DEFAULT 0,   -- łączny przebyty dystans (pól od startu)
+    laps              INTEGER DEFAULT 0,   -- ukończone okrążenia
+    balance           INTEGER DEFAULT 0,   -- punkty do wydania w sklepie
+    total_points      INTEGER DEFAULT 0,   -- suma zdobytych punktów (leaderboard)
+    last_move_date    TEXT,                -- YYYY-MM-DD (Europe/Warsaw) ostatniego ruchu
+    last_move_at      DATETIME,            -- dokładny moment ostatniego ruchu (zapis, nie blokada)
+    has_avatar        INTEGER DEFAULT 0,   -- 1 = ma zdjęcie profilowe (wymagane do gry)
+    avatar_updated_at DATETIME,            -- kiedy ostatnio wgrał/zmienił zdjęcie
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Konfiguracja wspólnej planszy: typ pola i (dla węża/drabiny) cel skoku.
+  CREATE TABLE IF NOT EXISTS sl_board (
+    position INTEGER PRIMARY KEY,       -- 0..SL_BOARD_SIZE-1
+    kind     TEXT NOT NULL,             -- 'ladder' | 'snake' | 'bonus'
+    target   INTEGER,                   -- pole docelowe (ladder/snake), NULL dla bonus
+    value    INTEGER DEFAULT 0          -- punkty bonusowe (bonus), 0 dla ladder/snake
+  );
+
+  -- Dziennik ruchów — blokada „SL_DAILY_ROLLS ruchów dziennie" przez
+  -- UNIQUE(player_id, move_date, move_seq): move_seq numeruje kolejne ruchy tego
+  -- samego dnia (1, 2, ...), więc każdy z dziennych ruchów dostaje własny wiersz.
+  CREATE TABLE IF NOT EXISTS sl_moves (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id  INTEGER REFERENCES players(id),
+    move_date  TEXT NOT NULL,           -- YYYY-MM-DD (Europe/Warsaw)
+    move_seq   INTEGER NOT NULL DEFAULT 1, -- który to ruch danego dnia (1, 2, ...)
+    rolls      TEXT DEFAULT '[]',       -- JSON: rzucone wartości (1 lub 2 przy Double Move)
+    from_abs   INTEGER,
+    to_abs     INTEGER,
+    points     INTEGER DEFAULT 0,
+    note       TEXT,                    -- np. 'frozen', 'ladder', 'snake', 'bonus'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(player_id, move_date, move_seq)
+  );
+
+  -- Ekwipunek power-upów (ile sztuk danego typu ma gracz).
+  CREATE TABLE IF NOT EXISTS sl_inventory (
+    player_id INTEGER REFERENCES players(id),
+    type      TEXT NOT NULL,            -- 'freeze' | 'curse' | 'double_move' | 'shield'
+    qty       INTEGER DEFAULT 0,
+    PRIMARY KEY (player_id, type)
+  );
+
+  -- Aktywne efekty power-upów oczekujące na „następną turę" celu.
+  -- Shield leży tu jako 'pending' aż do momentu, w którym zablokuje cudzy atak.
+  CREATE TABLE IF NOT EXISTS sl_effects (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_player_id INTEGER REFERENCES players(id),
+    source_player_id INTEGER REFERENCES players(id),
+    type             TEXT NOT NULL,     -- 'freeze' | 'curse' | 'double_move' | 'shield'
+    variant          INTEGER,           -- dla 'curse': 1..3 (który wariant); inaczej NULL
+    status           TEXT DEFAULT 'pending',  -- 'pending' | 'consumed' | 'blocked'
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    consumed_at      DATETIME
+  );
+
+  -- Klucz-wartość na ustawienia trybu (rozmiar planszy do migracji, przełączniki Discorda…)
+  CREATE TABLE IF NOT EXISTS sl_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
+
+  -- Wydarzenie kooperacyjne: jedna aktywna „edycja" (cykl) zbiórki naraz.
+  CREATE TABLE IF NOT EXISTS sl_coop (
+    cycle            INTEGER PRIMARY KEY,
+    threshold        INTEGER NOT NULL,
+    total            INTEGER DEFAULT 0,
+    status           TEXT DEFAULT 'collecting', -- 'collecting' | 'event_active' | 'completed'
+    reward_pool      INTEGER DEFAULT 0,
+    started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    triggered_at     DATETIME,
+    completed_at     DATETIME,
+    boss_name        TEXT,
+    boss_max_hp      INTEGER DEFAULT 0,
+    boss_hp          INTEGER DEFAULT 0,
+    boss_defeated_at DATETIME,
+    time_limit_days  INTEGER DEFAULT 5,   -- dni robocze na pokonanie TEGO bossa
+    boss_deadline_at DATETIME             -- policzone przy wybudzeniu (patrz addBusinessDaysMs)
+  );
+
+  -- Wkłady graczy do puli (per cykl) — na ich podstawie liczymy nagrody.
+  CREATE TABLE IF NOT EXISTS sl_coop_contributions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle      INTEGER NOT NULL,
+    player_id  INTEGER REFERENCES players(id),
+    amount     INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Dziennik aktywności (ruchy + sklep + wpłaty do puli + knockback) — widoczny dla
+  -- wszystkich, do przeglądania "kto co zrobił którego dnia" w prawej kolumnie UI.
+  CREATE TABLE IF NOT EXISTS sl_activity (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id  INTEGER REFERENCES players(id),
+    type       TEXT NOT NULL,   -- 'roll' | 'shop_buy' | 'shop_use' | 'coop_contribute' | 'knockback' | 'boss_hit'
+    detail     TEXT NOT NULL,
+    day        TEXT NOT NULL,   -- YYYY-MM-DD wg Europe/Warsaw (do grupowania/filtrowania)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// sl_state powstał już wcześniej niż zdjęcia profilowe w tym projekcie — dołóż kolumny
+// dla istniejących wdrożeń (musi być PO utworzeniu tabeli, stąd nie przy graczach/games wyżej).
+ensureColumn('sl_state', 'has_avatar', 'INTEGER DEFAULT 0');
+ensureColumn('sl_state', 'avatar_updated_at', 'DATETIME');
+// Ile z dziennego limitu ruchów (SL_DAILY_ROLLS) gracz już zużył — liczone dla dnia
+// zapisanego w last_move_date; przy zmianie dnia licznik efektywnie wraca do zera
+// (patrz slRollsUsedToday), więc kolumna nie musi być sama w sobie zerowana o północy.
+ensureColumn('sl_state', 'rolls_today', 'INTEGER DEFAULT 0');
+// Dokładny moment ostatniego ruchu — sam w sobie niczego nie blokuje (odstęp między
+// ruchami zniknął), zostaje jako ślad w danych i pod ewentualne statystyki.
+ensureColumn('sl_state', 'last_move_at', 'DATETIME');
+
+// sl_coop: dołóż kolumny bossa dla wdrożeń sprzed walki z bossem.
+ensureColumn('sl_coop', 'boss_name', 'TEXT');
+ensureColumn('sl_coop', 'boss_max_hp', 'INTEGER DEFAULT 0');
+ensureColumn('sl_coop', 'boss_hp', 'INTEGER DEFAULT 0');
+ensureColumn('sl_coop', 'boss_defeated_at', 'DATETIME');
+ensureColumn('sl_coop', 'time_limit_days', 'INTEGER DEFAULT 5');
+ensureColumn('sl_coop', 'boss_deadline_at', 'DATETIME');
+
+// sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
+// jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
+// błąd unikalności, więc trzeba przebudować tabelę (SQLite nie zmienia constraintów
+// przez ALTER). Bezpieczne: to tylko dziennik/log, nie trzyma stanu gry (to sl_state).
+(function migrateSlMovesUniqueConstraint() {
+  const ddl = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='sl_moves'`).get();
+  if (!ddl || !ddl.sql.includes('UNIQUE(player_id, move_date)') || ddl.sql.includes('move_seq')) return;
+  transaction(() => {
+    db.exec(`
+      CREATE TABLE sl_moves_new (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id  INTEGER REFERENCES players(id),
+        move_date  TEXT NOT NULL,
+        move_seq   INTEGER NOT NULL DEFAULT 1,
+        rolls      TEXT DEFAULT '[]',
+        from_abs   INTEGER,
+        to_abs     INTEGER,
+        points     INTEGER DEFAULT 0,
+        note       TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(player_id, move_date, move_seq)
+      );
+      INSERT INTO sl_moves_new (id, player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note, created_at)
+        SELECT id, player_id, move_date, 1, rolls, from_abs, to_abs, points, note, created_at FROM sl_moves;
+      DROP TABLE sl_moves;
+      ALTER TABLE sl_moves_new RENAME TO sl_moves;
+    `);
+  });
+  console.log('Snakes & Ladders: sl_moves przebudowane pod wiele ruchów dziennie (move_seq)');
+})();
+
+// Backfill rolls_today: gracze, którzy mieli już zapisany last_move_date PRZED tą
+// aktualizacją, dostaliby świeżą kolumnę z DEFAULT 0 — czyli z powrotem PEŁNY dzienny
+// limit, mimo że część już dziś zużyli. Liczymy rzeczywistą liczbę ruchów z sl_moves
+// dla ich last_move_date i tym uzupełniamy. Bezpieczne uruchamiać przy każdym starcie:
+// dotyka tylko wierszy z rolls_today=0, więc dla już poprawnie policzonych graczy to no-op.
+db.exec(`
+  UPDATE sl_state SET rolls_today = (
+    SELECT COUNT(*) FROM sl_moves
+    WHERE sl_moves.player_id = sl_state.player_id AND sl_moves.move_date = sl_state.last_move_date
+  )
+  WHERE last_move_date IS NOT NULL AND rolls_today = 0
+`);
+
+// Zapisuje wpis do dziennika aktywności. Wołane z ruchu, sklepu, wpłat do puli i knockbacku.
+function slLogActivity(playerId, type, detail) {
+  db.prepare('INSERT INTO sl_activity (player_id, type, detail, day) VALUES (?, ?, ?, ?)')
+    .run(playerId, type, detail, todayWaw());
+}
+
+// Etykiety power-upów do czytelnych wpisów w dzienniku i na Discordzie.
+const SL_POWERUP_LABELS = { freeze: 'Freeze', curse: 'Curse', double_move: 'Double Move', shield: 'Shield' };
+
+// ── META (klucz-wartość) ──
+function slMetaGet(key) {
+  const row = db.prepare('SELECT value FROM sl_meta WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+function slMetaSet(key, value) {
+  db.prepare(`
+    INSERT INTO sl_meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(key, String(value));
+}
+
+// ── UKŁAD PLANSZY 7×7 ──
+// Drabiny ciągną w górę, węże w dół, pola bonusowe dają punkty bez przesunięcia.
+// Rozkład dobrany pod 49 pól: 4 drabiny / 4 węże / 5 bonusów (~27% pól to pola specjalne).
+// Żaden cel skoku nie ląduje na innym polu specjalnym (brak reakcji łańcuchowych).
+const SL_LADDERS = [               // [from, to] — to > from
+  [3, 17], [8, 24], [21, 39], [28, 44]
+];
+const SL_SNAKES = [                // [from, to] — to < from
+  [12, 2], [19, 7], [36, 20], [45, 29]
+];
+const SL_BONUSES = [               // [position, points]
+  [5, 15], [11, 20], [23, 25], [34, 30], [41, 35]
+];
+
+function slSeedBoardRows() {
+  const insert = db.prepare('INSERT INTO sl_board (position, kind, target, value) VALUES (?, ?, ?, ?)');
+  for (const [from, to] of SL_LADDERS) insert.run(from, 'ladder', to, 0);
+  for (const [from, to] of SL_SNAKES) insert.run(from, 'snake', to, 0);
+  for (const [pos, val] of SL_BONUSES) insert.run(pos, 'bonus', null, val);
+}
+
+// ── MIGRACJA ROZMIARU PLANSZY ──
+// Plansza schudła ze 100 do 49 pól. Pozycji graczy NIE zerujemy — skalujemy je
+// proporcjonalnie (abs_pos × nowy/stary), więc każdy zostaje mniej więcej tam, gdzie był
+// (ten sam procent okrążenia), a punkty, salda i ekwipunek zostają nietknięte.
+// Migracja jest idempotentna: znacznik `board_size` w sl_meta pilnuje, by poszła raz.
+// Bump przy KAŻDEJ zmianie SL_LADDERS/SL_SNAKES/SL_BONUSES — wymusza reseed na już
+// działających wdrożeniach, żeby zmiana układu (nie tylko rozmiaru) też dotarła.
+const SL_BOARD_LAYOUT_VERSION = 2;
+
+function slMigrateBoard() {
+  const rows = db.prepare('SELECT COUNT(*) AS c, MAX(position) AS m FROM sl_board').get();
+  const stored = slMetaGet('board_size');
+
+  // Świeża instalacja — po prostu zaszczep planszę.
+  if (Number(rows.c) === 0) {
+    transaction(() => slSeedBoardRows());
+    slMetaSet('board_size', SL_BOARD_SIZE);
+    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
+    console.log(`Snakes & Ladders: plansza zaseedowana ${SL_BOARD_COLS}×${SL_BOARD_ROWS} (${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów)`);
+    return;
+  }
+
+  // Stary rozmiar: z metadanych, a gdy ich nie ma (baza sprzed tej wersji) — z układu pól.
+  const oldSize = stored ? Number(stored) : (Number(rows.m) >= SL_BOARD_SIZE ? 100 : SL_BOARD_SIZE);
+  if (oldSize === SL_BOARD_SIZE) {
+    slMetaSet('board_size', SL_BOARD_SIZE);
+  } else {
+    const scaled = transaction(() => {
+      let n = 0;
+      for (const st of db.prepare('SELECT player_id, abs_pos FROM sl_state').all()) {
+        const newAbs = Math.round(Number(st.abs_pos) * SL_BOARD_SIZE / oldSize);
+        db.prepare('UPDATE sl_state SET abs_pos = ?, laps = ? WHERE player_id = ?')
+          .run(newAbs, Math.floor(newAbs / SL_BOARD_SIZE), st.player_id);
+        n++;
+      }
+      db.exec('DELETE FROM sl_board');
+      slSeedBoardRows();
+      return n;
+    });
+    slMetaSet('board_size', SL_BOARD_SIZE);
+    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
+    console.log(`Snakes & Ladders: MIGRACJA planszy ${oldSize} → ${SL_BOARD_SIZE} pól, przeskalowano pozycje ${scaled} graczy (punkty i ekwipunek bez zmian)`);
+    return;
+  }
+
+  // Rozmiar bez zmian — ale sam UKŁAD (które pola są czym) mógł się zmienić w kodzie.
+  // sl_board nie trzyma stanu gracza (to robi sl_state), więc reseed jest tu bezpieczny:
+  // nie rusza pozycji, punktów ani ekwipunku nikogo — zmienia tylko co stoi na której kratce.
+  const storedLayout = Number(slMetaGet('board_layout_version') || 0);
+  if (storedLayout !== SL_BOARD_LAYOUT_VERSION) {
+    transaction(() => {
+      db.exec('DELETE FROM sl_board');
+      slSeedBoardRows();
+    });
+    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
+    console.log(`Snakes & Ladders: układ planszy zaktualizowany (wersja ${SL_BOARD_LAYOUT_VERSION}) — ${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów`);
+  }
+}
+slMigrateBoard();
+
+function slBoardMap() {
+  const map = {};
+  for (const t of db.prepare('SELECT position, kind, target, value FROM sl_board').all()) {
+    map[t.position] = t;
+  }
+  return map;
+}
+
+// Zwraca (i w razie potrzeby tworzy) rekord stanu gracza.
+function slEnsureState(playerId) {
+  let st = db.prepare('SELECT * FROM sl_state WHERE player_id = ?').get(playerId);
+  if (!st) {
+    db.prepare('INSERT INTO sl_state (player_id) VALUES (?)').run(playerId);
+    st = db.prepare('SELECT * FROM sl_state WHERE player_id = ?').get(playerId);
+  }
+  return st;
+}
+
+function slInventory(playerId) {
+  const rows = db.prepare('SELECT type, qty FROM sl_inventory WHERE player_id = ?').all(playerId);
+  const inv = {};
+  for (const t of SL_POWERUP_TYPES) inv[t] = 0;
+  for (const r of rows) if (r.type in inv) inv[r.type] = Number(r.qty);
+  return inv;
+}
+
+function slAddPowerup(playerId, type, delta) {
+  db.prepare(`
+    INSERT INTO sl_inventory (player_id, type, qty) VALUES (?, ?, ?)
+    ON CONFLICT(player_id, type) DO UPDATE SET qty = qty + ?
+  `).run(playerId, type, delta, delta);
+}
+
+function d6() {
+  return 1 + Math.floor(Math.random() * 6);
+}
+
+// Pola na planszy = abs_pos zwinięty do 0..SL_BOARD_SIZE-1
+function slTileOf(absPos) {
+  return ((absPos % SL_BOARD_SIZE) + SL_BOARD_SIZE) % SL_BOARD_SIZE;
+}
+
+// URL zdjęcia profilowego gracza — z parametrem wersji (data ostatniej zmiany), żeby
+// przeglądarki od razu widziały nowe zdjęcie po re-uploadzie, a nie stare z cache'u.
+// null, gdy gracz jeszcze nie wgrał zdjęcia (avatar_updated_at puste).
+function slAvatarUrl(playerId, avatarUpdatedAt) {
+  if (!avatarUpdatedAt) return null;
+  const v = Date.parse(avatarUpdatedAt.replace(' ', 'T') + 'Z') || Date.now();
+  return `/avatars/${playerId}.jpg?v=${v}`;
+}
+
+// ── SHIELD ──
+// Aktywna tarcza = wpis 'shield' w sl_effects ze statusem 'pending'. Zużywa się
+// w momencie, w którym ktoś rzuca na gracza Freeze albo Curse: atak nie dochodzi
+// do skutku (zapisujemy go jako 'blocked'), a tarcza znika.
+function slActiveShield(playerId) {
+  return db.prepare(
+    `SELECT * FROM sl_effects WHERE target_player_id = ? AND type = 'shield' AND status = 'pending' ORDER BY id LIMIT 1`
+  ).get(playerId) || null;
+}
+
+function slHasShield(playerId) {
+  return !!slActiveShield(playerId);
+}
+
+// Rozstrzyga efekt pola dla JUŻ WYLICZONEJ pozycji lądowania (drabina/wąż/bonus).
+// Współdzielona przez zwykły ruch (slStepMove), knockback i klątwę „Chaos" — każdy,
+// kto ląduje na nowym polu (nawet nie przez normalny rzut), odpala jego efekt tak samo.
+// `invertBoard` (klątwa „Odwrócone Zasady") sprawia, że drabiny działają jak węże i
+// odwrotnie na TEN JEDEN ruch: cel odbija się względem pola lądowania (2×landed - target),
+// więc drabina w górę o X pól staje się zjazdem w dół o X pól, i vice versa.
+function slResolveTileEffect(landedAbs, board, invertBoard = false) {
+  let abs = Math.max(0, landedAbs); // nie schodzimy poniżej startu (np. klątwa Odwrotny Ruch)
+  let tilePoints = 0;
+  let note = null;
+  const landed = slTileOf(abs);
+  const tile = board[landed];
+  if (tile) {
+    if (tile.kind === 'ladder' || tile.kind === 'snake') {
+      // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
+      // zachowując bieżące okrążenie jako bazę.
+      const base = abs - landed;
+      let target = tile.target;
+      let kind = tile.kind;
+      if (invertBoard) {
+        target = Math.min(SL_BOARD_SIZE - 1, Math.max(0, 2 * landed - tile.target));
+        kind = tile.kind === 'ladder' ? 'snake' : 'ladder';
+      }
+      abs = base + target;
+      if (abs < 0) abs = 0; // nie schodzimy poniżej startu
+      note = kind;
+    } else if (tile.kind === 'bonus') {
+      tilePoints += tile.value;
+      note = 'bonus';
+    }
+  }
+  return { abs, tilePoints, note };
+}
+
+// Wykonuje pojedynczy krok ruchu o `roll` pól, uwzględniając węże/drabiny/bonusy.
+// Zwraca { absAfter, tilePoints, note } dla tego kroku.
+function slStepMove(absBefore, roll, board, invertBoard = false) {
+  const resolved = slResolveTileEffect(absBefore + roll, board, invertBoard);
+  return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note };
+}
+
+// ── KNOCKBACK ──
+// Znajduje gracza (poza wykluczonymi) stojącego na danym polu — po numerze pola
+// (abs_pos modulo rozmiar planszy), bo to WSPÓLNA, zapętlona plansza.
+function slFindOccupant(tile, excludeIds) {
+  const rows = db.prepare(`
+    SELECT s.player_id, s.abs_pos, p.nickname
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+  `).all();
+  return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
+}
+
+// Gracz, który ląduje na zajętym polu, wypycha okupanta na START JEGO BIEŻĄCEGO
+// OKRĄŻENIA (pole 0 tego okrążenia, nie pole 0 planszy globalnie — kto jest na 2.
+// okrążeniu, wraca na start 2. okrążenia). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
+// monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
+// TO konkretne wypchnięcie — przy kaskadzie to nie zawsze roller: gdy wypchnięty gracz
+// sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej ofiary w łańcuchu.
+// Pole, na które trafia ofiara, odpala węża/drabinę/bonus normalnie (slResolveTileEffect)
+// — jeśli to przerzuci ją na KOLEJNE zajęte pole, kaskada leci dalej stamtąd. Każde
+// wypchnięcie trafia też do dziennika aktywności ofiary (i zbijającego, przy kradzieży).
+function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) {
+  const pushedIds = new Set([rollerPlayerId]);
+  const chain = [];
+  let targetTile = slTileOf(landingAbsPos);
+  let pusherId = rollerPlayerId;
+  let pusherNickname = rollerNickname;
+  for (let i = 0; i < 200; i++) { // bezpiecznik przeciw pętli nieskończonej
+    const occ = slFindOccupant(targetTile, pushedIds);
+    if (!occ) break;
+    const fromAbs = Number(occ.abs_pos);
+    const lapStart = Math.floor(fromAbs / SL_BOARD_SIZE) * SL_BOARD_SIZE;
+    const resolved = slResolveTileEffect(lapStart, board);
+    const toAbs = resolved.abs;
+    const bonusPoints = resolved.tilePoints;
+
+    const victimRow = db.prepare('SELECT balance FROM sl_state WHERE player_id = ?').get(occ.player_id);
+    const stolen = Math.min(SL_KNOCKBACK_COIN_STEAL, Math.max(0, Number(victimRow.balance)));
+
+    db.prepare(`
+      UPDATE sl_state
+      SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?
+      WHERE player_id = ?
+    `).run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), bonusPoints - stolen, bonusPoints, occ.player_id);
+
+    if (stolen > 0) {
+      db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?').run(stolen, pusherId);
+    }
+
+    const entry = {
+      player_id: occ.player_id,
+      nickname: occ.nickname,
+      from_tile: slTileOf(fromAbs),
+      to_tile: slTileOf(toAbs),
+      tile_effect: resolved.note,
+      bonus_points: bonusPoints,
+      coins_stolen: stolen,
+      stolen_by: pusherNickname
+    };
+    chain.push(entry);
+
+    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (start okrążenia)`];
+    if (resolved.note === 'ladder') bits.push('🪜 i wjechał na drabinę!');
+    if (resolved.note === 'snake') bits.push('🐍 i zjechał wężem niżej!');
+    if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
+    if (stolen > 0) bits.push(`💰 stracił ${stolen} monet na rzecz ${pusherNickname}`);
+    slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`);
+    if (stolen > 0) {
+      slLogActivity(pusherId, 'knockback', `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} monet!`);
+    }
+
+    pushedIds.add(occ.player_id);
+    pusherId = occ.player_id;
+    pusherNickname = occ.nickname;
+    if (fromAbs === toAbs) break; // brak realnej zmiany pozycji — koniec kaskady
+    targetTile = slTileOf(toAbs);
+  }
+  return chain;
+}
+
+
+
+// Buduje publiczny opis planszy (do rysowania w UI).
+function slBoardPayload() {
+  const tiles = db.prepare('SELECT position, kind, target, value FROM sl_board ORDER BY position').all();
+  return { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS, tiles };
+}
+
+// Pozycje wszystkich graczy na wspólnej planszy (widoczne dla każdego).
+// TYLKO gracze ze zdjęciem profilowym — bez zdjęcia nie widać ich na planszy i nie da
+// się ich wskazać jako celu power-upa (has_avatar = 1 w WHERE). To lustrzane odbicie
+// bramki na rzut (patrz POST /api/snakes/roll): kto nie wgrał zdjęcia, ten "nie gra".
+function slPlayersPayload(meId) {
+  const rows = db.prepare(`
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.rolls_today, s.avatar_updated_at
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+    WHERE s.has_avatar = 1
+    ORDER BY s.total_points DESC, s.abs_pos DESC
+  `).all();
+  const today = todayWaw();
+  // Jedno zapytanie na wszystkie tarcze zamiast N zapytań w pętli.
+  const shielded = new Set(db.prepare(
+    `SELECT DISTINCT target_player_id AS id FROM sl_effects WHERE type = 'shield' AND status = 'pending'`
+  ).all().map(r => r.id));
+  return rows.map(r => {
+    const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
+    return {
+      player_id: r.player_id,
+      nickname: r.nickname,
+      avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at),
+      tile: slTileOf(r.abs_pos),
+      abs_pos: Number(r.abs_pos),
+      laps: Number(r.laps),
+      total_points: Number(r.total_points),
+      moved_today: rollsUsedToday >= SL_DAILY_ROLLS,
+      rolls_used_today: rollsUsedToday,
+      rolls_remaining_today: Math.max(0, SL_DAILY_ROLLS - rollsUsedToday),
+      has_shield: shielded.has(r.player_id),
+      is_me: meId ? r.player_id === meId : false
+    };
+  });
+}
+
+// Oczekujące efekty na danym graczu (do pokazania „co Cię czeka w następnej turze").
+function slPendingEffects(playerId) {
+  return db.prepare(`
+    SELECT e.type, e.variant, p.nickname AS source_nickname
+    FROM sl_effects e LEFT JOIN players p ON p.id = e.source_player_id
+    WHERE e.target_player_id = ? AND e.status = 'pending'
+    ORDER BY e.id
+  `).all(playerId).map(e => ({
+    type: e.type,
+    variant: e.variant == null ? null : Number(e.variant),
+    source_nickname: e.source_nickname
+  }));
+}
+
+function slLeaderboard(meId) {
+  const rows = db.prepare(`
+    SELECT s.player_id, p.nickname, s.total_points, s.laps, s.abs_pos, s.balance
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+    ORDER BY s.total_points DESC, s.laps DESC, s.abs_pos DESC
+  `).all();
+  return rows.map((r, i) => ({
+    rank: i + 1,
+    player_id: r.player_id,
+    nickname: r.nickname,
+    total_points: Number(r.total_points),
+    laps: Number(r.laps),
+    tile: slTileOf(r.abs_pos),
+    is_me: meId ? r.player_id === meId : false
+  }));
+}
+
+// ══ WYDARZENIE KOOPERACYJNE ══
+// Gracze dobrowolnie dorzucają punkty ze swojego salda do WSPÓLNEJ puli. Pula jest
+// osobnym workiem — nie miesza się z saldem na power-upy i nie da się jej wypłacić.
+// Po przekroczeniu progu rusza event „bossowy" (mechanika = stub do uzupełnienia),
+// a po jego zakończeniu kontrybutorzy dostają nagrody wg wybranego podziału.
+
+// Domyślny próg dla NOWYCH cykli — admin może go podmienić na stałe (patrz
+// POST /api/snakes/admin/coop/config), bez tego trzeba by grzebać w .env i restartować.
+// Zmiana dotyczy tylko przyszłych cykli; bieżący ma już swój próg zapisany w wierszu.
+function slCoopDefaultThreshold() {
+  const override = parseInt(slMetaGet('coop_threshold_override'), 10);
+  return Number.isInteger(override) && override > 0 ? override : SL_COOP_THRESHOLD;
+}
+
+// Wstawia nowy cykl co-op — rusza NATYCHMIAST (started_at = teraz, domyślnie w schemacie),
+// z podanym progiem i limitem dni roboczych na pokonanie bossa, gdy ten padnie.
+function slCoopInsertCycle(cycle, threshold, timeLimitDays) {
+  db.prepare(`
+    INSERT INTO sl_coop (cycle, threshold, time_limit_days) VALUES (?, ?, ?)
+  `).run(cycle, threshold, timeLimitDays);
+  return db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
+}
+
+// Zwraca bieżący cykl co-op — zbiórka nie ma już terminu (patrz nagłówek sekcji), więc
+// wystarczy ostatni wiersz; jeśli baza jest zupełnie pusta, zakłada świeży cykl #1
+// z wartościami bazowymi (próg z ewentualnego override'u admina, czas z SL_COOP_BASE_TIME_DAYS).
+function slCurrentCoop() {
+  const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
+  if (coop) return coop;
+  return slCoopInsertCycle(1, slCoopDefaultThreshold(), SL_COOP_BASE_TIME_DAYS);
+}
+
+function slCoopContributors(cycle) {
+  return db.prepare(`
+    SELECT c.player_id, p.nickname, SUM(c.amount) AS amount
+    FROM sl_coop_contributions c JOIN players p ON p.id = c.player_id
+    WHERE c.cycle = ?
+    GROUP BY c.player_id
+    ORDER BY amount DESC
+  `).all(cycle).map(r => ({
+    player_id: r.player_id,
+    nickname: r.nickname,
+    amount: Number(r.amount)
+  }));
+}
+
+function slCoopPayload(meId) {
+  const coop = slCurrentCoop();
+  const contributors = slCoopContributors(coop.cycle);
+  const mine = meId ? (contributors.find(c => c.player_id === meId) || { amount: 0 }).amount : 0;
+  const total = Number(coop.total);
+  const threshold = Number(coop.threshold);
+
+  // Poprzednia edycja (jeśli już się rozstrzygnęła) — do krótkiego podsumowania "co się
+  // stało ostatnio i dlatego trudność jest taka, jaka jest" w UI zaraz po sukcesji.
+  let previousResult = null;
+  if (coop.cycle > 1) {
+    const prev = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle - 1);
+    if (prev && prev.completed_at) {
+      previousResult = {
+        cycle: Number(prev.cycle),
+        boss_name: prev.boss_name,
+        defeated: !!prev.boss_defeated_at,
+        reward_pool: Number(prev.reward_pool),
+        bonus: prev.boss_defeated_at ? SL_BOSS_DEFEAT_BONUS : 0,
+        timeout_penalty: prev.boss_defeated_at ? 0 : SL_BOSS_TIMEOUT_PENALTY
+      };
+    }
+  }
+
+  return {
+    cycle: Number(coop.cycle),
+    total,
+    threshold,
+    percent: Math.min(100, Math.round((total / Math.max(1, threshold)) * 100)),
+    status: coop.status,
+    goal_met: !!coop.triggered_at, // próg padł kiedykolwiek w tym cyklu (nawet jeśli dalej trwa walka z bossem)
+    reward_pool: Number(coop.reward_pool) || Math.round(threshold * SL_COOP_REWARD_MULTIPLIER),
+    reward_split: SL_COOP_REWARD_SPLIT,
+    my_contribution: mine,
+    contributors,
+    time_limit_days: Number(coop.time_limit_days),
+    default_threshold: slCoopDefaultThreshold(),
+    previous_result: previousResult,
+    timeout_penalty: SL_BOSS_TIMEOUT_PENALTY,
+    // Konkretne liczby na "co będzie, jak wygracie/przegracie" — żeby UI mógł pokazać
+    // realną karę/nagrodę zamiast ogólnikowego opisu (patrz slCoopNextDifficulty).
+    next_on_win: slCoopNextDifficulty(coop, true),
+    next_on_loss: slCoopNextDifficulty(coop, false),
+    boss: coop.status === 'event_active' || coop.boss_defeated_at ? {
+      name: coop.boss_name,
+      hp: Math.max(0, Number(coop.boss_hp)),
+      max_hp: Number(coop.boss_max_hp),
+      percent: Math.max(0, Math.min(100, Math.round((Number(coop.boss_hp) / Math.max(1, Number(coop.boss_max_hp))) * 100))),
+      defeated: !!coop.boss_defeated_at,
+      active: coop.status === 'event_active',
+      deadline_at: coop.boss_deadline_at ? new Date(coop.boss_deadline_at.replace(' ', 'T') + 'Z').toISOString() : null,
+      time_limit_days: Number(coop.time_limit_days),
+      attack_cost: SL_BOSS_ATTACK_COST,
+      attack_damage: SL_BOSS_ATTACK_DAMAGE,
+      dice_damage_mult: SL_BOSS_DICE_DAMAGE_MULT,
+      defeat_bonus: SL_BOSS_DEFEAT_BONUS
+    } : null
+  };
+}
+
+// ── WALKA Z BOSSEM ──
+// Wołane, gdy pula przekroczy próg pierwszy raz w danym cyklu (patrz /coop/contribute).
+// Losuje bossa, ustawia mu HP proporcjonalne do progu i liczy termin pokonania —
+// coop.time_limit_days DNI ROBOCZYCH od teraz (weekendy nie liczą się do odliczania,
+// patrz addBusinessDaysMs). `coop` musi mieć aktualne `threshold`/`time_limit_days`/`cycle`.
+function startCoopBossEvent(coop) {
+  const name = SL_BOSS_NAMES[Math.floor(Math.random() * SL_BOSS_NAMES.length)];
+  const maxHp = Math.round(Number(coop.threshold) * SL_BOSS_HP_MULTIPLIER);
+  const deadlineMs = addBusinessDaysMs(Date.now(), Number(coop.time_limit_days));
+  db.prepare(`
+    UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ?, boss_deadline_at = datetime(?, 'unixepoch')
+    WHERE cycle = ?
+  `).run(name, maxHp, maxHp, Math.floor(deadlineMs / 1000), coop.cycle);
+  return { started: true, cycle: Number(coop.cycle), boss_name: name, boss_max_hp: maxHp, deadline_ms: deadlineMs };
+}
+
+// Warunek zwycięstwa: HP bossa spadło do zera (od rzutów graczy lub ręcznych ataków —
+// patrz obsługa w POST /api/snakes/roll i /api/snakes/coop/attack).
+function resolveCoopBossEvent(coop) {
+  return { defeated: Number(coop.boss_hp) <= 0, cycle: Number(coop.cycle) };
+}
+
+// Podział nagród: 'proportional' (domyślnie) — wg udziału w puli; 'flat' — po równo.
+// Zwraca listę { player_id, nickname, amount } (bez zapisu do bazy).
+function slCoopRewardSplit(contributors, rewardPool) {
+  if (!contributors.length) return [];
+  if (SL_COOP_REWARD_SPLIT === 'flat') {
+    const each = Math.floor(rewardPool / contributors.length);
+    return contributors.map(c => ({ ...c, reward: each }));
+  }
+  const total = contributors.reduce((a, c) => a + c.amount, 0) || 1;
+  return contributors.map(c => ({ ...c, reward: Math.round(rewardPool * (c.amount / total)) }));
+}
+
+// Próg/czas KOLEJNEJ edycji na podstawie wyniku tej: wygrana = trudniej i szybciej
+// (× GROWTH / × SHRINK); przegrana (czas minął) = odrobinę łatwiej (RELIEF_FACTOR)
+// — "delikatna pomoc", żeby ekipa mogła się odbić, a nie utknąć na niemożliwym progu.
+// W obie strony trzymamy się widełek [BASE .. wynik poprzedniej edycji] — porażka
+// nigdy nie schodzi PONIŻEJ progu bazowego ani nie wydłuża czasu PONAD bazowy.
+function slCoopNextDifficulty(coop, defeated) {
+  const threshold = Number(coop.threshold);
+  const timeLimit = Number(coop.time_limit_days);
+  const base = slCoopDefaultThreshold();
+  if (defeated) {
+    // Trudniej: zaokrąglenia ZAWSZE w stronę większej trudności (próg w górę, czas w
+    // dół), żeby zaokrąglenie nigdy przypadkiem nie ułatwiło kolejnej edycji.
+    return {
+      threshold: Math.ceil(threshold * SL_COOP_THRESHOLD_GROWTH),
+      time_limit_days: Math.max(SL_COOP_MIN_TIME_DAYS, Math.floor(timeLimit * SL_COOP_TIME_SHRINK))
+    };
+  }
+  // Łatwiej: zaokrąglenia ZAWSZE w stronę większej ulgi (próg w dół, czas w górę) —
+  // inaczej przy małych wartościach czasu (dni) zaokrąglenie potrafi "utknąć" i ulga
+  // z porażki nigdy realnie nie nadejdzie.
+  return {
+    threshold: Math.max(base, Math.floor(threshold * SL_COOP_RELIEF_FACTOR)),
+    time_limit_days: Math.min(SL_COOP_BASE_TIME_DAYS, Math.ceil(timeLimit / SL_COOP_RELIEF_FACTOR))
+  };
+}
+
+// Zamyka event bossowy, wypłaca nagrody/karę i OD RAZU otwiera kolejną edycję (trudniejszą
+// po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty). Wołane
+// automatycznie, gdy HP bossa spadnie do zera (zwykły rzut lub ręczny atak), albo gdy
+// minie termin (scheduler niżej), a boss wciąż żyje. Pokonanie bossa dorzuca
+// SL_BOSS_DEFEAT_BONUS na KAŻDEGO kontrybutora ponad zwykłą pulę — to zachęta, żeby nie
+// tylko wpłacać, ale i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack).
+// Nie pokonanie na czas = boss "atakuje": zabiera SL_BOSS_TIMEOUT_PENALTY monet
+// KAŻDEMU graczowi (nie tylko kontrybutorom) — realna stawka za bierność.
+function slFinishBossEvent(coop, defeated) {
+  const contributors = slCoopContributors(coop.cycle);
+  const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
+  const bonus = defeated ? SL_BOSS_DEFEAT_BONUS : 0;
+  const payouts = slCoopRewardSplit(contributors, rewardPool).map(p => ({ ...p, reward: p.reward + bonus }));
+
+  for (const p of payouts) {
+    db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
+      .run(p.reward, p.reward, p.player_id);
+  }
+
+  let playersAttacked = 0;
+  if (!defeated) {
+    const allPlayers = db.prepare('SELECT player_id, balance FROM sl_state').all();
+    const upd = db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?');
+    for (const p of allPlayers) {
+      const taken = Math.min(SL_BOSS_TIMEOUT_PENALTY, Math.max(0, Number(p.balance)));
+      if (taken > 0) {
+        upd.run(taken, p.player_id);
+        playersAttacked++;
+      }
+    }
+  }
+
+  db.prepare(`
+    UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP, boss_hp = 0
+      ${defeated ? ", boss_defeated_at = CURRENT_TIMESTAMP" : ''}
+    WHERE cycle = ?
+  `).run(coop.cycle);
+
+  const next = slCoopNextDifficulty(coop, defeated);
+  const nextCoop = slCoopInsertCycle(coop.cycle + 1, next.threshold, next.time_limit_days);
+
+  return {
+    cycle: Number(coop.cycle), boss_name: coop.boss_name, reward_pool: rewardPool, bonus, payouts, defeated,
+    timeout_penalty: defeated ? 0 : SL_BOSS_TIMEOUT_PENALTY,
+    players_attacked: playersAttacked,
+    next_cycle: { cycle: Number(nextCoop.cycle), threshold: next.threshold, time_limit_days: next.time_limit_days }
+  };
+}
+
+// ══ DISCORD — SZYNA ZDARZEŃ ══
+// Zdarzenia gry lecą przez jedną szynę: każdy typ ma własny przełącznik, trzymany
+// w sl_meta (klucz 'discord_events'), więc da się je włączać/wyłączać z panelu admina
+// bez restartu. Webhook bierzemy z SNAKES_DISCORD_WEBHOOK_URL, a gdy go nie ma —
+// z DISCORD_WEBHOOK_URL (ten sam, co Wordle). Wysyłka jest „fire & forget":
+// błąd Discorda nigdy nie wywraca ruchu gracza.
+const SL_DISCORD_WEBHOOK_URL = process.env.SNAKES_DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL || '';
+const SNAKES_URL = (process.env.APP_URL || 'https://frog03-21535.wykr.es/').replace(/\/+$/, '') + '/snakes';
+
+// Domyślnie ON to rzeczy „warte pingu": ataki, tarcze, węże/drabiny, kamienie milowe
+// co-opu i dzienne podsumowanie. Codzienny wynik każdego rzutu i Double Move są
+// domyślnie OFF, żeby nie zasypywać kanału.
+const SL_EVENT_DEFAULTS = {
+  roll_result:        false,
+  tile_landing:       true,
+  powerup_freeze:     true,
+  powerup_curse:      true,
+  shield_block:       true,
+  double_move:        false,
+  knockback:          true,
+  coop_milestone:     true,
+  coop_completed:     true,
+  leaderboard_daily:  true
+};
+
+const SL_EVENT_LABELS = {
+  roll_result:        'Wynik dziennego rzutu',
+  tile_landing:       'Wejście na węża / drabinę',
+  powerup_freeze:     'Użycie Freeze (kto na kogo)',
+  powerup_curse:      'Użycie Curse (kto na kogo)',
+  shield_block:       'Shield zablokował atak',
+  double_move:        'Użycie Double Move',
+  knockback:          'Wypchnięcie z zajętego pola (i efekt domina)',
+  coop_milestone:     'Pula co-op przekroczyła próg',
+  coop_completed:     'Wydarzenie co-op ukończone (nagrody wypłacone, kolejna edycja rusza)',
+  leaderboard_daily:  'Dzienne podsumowanie rankingu'
+};
+
+function slEventsConfig() {
+  let stored = {};
+  try {
+    stored = JSON.parse(slMetaGet('discord_events') || '{}');
+  } catch {
+    stored = {};
+  }
+  const cfg = {};
+  for (const key of Object.keys(SL_EVENT_DEFAULTS)) {
+    cfg[key] = typeof stored[key] === 'boolean' ? stored[key] : SL_EVENT_DEFAULTS[key];
+  }
+  return cfg;
+}
+
+function slSetEventsConfig(patch) {
+  const cfg = slEventsConfig();
+  for (const [key, val] of Object.entries(patch || {})) {
+    if (key in SL_EVENT_DEFAULTS) cfg[key] = !!val;
+  }
+  slMetaSet('discord_events', JSON.stringify(cfg));
+  return cfg;
+}
+
+function slEventEnabled(type) {
+  return slEventsConfig()[type] === true;
+}
+
+async function slPostDiscord(payload) {
+  if (!SL_DISCORD_WEBHOOK_URL) return { skipped: 'brak webhooka' };
+  const r = await fetch(SL_DISCORD_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) throw new Error(`Discord ${r.status}: ${await r.text()}`);
+  return { sent: true };
+}
+
+// Główny punkt wejścia szyny. `build` to funkcja zwracająca treść (leniwie — nie
+// budujemy wiadomości, gdy zdarzenie jest wyłączone). Nigdy nie rzuca wyjątkiem.
+function slEmit(type, build) {
+  try {
+    if (!SL_DISCORD_WEBHOOK_URL) return;
+    if (!slEventEnabled(type)) return;
+    const content = build();
+    if (!content) return;
+    slPostDiscord(typeof content === 'string' ? { content } : content)
+      .catch(err => console.error(`Snakes/Discord [${type}]:`, err.message));
+  } catch (err) {
+    console.error(`Snakes/Discord [${type}] — błąd budowania wiadomości:`, err.message);
+  }
+}
+
+// ── DZIENNE PODSUMOWANIE RANKINGU ──
+// Tykamy co minutę (jak scheduler Wordle) i raz dziennie, o SNAKES_SUMMARY_HOUR,
+// wrzucamy skrót: podium, ilu graczy ruszyło się dziś, stan puli co-op.
+const SL_SUMMARY_HOUR = parseInt(process.env.SNAKES_SUMMARY_HOUR, 10) || 20;
+let slLastSummaryDate = null;
+
+function slBuildDailySummary() {
+  const today = todayWaw();
+  const top = slLeaderboard(null).slice(0, 5);
+  if (!top.length) return null;
+  const movedToday = Number(db.prepare(
+    'SELECT COUNT(*) AS c FROM sl_moves WHERE move_date = ?'
+  ).get(today).c);
+  const coop = slCoopPayload(null);
+  const medals = ['🥇', '🥈', '🥉', '4.', '5.'];
+  const lines = top.map((p, i) => `${medals[i]} **${p.nickname}** — ${p.total_points} pkt (okr. ${p.laps}, pole ${p.tile})`);
+  return {
+    content: '🐍 **Office Snakes & Ladders — podsumowanie dnia**',
+    embeds: [{
+      title: 'Ranking',
+      url: SNAKES_URL,
+      description: `${lines.join('\n')}\n\n🎲 Ruch dziś wykonało: **${movedToday}** ${movedToday === 1 ? 'osoba' : 'osób'}\n🤝 Pula co-op: **${coop.total}/${coop.threshold}** (${coop.percent}%)`,
+      color: 0xC8F135,
+      footer: { text: 'Jeden ruch dziennie — nie zapomnij rzucić kostką!' }
+    }]
+  };
+}
+
+function startSnakesDiscordScheduler() {
+  if (!SL_DISCORD_WEBHOOK_URL) {
+    console.log('Snakes/Discord: brak webhooka (SNAKES_DISCORD_WEBHOOK_URL / DISCORD_WEBHOOK_URL) — zdarzenia wyłączone');
+    return;
+  }
+  // Start po godzinie podsumowania = dzisiejsze uznajemy za wysłane (bez spamu po restarcie).
+  if (Number(warsawParts().h) >= SL_SUMMARY_HOUR) slLastSummaryDate = todayWaw();
+
+  setInterval(() => {
+    const today = todayWaw();
+    if (today === slLastSummaryDate) return;
+    if (Number(warsawParts().h) < SL_SUMMARY_HOUR) return;
+    slLastSummaryDate = today; // ustawiamy przed wysyłką — błąd sieci nie ma wracać co minutę
+    slEmit('leaderboard_daily', slBuildDailySummary);
+  }, 60_000);
+
+  console.log(`Snakes/Discord: szyna zdarzeń aktywna, podsumowanie dnia o ${String(SL_SUMMARY_HOUR).padStart(2, '0')}:00 (Europe/Warsaw)`);
+}
+startSnakesDiscordScheduler();
+
+// ── SCHEDULER TERMINU WALKI Z BOSSEM ──
+// Zbiórka ('collecting') nie ma już terminu — jedyny zegar dotyczy AKTYWNEJ walki:
+// jeśli minie boss_deadline_at, a boss wciąż żyje, próg i tak padł (należy się zwykła
+// nagroda), więc rozliczamy jak przegraną i OD RAZU startuje kolejna, łagodniejsza
+// edycja (patrz slFinishBossEvent). Jeśli boss padł wcześniej w grze, status jest już
+// 'completed' i ten kod nigdy się nie odpala — brak podwójnego rozliczenia. Działa
+// ZAWSZE (niezależnie od webhooka) — slEmit sam pomija wysyłkę, gdy webhook nie jest
+// skonfigurowany. Tick co minutę + raz od razu przy starcie (samo-naprawa po restarcie).
+function slResolveBossTimeout(cycle) {
+  return transaction(() => {
+    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
+    if (!fresh || fresh.status !== 'event_active') return null;
+    return slFinishBossEvent(fresh, Number(fresh.boss_hp) <= 0);
+  });
+}
+
+function slEmitBossTimeout(outcome) {
+  slEmit('coop_completed', () => ({
+    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '💥 **Czas minął — boss zaatakował!**',
+    embeds: [{
+      title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
+      url: SNAKES_URL,
+      description: (outcome.defeated
+        ? `Kontrybutorzy dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
+        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów. Nie zdążyliście dobić bossa na czas — zaatakował i zabrał **${outcome.timeout_penalty} monet** każdemu graczowi (dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
+      ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: próg **${outcome.next_cycle.threshold}** pkt, **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie bossa.`,
+      color: outcome.defeated ? 0x53D06B : 0xE85D4A
+    }]
+  }));
+}
+
+function startCoopBossDeadlineScheduler() {
+  const tick = () => {
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active') return;
+    if (!coop.boss_deadline_at) return;
+    const deadlineMs = Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z');
+    if (Date.now() < deadlineMs) return;
+    const outcome = slResolveBossTimeout(coop.cycle);
+    if (outcome) slEmitBossTimeout(outcome);
+  };
+  tick();
+  setInterval(tick, 60_000);
+  console.log(`Snakes/Co-op: eskalacja trudności — próg ×${SL_COOP_THRESHOLD_GROWTH} i czas ×${SL_COOP_TIME_SHRINK} po wygranej (min. ${SL_COOP_MIN_TIME_DAYS} dni robocze), ulga ×${SL_COOP_RELIEF_FACTOR} po porażce.`);
+}
+startCoopBossDeadlineScheduler();
+
+// Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
+function slBuildState(playerId) {
+  const st = slEnsureState(playerId);
+  const today = todayWaw();
+  const isWeekend = isWeekendStr(today);
+  const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
+  const rollsRemainingToday = Math.max(0, SL_DAILY_ROLLS - rollsUsedToday);
+  const officeOpen = slOfficeOpenAt();
+  return {
+    board: slBoardPayload(),
+    players: slPlayersPayload(playerId),
+    me: {
+      player_id: playerId,
+      tile: slTileOf(st.abs_pos),
+      abs_pos: Number(st.abs_pos),
+      laps: Number(st.laps),
+      balance: Number(st.balance),
+      total_points: Number(st.total_points),
+      moved_today: rollsRemainingToday === 0,
+      rolls_used_today: rollsUsedToday,
+      rolls_remaining_today: rollsRemainingToday,
+      daily_rolls: SL_DAILY_ROLLS,
+      is_weekend: isWeekend,
+      office_open: officeOpen,
+      office_start_hour: SL_PLAY_START_HOUR,
+      office_end_hour: SL_PLAY_END_HOUR,
+      office_closes_at: officeOpen ? new Date(slOfficeCloseMs()).toISOString() : null,
+      next_move_at: new Date(slNextOpenMs()).toISOString(),
+      can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend && officeOpen,
+      has_shield: slHasShield(playerId),
+      has_avatar: !!st.has_avatar,
+      avatar_url: slAvatarUrl(playerId, st.avatar_updated_at)
+    },
+    inventory: slInventory(playerId),
+    pending_effects: slPendingEffects(playerId),
+    leaderboard: slLeaderboard(playerId),
+    shop: SL_POWERUP_TYPES.map(type => ({ type, cost: SL_POWERUP_COSTS[type] })),
+    coop: slCoopPayload(playerId),
+    server_date: today
+  };
+}
+
+// ── ENDPOINTY — SNAKES & LADDERS ──
+
+// GET /api/snakes/state — pełny stan gry gracza (plansza, pozycje, sklep, ekwipunek…)
+app.get('/api/snakes/state', authPlayer, (req, res) => {
+  res.json(slBuildState(req.player.id));
+});
+
+// POST /api/snakes/avatar — wgraj/zmień zdjęcie profilowe (wymagane, żeby zagrać).
+// Ciało to SUROWE bajty JPEG (Content-Type: application/octet-stream) — nie JSON —
+// świadomie, żeby nie podnosić globalnego limitu express.json() (dzielonego z Wordle)
+// tylko dla tego jednego, cięższego endpointu. Klient sam kadruje/kompresuje zdjęcie
+// przez <canvas> przed wysyłką, więc 3 MB to zapas bezpieczeństwa, nie oczekiwany rozmiar.
+const SL_AVATAR_MAX_BYTES = 3 * 1024 * 1024;
+app.post('/api/snakes/avatar', authPlayer, express.raw({ type: '*/*', limit: SL_AVATAR_MAX_BYTES }), (req, res) => {
+  const playerId = req.player.id;
+  const buffer = Buffer.isBuffer(req.body) ? req.body : null;
+
+  // Minimalna walidacja "to naprawdę JPEG" po magicznych bajtach (0xFFD8) — klient
+  // zawsze eksportuje przez canvas.toBlob('image/jpeg', ...), więc to powinno się zgadzać;
+  // to tylko siatka bezpieczeństwa przeciw pustym/zepsutym/nie-obrazkowym wysyłkom.
+  if (!buffer || buffer.length < 100 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) {
+    return res.status(400).json({ error: 'Nieprawidłowy plik zdjęcia — spróbuj innego.' });
+  }
+
+  fs.writeFileSync(path.join(avatarsDir, `${playerId}.jpg`), buffer);
+  slEnsureState(playerId);
+  db.prepare(`UPDATE sl_state SET has_avatar = 1, avatar_updated_at = CURRENT_TIMESTAMP WHERE player_id = ?`)
+    .run(playerId);
+  slLogActivity(playerId, 'avatar', '🖼️ Wgrał/zaktualizował zdjęcie profilowe');
+
+  res.json({ success: true, state: slBuildState(playerId) });
+});
+
+// GET /api/snakes/board — publiczny widok planszy + pozycji (bez logowania)
+app.get('/api/snakes/board', (req, res) => {
+  res.json({
+    board: slBoardPayload(),
+    players: slPlayersPayload(null),
+    leaderboard: slLeaderboard(null),
+    coop: slCoopPayload(null)
+  });
+});
+
+// GET /api/snakes/activity?date=YYYY-MM-DD&limit=150 — publiczny dziennik aktywności
+// (ruchy, sklep, wpłaty do puli, knockback) do przeglądania w prawej kolumnie UI.
+// Bez filtra dnia zwraca po prostu najnowsze wpisy ze wszystkich dni.
+app.get('/api/snakes/activity', (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null;
+  const limit = Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 150));
+
+  const rows = date
+    ? db.prepare(`
+        SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.day, a.created_at
+        FROM sl_activity a JOIN players p ON p.id = a.player_id
+        WHERE a.day = ? ORDER BY a.id DESC LIMIT ?
+      `).all(date, limit)
+    : db.prepare(`
+        SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.day, a.created_at
+        FROM sl_activity a JOIN players p ON p.id = a.player_id
+        ORDER BY a.id DESC LIMIT ?
+      `).all(limit);
+
+  const dates = db.prepare('SELECT DISTINCT day FROM sl_activity ORDER BY day DESC LIMIT 60').all().map(r => r.day);
+
+  res.json({
+    entries: rows.map(r => ({
+      id: r.id,
+      player_id: r.player_id,
+      nickname: r.nickname,
+      type: r.type,
+      detail: r.detail,
+      date: r.day,
+      created_at: r.created_at
+    })),
+    dates
+  });
+});
+
+// POST /api/snakes/roll — jedyny dzienny ruch gracza (rzut kostką).
+app.post('/api/snakes/roll', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const nickname = req.player.nickname;
+  const today = todayWaw();
+  const board = slBoardMap();
+
+  // Bramka: bez zdjęcia profilowego nie da się zagrać. Sprawdzana przed transakcją,
+  // żeby nawet nie próbować rzutu — klient i tak trzyma gracza na ekranie uploadu.
+  if (!slEnsureState(playerId).has_avatar) {
+    return res.status(403).json({ error: 'Wgraj najpierw zdjęcie profilowe, żeby móc zagrać.', avatar_required: true });
+  }
+
+  // Bramka: w weekend nie gramy — dokładnie jak w Wordle.
+  if (isWeekendStr(today)) {
+    return res.status(400).json({ error: 'W weekend nie gramy — wróć w poniedziałek.', is_weekend: true });
+  }
+
+  // Bramka: gra biurowa — rzucamy tylko w godzinach pracy (czasu Warszawy).
+  if (!slOfficeOpenAt()) {
+    return res.status(400).json({
+      error: `Rzucamy tylko w godzinach ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 — to gra biurowa.`,
+      office_closed: true,
+      next_open: new Date(slNextOpenMs()).toISOString()
+    });
+  }
+
+  const result = transaction(() => {
+    const st = slEnsureState(playerId);
+    // rolls_today liczy się dla dnia zapisanego w last_move_date — inny dzień = licznik
+    // efektywnie na zero, bez potrzeby osobnego resetu o północy.
+    const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
+    if (rollsUsedToday >= SL_DAILY_ROLLS) return { locked: true };
+    const moveSeq = rollsUsedToday + 1;
+
+    // Zbierz oczekujące efekty na tym graczu (tarcza nie jest efektem na turę — pomijamy).
+    const pending = db.prepare(
+      `SELECT * FROM sl_effects WHERE target_player_id = ? AND status = 'pending' ORDER BY id`
+    ).all(playerId);
+    const freeze = pending.find(e => e.type === 'freeze');
+    const curse = pending.find(e => e.type === 'curse');
+    const doubleMove = pending.find(e => e.type === 'double_move');
+
+    const consume = id => db.prepare(
+      `UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).run(id);
+
+    // FREEZE: blokuje JEDEN ruch (nie cały dzień) — zużywa ten slot bez przesunięcia,
+    // inne sloty tego dnia (przy SL_DAILY_ROLLS > 1) zostają nietknięte.
+    if (freeze) {
+      consume(freeze.id);
+      db.prepare(`
+        INSERT INTO sl_moves (player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note)
+        VALUES (?, ?, ?, '[]', ?, ?, 0, 'frozen')
+      `).run(playerId, today, moveSeq, st.abs_pos, st.abs_pos);
+      db.prepare('UPDATE sl_state SET last_move_date = ?, rolls_today = ?, last_move_at = CURRENT_TIMESTAMP WHERE player_id = ?')
+        .run(today, moveSeq, playerId);
+      slLogActivity(playerId, 'roll', `❄️ Zamrożony — ruch ${moveSeq}/${SL_DAILY_ROLLS} dzisiaj przepadł.`);
+      return { frozen: true, source: freeze.source_player_id, rolls_used_today: moveSeq };
+    }
+
+    // DOUBLE MOVE: dwa rzuty w jednej turze.
+    const rolls = doubleMove ? [d6(), d6()] : [d6()];
+    if (doubleMove) consume(doubleMove.id);
+
+    const curseVariant = curse ? Number(curse.variant) : null;
+    // Warianty 1 (Odwrotny Ruch) i 2 (Rozdwojona Kostka) zmieniają wartość kości —
+    // muszą zadziałać PRZED odpaleniem węży/drabin/bonusów, inaczej gracz wylądowałby
+    // na złym polu. Wariant 5 (Odwrócone Zasady) odwraca role drabin/węży na ten ruch.
+    const effectiveRolls = rolls.map(r => slCurseAdjustRoll(curseVariant, r));
+    const invertBoard = curseVariant === 5;
+
+    // Sekwencyjnie wykonaj kroki (każdy rzut oddzielnie, by węże/drabiny/bonusy
+    // z każdego lądowania zadziałały poprawnie także przy podwójnym ruchu).
+    let abs = Number(st.abs_pos);
+    const from_abs = abs;
+    let tilePoints = 0;
+    const notes = [];
+    for (const roll of effectiveRolls) {
+      const step = slStepMove(abs, roll, board, invertBoard);
+      abs = step.absAfter;
+      tilePoints += step.tilePoints;
+      if (step.note) notes.push(step.note);
+    }
+
+    let curseCoinSteal = 0;
+    if (curseVariant) {
+      notes.push(`curse${curseVariant}`);
+      if (curseVariant === 6) {
+        // CHAOS: po normalnym wylądowaniu, dodatkowy losowy doskok o 1–3 pola —
+        // ponownie odpalamy efekt pola (drabina/wąż/bonus), gdyby doskok w coś trafił.
+        const landedTile = slTileOf(abs);
+        const base = abs - landedTile;
+        const jitter = (1 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
+        const jitteredTile = Math.min(SL_BOARD_SIZE - 1, Math.max(0, landedTile + jitter));
+        const resolved = slResolveTileEffect(base + jitteredTile, board);
+        abs = resolved.abs;
+        tilePoints += resolved.tilePoints;
+        if (resolved.note) notes.push(resolved.note);
+      } else if (curseVariant === 7) {
+        tilePoints = 0; // BEZ BONUSU: pole bonusowe tego ruchu nie liczy się
+      }
+    }
+
+    // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
+    // Sprawdzane na OSTATECZNYM polu lądowania tej tury (po drabinach/wężach/klątwie,
+    // po obu rzutach przy Double Move) — nie na każdym pośrednim kroku.
+    const knockback = slApplyKnockback(playerId, abs, board, nickname);
+    if (knockback.length) notes.push('knockback');
+
+    // ── PUNKTACJA ── (pipPoints liczone od SUROWYCH rzutów, nie od skorygowanych
+    // klątwą — gracz i tak wyrzucił tyle oczek, klątwa psuje tylko ruch/zdobycz)
+    const pipPoints = rolls.reduce((a, r) => a + r, 0) * SL_POINTS_PER_PIP;
+    const distance = Math.max(0, abs - from_abs);
+    const progressPoints = distance * SL_POINTS_PER_TILE;
+    const oldLaps = Math.floor(from_abs / SL_BOARD_SIZE);
+    const newLaps = Math.floor(abs / SL_BOARD_SIZE);
+    const lapPoints = Math.max(0, newLaps - oldLaps) * SL_POINTS_PER_LAP;
+    let earned = pipPoints + progressPoints + lapPoints + tilePoints;
+
+    if (curseVariant === 4) earned = Math.floor(earned / 2); // CHCIWOŚĆ: połowa zdobyczy przepada
+
+    if (curseVariant === 3) {
+      // KIESZONKOWIEC: zabiera monety z BIEŻĄCEGO salda (sprzed doliczenia `earned`)
+      // na rzecz tego, kto rzucił klątwę — symetrycznie do kradzieży przy knockbacku.
+      curseCoinSteal = Math.min(SL_CURSE_COIN_STEAL, Math.max(0, Number(st.balance)));
+      if (curseCoinSteal > 0 && curse.source_player_id) {
+        db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?')
+          .run(curseCoinSteal, curse.source_player_id);
+      }
+    }
+
+    if (curse) consume(curse.id);
+
+    db.prepare(`
+      INSERT INTO sl_moves (player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(playerId, today, moveSeq, JSON.stringify(rolls), from_abs, abs, earned, notes.join(',') || null);
+
+    db.prepare(`
+      UPDATE sl_state
+      SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?, last_move_date = ?, rolls_today = ?, last_move_at = CURRENT_TIMESTAMP
+      WHERE player_id = ?
+    `).run(abs, newLaps, earned - curseCoinSteal, earned, today, moveSeq, playerId);
+
+    slLogActivity(playerId, 'roll',
+      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`);
+    if (curseVariant) {
+      slLogActivity(playerId, 'roll',
+        `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} monet)` : ''}`);
+    }
+
+    // ── SZTURM NA BOSSA: jeśli trwa event bossowy, KAŻDY rzut zadaje mu obrażenia —
+    // normalna gra już "walczy", bez dodatkowej akcji. Liczone od SUROWYCH rzutów.
+    let bossHit = null;
+    const coopNow = slCurrentCoop();
+    if (coopNow.status === 'event_active' && Number(coopNow.boss_hp) > 0) {
+      const dmg = rolls.reduce((a, r) => a + r, 0) * SL_BOSS_DICE_DAMAGE_MULT;
+      const newHp = Math.max(0, Number(coopNow.boss_hp) - dmg);
+      db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coopNow.cycle);
+      slLogActivity(playerId, 'boss_hit',
+        `⚔️ Trafił ${coopNow.boss_name} na ${dmg} obrażeń (${rolls.join('+')} × ${SL_BOSS_DICE_DAMAGE_MULT}) — HP ${newHp}/${coopNow.boss_max_hp}`);
+      bossHit = { damage: dmg, boss_name: coopNow.boss_name, hp_left: newHp, max_hp: Number(coopNow.boss_max_hp), defeated: false };
+      if (newHp <= 0) {
+        const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coopNow.cycle);
+        bossHit.defeated = true;
+        bossHit.victory = slFinishBossEvent(fresh, true);
+      }
+    }
+
+    return {
+      frozen: false,
+      rolls,
+      from_tile: slTileOf(from_abs),
+      to_tile: slTileOf(abs),
+      distance,
+      completed_laps: Math.max(0, newLaps - oldLaps),
+      breakdown: { pip: pipPoints, progress: progressPoints, laps: lapPoints, bonus: tilePoints },
+      earned,
+      notes,
+      curse_applied: !!curse,
+      curse_variant: curseVariant,
+      curse_label: curseVariant ? SL_CURSE_LABELS[curseVariant] : null,
+      curse_coin_steal: curseCoinSteal,
+      double_move: !!doubleMove,
+      knockback,
+      boss_hit: bossHit,
+      rolls_used_today: moveSeq
+    };
+  });
+
+  if (result.locked) {
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${SL_DAILY_ROLLS} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.` });
+  }
+
+  // ── ZDARZENIA DISCORD ──
+  if (result.frozen) {
+    slEmit('roll_result', () => `❄️ **${nickname}** próbował rzucić, ale jest zamrożony — tura przepada.`);
+  } else {
+    slEmit('roll_result', () => {
+      const dice = result.rolls.join(' + ');
+      return `🎲 **${nickname}** wyrzucił **${dice}** → pole **${result.to_tile}** (+${result.earned} pkt).`;
+    });
+    if (result.notes.includes('ladder')) {
+      slEmit('tile_landing', () => `🪜 **${nickname}** wszedł na drabinę i wskoczył na pole **${result.to_tile}**!`);
+    }
+    if (result.notes.includes('snake')) {
+      slEmit('tile_landing', () => `🐍 **${nickname}** wdepnął na węża i zjechał na pole **${result.to_tile}**.`);
+    }
+    if (result.double_move) {
+      slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dwa rzuty (${result.rolls.join(' + ')}) i pole **${result.to_tile}**.`);
+    }
+    if (result.knockback && result.knockback.length) {
+      const extraFor = k => (k.tile_effect === 'ladder' ? ' 🪜 i wjechał na drabinę!'
+        : k.tile_effect === 'snake' ? ' 🐍 i zjechał wężem niżej!'
+        : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
+        : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} monet na rzecz ${k.stolen_by}` : '');
+      slEmit('knockback', () => result.knockback.map((k, i) => i === 0
+        ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.to_tile}**${extraFor(k)}.`
+        : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.to_tile}**${extraFor(k)}.`
+      ).join('\n'));
+    }
+    if (result.curse_variant) {
+      slEmit('powerup_curse', () =>
+        `💀 **${nickname}** dostał klątwę **${result.curse_label}** na tym ruchu: ${SL_CURSE_DESCRIPTIONS[result.curse_variant]}.`);
+    }
+    if (result.boss_hit) {
+      if (result.boss_hit.defeated) {
+        slEmit('coop_completed', () => ({
+          content: `🏆 **${result.boss_hit.boss_name} pokonany!**`,
+          embeds: [{
+            title: `Edycja #${result.boss_hit.victory.cycle}`,
+            url: SNAKES_URL,
+            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Kontrybutorzy dzielą **${result.boss_hit.victory.reward_pool} pkt** + premię za zabicie **${result.boss_hit.victory.bonus} pkt/os.**`,
+            color: 0x53D06B
+          }]
+        }));
+      }
+      // Pojedyncze trafienia bossa (bez finału) celowo NIE lecą na Discorda — spamowałyby
+      // kanał przy każdym rzucie podczas eventu.
+    }
+  }
+
+  res.json({ move: result, state: slBuildState(playerId) });
+});
+
+// POST /api/snakes/shop/buy { type } — kup power-up za punkty.
+app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const type = String(req.body.type || '');
+  if (!SL_POWERUP_TYPES.includes(type)) {
+    return res.status(400).json({ error: 'Nieznany power-up' });
+  }
+  const cost = SL_POWERUP_COSTS[type];
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.balance < cost) return { poor: true, balance: st.balance };
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(cost, playerId);
+    slAddPowerup(playerId, type, 1);
+    slLogActivity(playerId, 'shop_buy', `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} pkt)`);
+    return { poor: false };
+  });
+
+  if (out.poor) {
+    return res.status(400).json({ error: `Za mało punktów — koszt ${cost}, masz ${out.balance}.` });
+  }
+  res.json({ success: true, state: slBuildState(playerId) });
+});
+
+// POST /api/snakes/shop/use { type, target_player_id? } — użyj power-up z ekwipunku.
+// Freeze/Curse wymagają celu (innego gracza). Double Move i Shield działają na siebie.
+// Jeśli cel ma aktywny Shield, atak zostaje ZABLOKOWANY: tarcza znika, atak nie działa
+// (power-up atakującego i tak się zużywa — ryzyko wpisane w atak).
+app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const nickname = req.player.nickname;
+  const type = String(req.body.type || '');
+  if (!SL_POWERUP_TYPES.includes(type)) {
+    return res.status(400).json({ error: 'Nieznany power-up' });
+  }
+  const needsTarget = SL_SHIELD_BLOCKS.includes(type); // freeze / curse
+  let targetId = playerId;
+  let targetNick = nickname;
+
+  if (needsTarget) {
+    targetId = parseInt(req.body.target_player_id, 10);
+    if (!Number.isInteger(targetId)) {
+      return res.status(400).json({ error: 'Wskaż gracza, na którego użyjesz power-upa.' });
+    }
+    if (targetId === playerId) {
+      return res.status(400).json({ error: 'Freeze i Curse rzucasz na INNEGO gracza.' });
+    }
+    const target = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(targetId);
+    if (!target) return res.status(404).json({ error: 'Nie ma takiego gracza.' });
+    targetNick = target.nickname;
+    slEnsureState(targetId); // upewnij się, że cel ma stan gry
+  }
+
+  const out = transaction(() => {
+    const inv = slInventory(playerId);
+    if (inv[type] <= 0) return { none: true };
+
+    // Shield można trzymać tylko jeden naraz — drugi byłby wyrzuceniem punktów.
+    if (type === 'shield' && slHasShield(playerId)) return { already: true };
+
+    slAddPowerup(playerId, type, -1);
+
+    // TARCZA CELU: przechwytuje Freeze/Curse zanim staną się efektem na turę.
+    if (needsTarget) {
+      const shield = slActiveShield(targetId);
+      if (shield) {
+        db.prepare(`UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(shield.id);
+        db.prepare(`
+          INSERT INTO sl_effects (target_player_id, source_player_id, type, variant, status, consumed_at)
+          VALUES (?, ?, ?, ?, 'blocked', CURRENT_TIMESTAMP)
+        `).run(targetId, playerId, type, null);
+        return { none: false, blocked: true };
+      }
+    }
+
+    // Curse: losujemy wariant (patrz SL_CURSE_LABELS) już TERAZ, w momencie rzucenia —
+    // ale celowo NIE zdradzamy go celowi. Efekt (i jego opis) ujawnia się dopiero, gdy
+    // klątwa faktycznie odpali na następnym ruchu ofiary (patrz POST /api/snakes/roll).
+    const variant = type === 'curse' ? (1 + Math.floor(Math.random() * SL_CURSE_VARIANTS)) : null;
+
+    db.prepare(`
+      INSERT INTO sl_effects (target_player_id, source_player_id, type, variant)
+      VALUES (?, ?, ?, ?)
+    `).run(targetId, playerId, type, variant);
+
+    return { none: false, blocked: false, variant };
+  });
+
+  if (out.none) {
+    return res.status(400).json({ error: 'Nie masz tego power-upa w ekwipunku.' });
+  }
+  if (out.already) {
+    return res.status(400).json({ error: 'Masz już aktywną tarczę — poczekaj, aż coś zablokuje.' });
+  }
+
+  // ── DZIENNIK AKTYWNOŚCI (obie strony, gdy dotyczy) ──
+  const label = SL_POWERUP_LABELS[type];
+  if (out.blocked) {
+    slLogActivity(playerId, 'shop_use', `${label} na ${targetNick} zablokowany tarczą`);
+    slLogActivity(targetId, 'shop_use', `🛡️ Zablokował ${label} od ${nickname} tarczą`);
+  } else if (needsTarget) {
+    slLogActivity(playerId, 'shop_use', `Użył ${label} na ${targetNick}`);
+    slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${type === 'curse' ? ' — zobaczysz jaka, dopiero gdy odpali' : ''}`);
+  } else {
+    slLogActivity(playerId, 'shop_use', `Użył ${label}`);
+  }
+
+  // ── ZDARZENIA DISCORD ──
+  if (out.blocked) {
+    slEmit('shield_block', () =>
+      `🛡️ **${targetNick}** zablokował tarczą ${type === 'freeze' ? 'Freeze' : 'Curse'} od **${nickname}**! Tarcza zużyta.`);
+  } else if (type === 'freeze') {
+    slEmit('powerup_freeze', () => `❄️ **${nickname}** zamroził **${targetNick}** — następna tura celu przepada.`);
+  } else if (type === 'curse') {
+    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
+  } else if (type === 'shield') {
+    slEmit('shield_block', () => `🛡️ **${nickname}** aktywował tarczę — najbliższy Freeze/Curse się od niego odbije.`);
+  }
+
+  res.json({
+    success: true,
+    applied_to: targetId,
+    blocked: !!out.blocked,
+    curse_variant: out.variant, // wylosowany wariant (patrz SL_CURSE_LABELS) — efekt ujawnia się dopiero, gdy odpali
+    state: slBuildState(playerId)
+  });
+});
+
+// GET /api/snakes/players — lekka lista graczy do wyboru celu power-upa.
+app.get('/api/snakes/players', authPlayer, (req, res) => {
+  res.json({ players: slPlayersPayload(req.player.id) });
+});
+
+// POST /api/snakes/coop/contribute { amount } — dorzuć punkty do wspólnej puli.
+app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const nickname = req.player.nickname;
+  const amount = parseInt(req.body.amount, 10);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Podaj dodatnią liczbę punktów.' });
+  }
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.balance < amount) return { poor: true, balance: st.balance };
+
+    // Wpłaty są ZAWSZE możliwe — nawet po osiągnięciu progu, w trakcie walki z bossem
+    // czy po jej rozstrzygnięciu. To świadomy "backup mechanizm": pula nigdy nie jest
+    // zablokowana dla chętnych. Wpłaty po starcie eventu po prostu dokładają się do puli
+    // (na poczet kolejnej edycji) i NIE wyzwalają bossa drugi raz (patrz triggered_at).
+    const coop = slCurrentCoop();
+
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(amount, playerId);
+    db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
+      .run(coop.cycle, playerId, amount);
+    db.prepare('UPDATE sl_coop SET total = total + ? WHERE cycle = ?').run(amount, coop.cycle);
+    slLogActivity(playerId, 'coop_contribute', `🤝 Dorzucił ${amount} pkt do puli (edycja #${coop.cycle})`);
+
+    const updated = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
+    let triggered = false;
+    let bossName = null;
+    // Próg przekroczony PIERWSZY RAZ w tym cyklu → budzi się boss.
+    if (!updated.triggered_at && Number(updated.total) >= Number(updated.threshold)) {
+      const rewardPool = Math.round(Number(updated.threshold) * SL_COOP_REWARD_MULTIPLIER);
+      db.prepare(`
+        UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
+        WHERE cycle = ?
+      `).run(rewardPool, updated.cycle);
+      bossName = startCoopBossEvent(updated).boss_name;
+      triggered = true;
+    }
+    return { poor: false, triggered, cycle: Number(updated.cycle), total: Number(updated.total), threshold: Number(updated.threshold), boss_name: bossName };
+  });
+
+  if (out.poor) {
+    return res.status(400).json({ error: `Za mało punktów — masz ${out.balance}.` });
+  }
+
+  if (out.triggered) {
+    slEmit('coop_milestone', () => ({
+      content: '🤝 **Pula co-op osiągnęła próg!**',
+      embeds: [{
+        title: `Wydarzenie #${out.cycle} rusza!`,
+        url: SNAKES_URL,
+        description: `Wspólnie uzbieraliście **${out.total}/${out.threshold}** pkt. Ostatnią cegiełkę dorzucił **${nickname}**.\n👹 Budzi się **${out.boss_name}**! Każdy rzut kostką go rani — a za monety można dobić go ręcznym atakiem.`,
+        color: 0xF5C842
+      }]
+    }));
+  }
+
+  res.json({ success: true, triggered: !!out.triggered, state: slBuildState(playerId) });
+});
+
+// POST /api/snakes/coop/attack — ręczny atak na bossa za monety (SL_BOSS_ATTACK_COST).
+// Nie wymaga bycia kontrybutorem — to dodatkowy, opcjonalny sposób na wydawanie salda
+// w trakcie eventu, poza sklepem power-upów. Jeśli dobija bossa, od razu wypłaca nagrody
+// (patrz slFinishBossEvent) — identycznie jak wtedy, gdy dobicie przychodzi ze zwykłego rzutu.
+app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
+  const playerId = req.player.id;
+  const nickname = req.player.nickname;
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active' || Number(coop.boss_hp) <= 0) return { notActive: true };
+    if (st.balance < SL_BOSS_ATTACK_COST) return { poor: true, balance: st.balance };
+
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(SL_BOSS_ATTACK_COST, playerId);
+    const newHp = Math.max(0, Number(coop.boss_hp) - SL_BOSS_ATTACK_DAMAGE);
+    db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
+    slLogActivity(playerId, 'boss_hit',
+      `🗡️ Zaatakował ${coop.boss_name} za ${SL_BOSS_ATTACK_COST} monet — ${SL_BOSS_ATTACK_DAMAGE} obrażeń (HP ${newHp}/${coop.boss_max_hp})`);
+
+    let victory = null;
+    if (newHp <= 0) {
+      const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
+      victory = slFinishBossEvent(fresh, true);
+    }
+    return {
+      notActive: false, poor: false, boss_name: coop.boss_name,
+      damage: SL_BOSS_ATTACK_DAMAGE, hp_left: newHp, max_hp: Number(coop.boss_max_hp), victory
+    };
+  });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: 'Żaden boss aktualnie nie walczy.' });
+  }
+  if (out.poor) {
+    return res.status(400).json({ error: `Za mało monet — atak kosztuje ${SL_BOSS_ATTACK_COST}, masz ${out.balance}.` });
+  }
+
+  if (out.victory) {
+    slEmit('coop_completed', () => ({
+      content: `🏆 **${out.boss_name} pokonany!**`,
+      embeds: [{
+        title: `Edycja #${out.victory.cycle}`,
+        url: SNAKES_URL,
+        description: `Ostateczny cios zadał **${nickname}**. Kontrybutorzy dzielą **${out.victory.reward_pool} pkt** + premię za zabicie **${out.victory.bonus} pkt/os.**`,
+        color: 0x53D06B
+      }]
+    }));
+  }
+  // Uwaga: pojedyncze ataki (jak pojedyncze rzuty) NIE lecą na Discorda — tylko finał
+  // eventu (pokonanie / koniec czasu), żeby nie zasypywać kanału.
+
+  res.json({ success: true, damage: out.damage, hp_left: out.hp_left, max_hp: out.max_hp, defeated: !!out.victory, state: slBuildState(playerId) });
+});
+
+// ── ENDPOINTY ADMINA (Snakes) ──
+
+// GET /api/snakes/admin/settings?password= — konfiguracja zdarzeń + stan co-opu
+app.get('/api/snakes/admin/settings', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  res.json({
+    events: slEventsConfig(),
+    labels: SL_EVENT_LABELS,
+    defaults: SL_EVENT_DEFAULTS,
+    webhook_configured: !!SL_DISCORD_WEBHOOK_URL,
+    summary_hour: SL_SUMMARY_HOUR,
+    board: { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS },
+    powerup_costs: SL_POWERUP_COSTS,
+    coop: { ...slCoopPayload(null), reward_multiplier: SL_COOP_REWARD_MULTIPLIER }
+  });
+});
+
+// POST /api/snakes/admin/reset { password } — twardy reset CAŁEJ gry Snakes do stanu
+// zerowego: każdy gracz wraca na pole 0 z saldem/punktami 0, ekwipunkiem power-upów
+// wyczyszczonym i bez oczekujących efektów (Freeze/Curse/Shield/Double Move). Historia
+// ruchów i dziennik aktywności są kasowane, a pula co-op wraca do świeżej edycji #1
+// z bazowym progiem/czasem (patrz slCurrentCoop). Gracze i ich AWATARY
+// (pionki) NIE są ruszane — konta w Snakes zostają, tylko ich postęp w grze wraca do zera.
+// Wordle jest kompletnie nietknięte (osobne tabele). Nieodwracalne — potwierdzenie
+// (i podwójne potwierdzenie w UI) leży po stronie panelu admina.
+app.post('/api/snakes/admin/reset', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const out = transaction(() => {
+    const playersAffected = Number(db.prepare('SELECT COUNT(*) AS c FROM sl_state').get().c);
+    db.exec(`
+      UPDATE sl_state SET abs_pos = 0, laps = 0, balance = 0, total_points = 0,
+        last_move_date = NULL, rolls_today = 0, last_move_at = NULL;
+      DELETE FROM sl_moves;
+      DELETE FROM sl_inventory;
+      DELETE FROM sl_effects;
+      DELETE FROM sl_activity;
+      DELETE FROM sl_coop_contributions;
+      DELETE FROM sl_coop;
+    `);
+    // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
+    // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).
+    return { players_affected: playersAffected, coop: slCoopPayload(null) };
+  });
+
+  slEmit('coop_completed', () => '🔄 **Admin zresetował grę Snakes & Ladders** — wszyscy wracają na start z zerowym kontem.');
+
+  res.json({ success: true, ...out });
+});
+
+// GET /api/snakes/admin/players — lista graczy z ich stanem w Snakes & Ladders
+// (tylko ci, którzy mieli już z grą kontakt — sl_state powstaje leniwie przy pierwszym
+// zapytaniu o stan). Do wyboru gracza w akcjach admina niżej.
+app.get('/api/snakes/admin/players', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const today = todayWaw();
+  const rows = db.prepare(`
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date, s.rolls_today
+    FROM sl_state s JOIN players p ON p.id = s.player_id
+    ORDER BY p.nickname COLLATE NOCASE ASC
+  `).all();
+  res.json({
+    players: rows.map(r => {
+      const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
+      return {
+        player_id: r.player_id,
+        nickname: r.nickname,
+        tile: slTileOf(r.abs_pos),
+        laps: Number(r.laps),
+        balance: Number(r.balance),
+        total_points: Number(r.total_points),
+        last_move_date: r.last_move_date,
+        rolls_used_today: rollsUsedToday,
+        daily_rolls: SL_DAILY_ROLLS,
+        moved_today: rollsUsedToday >= SL_DAILY_ROLLS
+      };
+    }),
+    today
+  });
+});
+
+// DELETE /api/snakes/admin/players/:id — usuwa gracza WYŁĄCZNIE z trybu Snakes.
+// Kasuje jego stan, ekwipunek, dziennik ruchów, aktywne/przychodzące efekty i wpłaty
+// do puli co-op. Konto (players) i dane Wordle zostają nietknięte — to ten sam login,
+// więc gracz może dalej grać w Wordle, a w Snakes wystartuje od zera przy następnym
+// wejściu (sl_state tworzy się leniwie).
+app.delete('/api/snakes/admin/players/:id', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  transaction(() => {
+    db.prepare('DELETE FROM sl_moves WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_inventory WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
+    db.prepare('DELETE FROM sl_coop_contributions WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);
+  });
+
+  res.json({ success: true, deleted: player.nickname });
+});
+
+// POST /api/snakes/admin/players/:id/grant-move { password, date? } — oddaje graczowi
+// JEDEN dodatkowy ruch danego dnia (domyślnie dziś, wg czasu Warszawy) — z SL_DAILY_ROLLS
+// dostępnych ruchów cofa licznik zużycia o jeden i kasuje ostatni zapisany ruch z tego
+// dnia. NIE cofa punktów/pozycji z ruchów już wykonanych — to dodatkowa szansa, nie
+// cofnięcie. Wołane wielokrotnie odda kolejne sloty (aż do pełnego dziennego limitu).
+app.post('/api/snakes/admin/players/:id/grant-move', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
+
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  const result = transaction(() => {
+    const st = slEnsureState(playerId);
+    if (st.last_move_date !== date) return { already_full: true };
+    const used = Number(st.rolls_today);
+    if (used <= 0) return { already_full: true };
+    db.prepare('DELETE FROM sl_moves WHERE player_id = ? AND move_date = ? AND move_seq = ?')
+      .run(playerId, date, used);
+    db.prepare('UPDATE sl_state SET rolls_today = ? WHERE player_id = ?').run(used - 1, playerId);
+    return { already_full: false, rolls_used_today: used - 1 };
+  });
+
+  if (result.already_full) {
+    return res.status(400).json({ error: `${player.nickname} ma już pełny limit ruchów na ${date}.` });
+  }
+  res.json({ success: true, nickname: player.nickname, date, rolls_used_today: result.rolls_used_today, daily_rolls: SL_DAILY_ROLLS });
+});
+
+// POST /api/snakes/admin/settings { password, events: { typ: bool } } — przełącz zdarzenia
+app.post('/api/snakes/admin/settings', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const events = slSetEventsConfig(req.body.events);
+  res.json({ success: true, events });
+});
+
+// POST /api/snakes/admin/discord-test { password } — testowy strzał w webhooka
+app.post('/api/snakes/admin/discord-test', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  if (!SL_DISCORD_WEBHOOK_URL) {
+    return res.status(400).json({ error: 'Brak webhooka — ustaw SNAKES_DISCORD_WEBHOOK_URL lub DISCORD_WEBHOOK_URL w .env' });
+  }
+  try {
+    await slPostDiscord({ content: '🐍 Test webhooka Office Snakes & Ladders — działa!' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/snakes/admin/coop/complete { password, force? } — zamknij wydarzenie i wypłać
+// nagrody ręcznie. Normalnie robi to sama mechanika bossa (HP=0 przy rzucie/ataku, albo
+// timeout w schedulerze) — ten endpoint to głównie fallback na wypadek utkniętego eventu.
+// `force: true` domyka event NAWET jeśli boss żyje (bez premii za pokonanie — jak timeout).
+app.post('/api/snakes/admin/coop/complete', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const force = !!req.body.force;
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
+
+    const outcome = resolveCoopBossEvent(coop);
+    if (!outcome.defeated && !force) return { notDefeated: true };
+
+    const result = slFinishBossEvent(coop, outcome.defeated);
+    return { notActive: false, ...result };
+  });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: `Żadne wydarzenie nie trwa (status: ${out.status}).` });
+  }
+  if (out.notDefeated) {
+    return res.status(400).json({ error: 'Boss jeszcze nie pokonany (dodaj force:true, żeby zamknąć mimo to — bez premii).' });
+  }
+
+  slEmit('coop_completed', () => ({
+    content: '🏆 **Wydarzenie co-op ukończone (ręcznie przez admina)!**',
+    embeds: [{
+      title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
+      url: SNAKES_URL,
+      description: `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).${out.timeout_penalty ? ` Boss zaatakował — zabrał **${out.timeout_penalty} monet** każdemu graczowi (${out.players_attacked}).` : ''}\n\n` +
+        out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n'),
+      color: 0xC8F135
+    }]
+  }));
+
+  res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/coop/config { password, threshold?, speed_up_hours? } — kontrola
+// admina nad tym, co jest zaplanowane dla co-opu/bossa: podniesienie progu i/lub
+// przyspieszenie terminu AKTYWNEJ walki (zbiórka nie ma już terminu — nie ma czego
+// przyspieszać, dopóki boss śpi). `threshold` ustawia próg BIEŻĄCEGO cyklu (tylko gdy
+// status='collecting' — dla 'event_active'/'completed' nagroda już jest zamrożona
+// w reward_pool) ORAZ zapisuje go jako bazowy dla WSZYSTKICH przyszłych cykli (patrz
+// slCoopDefaultThreshold). `speed_up_hours` cofa termin pokonania bossa (boss_deadline_at)
+// o tyle godzin — działa tylko gdy boss właśnie walczy (status='event_active').
+app.post('/api/snakes/admin/coop/config', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const threshold = req.body.threshold != null ? parseInt(req.body.threshold, 10) : null;
+  const speedUpHours = req.body.speed_up_hours != null ? Number(req.body.speed_up_hours) : null;
+
+  if (threshold != null && (!Number.isInteger(threshold) || threshold <= 0)) {
+    return res.status(400).json({ error: 'Próg musi być dodatnią liczbą całkowitą.' });
+  }
+  if (speedUpHours != null && (!Number.isFinite(speedUpHours) || speedUpHours <= 0)) {
+    return res.status(400).json({ error: 'Liczba godzin przyspieszenia musi być dodatnia.' });
+  }
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+
+    // Walidacja PRZED jakimkolwiek zapisem — żeby błąd na jednym polu nie zostawił
+    // drugiego już zacommitowanego (transaction() commituje też przy zwykłym return).
+    if (speedUpHours != null && !(coop.status === 'event_active' && coop.boss_deadline_at)) {
+      return { notActive: true, cycle: Number(coop.cycle), status: coop.status };
+    }
+
+    let thresholdChanged = false;
+    if (threshold != null) {
+      slMetaSet('coop_threshold_override', threshold); // dotyczy przyszłych cykli
+      if (coop.status === 'collecting') {
+        db.prepare('UPDATE sl_coop SET threshold = ? WHERE cycle = ?').run(threshold, coop.cycle);
+        thresholdChanged = true;
+      }
+    }
+
+    let deadlineSped = false;
+    if (speedUpHours != null) {
+      const shiftMs = Math.round(speedUpHours * 3600 * 1000);
+      const currentDeadlineMs = Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z');
+      const newDeadlineMs = currentDeadlineMs - shiftMs;
+      db.prepare(`UPDATE sl_coop SET boss_deadline_at = datetime(?, 'unixepoch') WHERE cycle = ?`)
+        .run(Math.floor(newDeadlineMs / 1000), coop.cycle);
+      deadlineSped = true;
+    }
+
+    return { notActive: false, cycle: Number(coop.cycle), threshold_changed: thresholdChanged, deadline_sped: deadlineSped, coop: slCoopPayload(null) };
+  });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: `Nie ma czego przyspieszać — boss nie walczy teraz (status: ${out.status}).` });
+  }
+
+  res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/coop/force-trigger { password } — natychmiast dobija bieżący
+// cykl do progu i budzi bossa, bez czekania na realne wpłaty graczy. Wpłaty od
+// prawdziwych kontrybutorów (jeśli jakieś już są) nadal liczą się normalnie do podziału
+// nagród — to tylko "sztuczne" dobicie samego progu (total), do testów/pokazówki.
+app.post('/api/snakes/admin/coop/force-trigger', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+    if (coop.status !== 'collecting') return { notCollecting: true, status: coop.status };
+
+    const threshold = Number(coop.threshold);
+    if (Number(coop.total) < threshold) {
+      db.prepare('UPDATE sl_coop SET total = ? WHERE cycle = ?').run(threshold, coop.cycle);
+    }
+    const rewardPool = Math.round(threshold * SL_COOP_REWARD_MULTIPLIER);
+    db.prepare(`
+      UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
+      WHERE cycle = ?
+    `).run(rewardPool, coop.cycle);
+    const bossInfo = startCoopBossEvent(coop);
+
+    return { notCollecting: false, cycle: Number(coop.cycle), boss_name: bossInfo.boss_name, coop: slCoopPayload(null) };
+  });
+
+  if (out.notCollecting) {
+    return res.status(400).json({ error: `Nie można wymusić startu — cykl jest już w statusie "${out.status}".` });
+  }
+
+  slEmit('coop_milestone', () => ({
+    content: '🤝 **Pula co-op osiągnęła próg (wymuszone przez admina)!**',
+    embeds: [{
+      title: `Wydarzenie #${out.cycle} rusza!`,
+      url: SNAKES_URL,
+      description: `👹 Budzi się **${out.boss_name}**!`,
+      color: 0xF5C842
+    }]
+  }));
+
+  res.json({ success: true, ...out });
+});
+
+// Strona gry
+app.get('/snakes', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'snakes.html'));
+});
+
+// Panel admina trybu Snakes (przełączniki zdarzeń Discorda, co-op)
+app.get('/snakes/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'snakes-admin.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
   // Znacznik wersji w logach — po deployu widać w `pm2 logs`, czy wstał nowy kod.
   console.log(`Bonus za szybkość: pierwsze ${SPEED_BONUS_PLACES} osób dnia (+${SPEED_BONUS_PLACES}…+1 pkt)`);
+  console.log(`Snakes: ${SL_DAILY_ROLLS} ruchy dziennie, do wykorzystania ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 (pon–pt, Europe/Warsaw), bez odstępu między ruchami`);
   startDiscordScheduler();
 });

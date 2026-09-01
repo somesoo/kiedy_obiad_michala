@@ -1,0 +1,646 @@
+/* ══ SNAKES & LADDERS — style dodatkowe (reużywa tokenów z style.css) ══ */
+
+/* ── UKŁAD: wąski lewy panel + plansza na całą resztę ekranu ──
+   Snakes ma własną siatkę (nie korzysta z .main-grid Wordle), bo plansza ma się
+   rozciągać, a nie mieścić w stałej kolumnie. Prawa kolumna zniknęła — ranking
+   przeniósł się do lewego panelu, żeby oddać planszy maksimum miejsca. */
+.main-grid-snakes {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 240px;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 16px;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+/* ── LEWY PANEL (kompakt) ── */
+.col-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.mini-card {
+  background: var(--surface);
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+.mini-head {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: var(--text-primary);
+  margin-bottom: 7px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.mini-head .text-muted { font-size: 9px; font-weight: 400; }
+
+/* ── PRZYCISK ZASAD W GÓRNYM PASKU ──
+   #btn-how dziedziczy .btn-how-mobile ze wspólnego style.css (domyślnie ukryty,
+   widoczny tylko < 1000px — Wordle ma tam swój odpowiednik). W Snakes to JEDYNE
+   wejście do zasad (panel boczny go nie ma), więc nadpisujemy selektorem po ID
+   (nie istnieje w DOM Wordle, więc nic mu nie grozi), żeby był widoczny zawsze. */
+#btn-how { display: inline-block; }
+
+/* ── KOLUMNA PLANSZY ── */
+.col-game {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.game-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.game-bar-title h2 { font-size: 17px; letter-spacing: 1.5px; line-height: 1.1; }
+.game-bar-sub { font-size: 11px; color: var(--text-muted); }
+.game-bar .roll-result { flex: 1; text-align: left; }
+
+/* ── STATY (lewa kolumna) ── */
+.sl-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.sl-stat {
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 7px;
+  padding: 5px 4px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sl-stat-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+.sl-stat-lbl {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.sl-shield-status {
+  margin-top: 7px;
+  font-size: 10px;
+  color: #7fd3ff;
+  text-align: center;
+}
+.sl-shield-status:empty { margin-top: 0; }
+
+/* ── PANEL RZUTU ── */
+.btn-roll {
+  font-size: 14px;
+  padding: 9px 20px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.btn-roll:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.roll-result { min-width: 0; }
+.roll-line { font-size: 13px; display: inline; margin-right: 10px; }
+.roll-earned { font-size: 14px; font-weight: 600; display: inline; margin-right: 10px; }
+.roll-notes { font-size: 13px; display: inline; }
+.roll-frozen { color: #7fd3ff; font-weight: 600; font-size: 14px; }
+
+/* ── PLANSZA 7×7 ──
+   Plansza rozciąga się na CAŁĄ dostępną przestrzeń kolumny (szerokość i wysokość),
+   więc kafelki są prostokątami, a nie kwadratami — to świadoma decyzja, żeby
+   wykorzystać cały ekran. Warstwa łączników (SVG) mapuje się procentowo, więc
+   działa tak samo przy dowolnych proporcjach kafelka. */
+#board-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sl-board-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.sl-board {
+  /* Safari: height:100% na gridzie zagnieżdżonym w łańcuchu flex o niejawnej
+     wysokości (flex:1 bez ustalonej wysokości) potrafi się nie rozwiązać —
+     plansza znika. position:absolute + inset:0 nie zależy od tej rezolucji. */
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 7), 1fr);
+  /* grid-template-rows ustawiany z JS (renderBoard) — tory na przemian standard/szczelina,
+     żeby kafelki na zakręcie (sl-cell-turn) mogły wydłużyć się o szczelinę nad sobą przez
+     grid-row: span 2, a pozostałe kafelki w tym samym wierszu zostały standardowej wysokości.
+     Stąd tylko column-gap tutaj — odstęp między wierszami to same tory szczelin. */
+  column-gap: 5px;
+}
+/* Kafelek na zakręcie: zajmuje swój wiersz + szczelinę nad nim (patrz slGridRowStyle),
+   więc jest wyraźnie wyższy niż sąsiedzi w tym samym wierszu — to właśnie ma pokazywać,
+   że tu ścieżka skręca do wiersza powyżej. */
+.sl-cell-turn {
+  z-index: 1;
+}
+.sl-cell {
+  position: relative;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+.sl-cell-empty {
+  background: transparent;
+  border: none;
+}
+.sl-idx {
+  position: absolute;
+  top: 5px;
+  left: 8px;
+  z-index: 2;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(9px, 1.15vh, 13px);
+  color: var(--text-muted);
+  line-height: 1;
+}
+.sl-mark {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 2;
+  font-size: clamp(13px, 1.9vh, 20px);
+  line-height: 1;
+}
+.sl-ladder { background: rgba(200, 241, 53, 0.14); border-color: var(--accent-dim); }
+.sl-snake  { background: rgba(232, 93, 74, 0.16); border-color: var(--danger); }
+.sl-bonus  { background: rgba(245, 200, 66, 0.16); border-color: var(--gold); }
+
+/* ── LINIE ŁĄCZĄCE WĘŻE I DRABINY ──
+   Warstwa SVG leży NAD tłem pól, ale POD pionkami (z-index 1 vs 2), więc linie
+   nie zasłaniają graczy. Drabina = prosta, przerywana, zielona. Wąż = wygięta,
+   ciągła, czerwona, z „głową" na polu docelowym. */
+.sl-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+.sl-links path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.sl-link-ladder path {
+  stroke: var(--accent);
+  stroke-width: 3px;
+  stroke-dasharray: 7 5;   /* szczeble drabiny */
+  opacity: 0.8;
+}
+.sl-link-snake path {
+  stroke: var(--danger);
+  stroke-width: 3px;
+  opacity: 0.8;
+}
+/* Kropki końców — warstwa HTML nad liniami, pod pionkami. Zawsze idealnie okrągłe,
+   niezależnie od proporcji kafelka (SVG jest rozciągane, więc <circle> by się zdeformował). */
+.sl-link-dots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.sl-dot {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.sl-dot-start { width: 9px; height: 9px; background: transparent; border: 2px solid currentColor; }
+.sl-dot-end   { width: 13px; height: 13px; background: currentColor; }
+.sl-dot-ladder { color: var(--accent); }
+.sl-dot-snake  { color: var(--danger); }
+
+/* ── PIONKI ── */
+.sl-pawns {
+  position: relative;
+  z-index: 2;
+  margin: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.sl-pawn-wrap {
+  position: relative;
+  display: inline-flex;
+  width: clamp(20px, 3.4vh, 34px);
+  height: clamp(20px, 3.4vh, 34px);
+  flex: 0 0 auto;
+}
+.sl-pawn-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--muted);
+  border: 2px solid var(--muted);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.sl-pawn-me .sl-pawn-avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.sl-pawn-shielded .sl-pawn-avatar {
+  border-color: #7fd3ff;
+  box-shadow: 0 0 0 2px #7fd3ff;
+}
+.sl-pawn-shield {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sl-legend {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  margin: 8px auto 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sl-legend-me { color: var(--accent); }
+.sl-legend-ladder { color: var(--accent); }
+.sl-legend-snake { color: var(--danger); }
+
+/* ── SKLEP ── */
+.shop-item {
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+}
+.shop-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.shop-name { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12px; }
+.shop-cost { color: var(--gold); font-size: 11px; white-space: nowrap; }
+.shop-desc { display: none; }  /* opis żyje w „Pełne zasady" — panel ma być wąski */
+.shop-actions { display: flex; gap: 5px; margin-top: 5px; }
+.shop-actions button { flex: 1; padding: 4px 0; font-size: 11px; }
+.shop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sl-hint {
+  margin-top: 6px;
+  color: var(--gold);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+/* ── WYDARZENIE KOOPERACYJNE ── */
+.coop-amt { color: var(--gold); }
+
+/* ── WYBÓR CELU ── */
+.target-inner { max-width: 420px; }
+.target-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.target-row:hover {
+  border-color: var(--accent);
+  background: rgba(200, 241, 53, 0.06);
+}
+.target-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--muted);
+  flex: 0 0 auto;
+}
+.target-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.target-nick { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 14px; }
+
+/* ── RESPONSYWNOŚĆ ── */
+@media (max-width: 1000px) {
+  .main-grid-snakes {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px 12px;
+  }
+  .col-side { order: 2; }
+  .col-game { order: 1; }
+  .col-activity { order: 3; }
+  .activity-card { max-height: 50vh; overflow-y: auto; }
+  .sl-board-wrap { min-height: 60vh; }
+  .game-bar { flex-wrap: wrap; gap: 10px; }
+  .sl-idx { font-size: 10px; }
+  .sl-mark { font-size: 14px; }
+  .sl-pawn { font-size: 12px; padding: 2px 5px; }
+}
+
+/* ── DOPASOWANIE DO EKRANU ──
+   Strona gry zajmuje dokładnie jeden ekran: plansza rozciąga się na całą wolną
+   przestrzeń, a lewy panel przewija się WEWNĄTRZ siebie, nigdy nie rozpychając strony.
+   Klasa `snakes-page` trzyma to wyłącznie tutaj — Wordle zostaje bez zmian. */
+@media (min-width: 1001px) {
+  body.snakes-page {
+    height: 100vh;
+    overflow: hidden;
+  }
+  body.snakes-page .col-side,
+  body.snakes-page .col-activity {
+    max-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted) transparent;
+  }
+  body.snakes-page .col-side::-webkit-scrollbar,
+  body.snakes-page .col-activity::-webkit-scrollbar { width: 5px; }
+  body.snakes-page .col-side::-webkit-scrollbar-thumb,
+  body.snakes-page .col-activity::-webkit-scrollbar-thumb {
+    background: var(--muted);
+    border-radius: 3px;
+  }
+}
+
+/* ── HISTORIA AKTYWNOŚCI (prawa kolumna) ── */
+.col-activity { min-width: 0; }
+.activity-card { display: flex; flex-direction: column; min-height: 0; }
+.activity-date-select {
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 10px;
+  padding: 2px 4px;
+  max-width: 90px;
+}
+.activity-day {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  margin: 8px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--muted);
+}
+.activity-day:first-child { margin-top: 0; }
+.activity-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.activity-time { color: var(--text-muted); font-size: 9px; flex: 0 0 auto; }
+.activity-icon { flex: 0 0 auto; }
+.activity-body { min-width: 0; word-break: break-word; }
+.activity-body strong { font-family: 'Space Grotesk', sans-serif; }
+
+/* ── RANKING W WĄSKIM PANELU ──
+   Nadpisujemy współdzielone .lb-* ze style.css tylko wewnątrz lewego panelu,
+   żeby zmieścić ranking w 200 px. Wordle korzysta z tych samych klas i zostaje nietknięty. */
+.col-side .lb-row {
+  padding: 4px 5px;
+  gap: 6px;
+}
+.col-side .lb-rank { font-size: 11px; min-width: 16px; }
+.col-side .lb-nick { font-size: 11px; }
+.col-side .lb-points { font-size: 11px; }
+.col-side .lb-unit { font-size: 9px; }
+.col-side .lb-stats { font-size: 9px; gap: 7px; }
+
+/* ── PASEK WSPÓLNEJ PULI POD PLANSZĄ ──
+   Świadomie SPŁASZCZONY do jednego-dwóch wąskich rzędów (nie karty z sekcjami) —
+   to pasek stanu pod planszą, nie osobny panel, więc ma zostawiać planszy jak
+   najwięcej miejsca w pionie. Wszystko (ikona, pasek postępu/HP, staty, timer,
+   akcja) leży w jednym rzędzie; zasady/kara to jedna cienka linijka pod spodem. */
+.coop-card {
+  flex: 0 0 auto;
+  margin: 6px 0 0;
+  background: var(--surface);
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+.coop-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.coop-emoji { font-size: 15px; line-height: 1; flex: 0 0 auto; }
+.coop-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.coop-bar-flex { flex: 1 1 auto; min-width: 40px; }
+.coop-stat { font-size: 10px; color: var(--text-muted); flex: 0 0 auto; white-space: nowrap; }
+.boss-timer {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.coop-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.coop-actions input {
+  width: 64px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 4px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+.coop-actions button { padding: 4px 10px; font-size: 11px; }
+.coop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-boss-attack { background: var(--danger); border-color: var(--danger); }
+.coop-row-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 3px;
+  font-size: 9px;
+  line-height: 1.3;
+}
+.coop-kara { color: var(--gold); }
+.coop-prev { color: var(--text-muted); }
+.coop-bar {
+  height: 8px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 20px;
+  overflow: hidden;
+}
+.coop-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 0.5s ease;
+}
+.boss-hp-fill { background: linear-gradient(90deg, var(--gold), var(--danger)); }
+.coop-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.coop-chip {
+  font-size: 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+.coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
+.coop-chip .coop-amt { margin-left: 3px; }
+
+@media (max-width: 700px) {
+  .coop-row-main { flex-wrap: wrap; }
+  .coop-bar-flex { flex-basis: 100%; order: 5; }
+}
+
+/* ── KNOCKBACK — pulsujące podświetlenie wypchniętych pionków ── */
+.sl-pawn-pushed {
+  animation: sl-push-pulse 0.4s ease-in-out 4;
+}
+@keyframes sl-push-pulse {
+  0%, 100% { transform: scale(1); filter: none; }
+  50% { transform: scale(1.35); filter: drop-shadow(0 0 6px var(--danger)); }
+}
+
+/* ── OVERLAY: WGRYWANIE ZDJĘCIA PROFILOWEGO ── */
+.avatar-preview-wrap {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  overflow: hidden;
+  margin: 14px auto;
+  background: var(--surface-alt);
+  border: 2px dashed var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.avatar-preview-placeholder { font-size: 36px; opacity: 0.5; }
+.avatar-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+}
+.avatar-preview.has-img { display: block; }
+.avatar-preview.has-img ~ .avatar-preview-placeholder { display: none; }
+#avatar-file {
+  display: block;
+  width: 100%;
+  margin: 4px 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── MOJE ZDJĘCIE — miniatura + zmiana ── */
+.my-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.my-avatar-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--accent);
+  flex: 0 0 auto;
+  background: var(--surface-alt);
+}
+.my-avatar-change {
+  flex: 1;
+  font-size: 10px;
+  padding: 5px 6px;
+}
+
+/* ── ZAMKNIĘCIE OVERLAYA ZDJĘCIA (tylko gdy otwarty dobrowolnie, do zmiany) ──
+   Scoped do #avatar-overlay, żeby nie ruszać .login-card ze style.css (współdzielone
+   z Wordle) — position:relative tylko tutaj, żeby przycisk kotwiczył się do karty,
+   a nie do całego pełnoekranowego .overlay (który ma position:fixed). */
+#avatar-overlay .login-card { position: relative; }
+.avatar-overlay-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+.avatar-overlay-close:hover { color: var(--text-primary); }
+
+/* ── WIĘKSZY PODGLĄD ZDJĘCIA NA HOVER ── */
+.avatar-hover-preview {
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  width: 180px;
+  height: 180px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 3px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65);
+  background: var(--surface-alt);
+}
+.avatar-hover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}

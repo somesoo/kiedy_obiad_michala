@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Snakes &amp; Ladders</title>
+  <link rel="icon" type="image/png" href="/snake.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="snakes.css" />
+</head>
+<body class="snakes-page">
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <span class="logo-text">OFFICE SNAKES</span>
+        <span class="logo-sub">węże i drabiny · nieskończona pętla</span>
+      </div>
+      <div class="header-user" id="header-user">
+        <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">Zasady</button>
+        <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
+        <span class="user-nick" id="user-nick-display"></span>
+        <span class="user-balance" id="user-balance-display"></span>
+      </div>
+    </div>
+    <div class="countdown-bar-wrap">
+      <div class="countdown-bar" id="countdown-bar"></div>
+      <div class="countdown-text" id="countdown-text">ładowanie...</div>
+    </div>
+    <div class="season-ribbon" id="season-ribbon">🐍 Jedna wspólna plansza · trzy ruchy dziennie w godzinach 8:00–16:00 (pon–pt) · graj bez końca i zbieraj punkty</div>
+  </header>
+
+  <!-- REJESTRACJA / LOGOWANIE -->
+  <div class="overlay" id="login-overlay">
+    <div class="login-card">
+      <h2>Dołącz do gry</h2>
+      <p class="login-sub">Podaj swój nick — to samo konto co w Office Wordle. Codziennie (od poniedziałku do piątku) trzy rzuty kostką na wspólnej planszy węży i drabin, do wykorzystania w godzinach 8:00–16:00, kiedy chcesz.</p>
+      <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
+      <button class="btn-primary" id="btn-login">Wchodzę w to</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- ZDJĘCIE PROFILOWE — WYMAGANE DO GRY (i do zmiany istniejącego) -->
+  <div class="overlay" id="avatar-overlay" style="display:none">
+    <div class="login-card">
+      <button class="avatar-overlay-close" id="avatar-overlay-close" style="display:none" title="Zamknij">✕</button>
+      <h2 id="avatar-overlay-title">Dodaj zdjęcie</h2>
+      <p class="login-sub" id="avatar-overlay-sub">Żeby zagrać, potrzebujesz zdjęcia — Twojego albo dowolnego innego. Będzie widoczne jako okrągły awatar na wspólnej planszy; najedź na niego myszką, żeby zobaczyć większy podgląd i nick.</p>
+      <div class="avatar-preview-wrap">
+        <img class="avatar-preview" id="avatar-preview" alt="" />
+        <span class="avatar-preview-placeholder" id="avatar-preview-placeholder">📷</span>
+      </div>
+      <input type="file" id="avatar-file" accept="image/*" />
+      <button class="btn-primary" id="btn-avatar-upload" disabled>Wgraj zdjęcie</button>
+      <div class="login-error" id="avatar-error"></div>
+    </div>
+  </div>
+
+  <!-- JAK TO DZIAŁA -->
+  <div class="how-it-works" id="how-it-works" style="display:none">
+    <div class="how-inner">
+      <button class="how-close" id="how-close">✕</button>
+      <h3>Jak grać w Office Snakes &amp; Ladders?</h3>
+      <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty.</p>
+      <ol>
+        <li><strong>Zdjęcie profilowe — wymagane.</strong> Zanim zagrasz, wgraj zdjęcie (swoje albo dowolne inne) — to Twój pionek na planszy, okrągły awatar widoczny dla wszystkich. Najedź na czyjeś zdjęcie myszką, żeby zobaczyć nick. Bez zdjęcia nie da się rzucić kostką.</li>
+        <li><strong>Trzy ruchy dziennie, w godzinach 8:00–16:00.</strong> To gra biurowa: rzucać można wyłącznie od poniedziałku do piątku <strong>między 8:00 a 16:00</strong> (czasu Warszawy). W tym oknie masz <strong>trzy rzuty kostką</strong> i <strong>sam decydujesz, kiedy je zużyjesz</strong> — trzy pod rząd rano albo po jednym przez cały dzień, bez żadnego odstępu między nimi. Po 16:00 przycisk jest zamknięty, nawet jeśli zostały Ci ruchy — niewykorzystane rzuty przepadają wraz z końcem dnia. W sobotę i niedzielę gra stoi — jak w Wordle, w weekend nie rzucamy.</li>
+        <li><strong>Drabiny i węże.</strong> Wejdziesz na drabinę 🪜 — wskakujesz wyżej. Wdepniesz na węża 🐍 — zjeżdżasz w dół. Pola bonusowe ⭐ dają dodatkowe punkty bez ruchu. Na planszy <strong>każdy wąż i każda drabina ma narysowaną linię</strong> od pola startowego do docelowego: drabiny to proste, zielone linie w górę, węże to czerwone, wijące się krzywe w dół — od razu widać, dokąd prowadzą.</li>
+        <li><strong>Wypychanie.</strong> Wylądujesz na polu zajętym przez kogoś innego — wypychasz go na <strong>początek jego bieżącego okrążenia</strong> i zabierasz mu 50 monet (tyle, ile ma — jeśli ma mniej, zabierasz resztę). Wypchnięty gracz normalnie odpala węże, drabiny i bonusy na polu, na które wylądował — czasem to i tak dobry deal.</li>
+        <li><strong>Punkty.</strong> Zdobywasz je za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus). Punkty się kumulują i budują <strong>leaderboard</strong>.</li>
+        <li><strong>Power-upy (za punkty, nie losowo).</strong> W sklepie kupujesz:
+          <ul>
+            <li>❄️ <strong>Freeze</strong> — zatrzymuje wybranego gracza w jego następnej turze.</li>
+            <li>💀 <strong>Curse</strong> — klątwa z 7 losowych wariantów, wybrana już w momencie rzucenia, ale ujawnia się celowi dopiero, gdy odpali na jego następnym ruchu:
+              <ul>
+                <li>↩️ <strong>Odwrotny Ruch</strong> — kość cofa zamiast pchać do przodu.</li>
+                <li>➗ <strong>Rozdwojona Kostka</strong> — rzut liczy się w połowie, w dół.</li>
+                <li>💰 <strong>Kieszonkowiec</strong> — traci 50 monet na rzecz rzucającego klątwę.</li>
+                <li>📉 <strong>Chciwość</strong> — połowa punktów z tego ruchu przepada.</li>
+                <li>🔀 <strong>Odwrócone Zasady</strong> — na ten ruch drabiny i węże zamieniają się rolami.</li>
+                <li>🌀 <strong>Chaos</strong> — po wylądowaniu losowy doskok o 1–3 pola.</li>
+                <li>🚫 <strong>Bez Bonusu</strong> — pole bonusowe na ten ruch nie działa.</li>
+              </ul>
+            </li>
+            <li>⏩ <strong>Double Move</strong> — Twój następny ruch to dwa rzuty naraz.</li>
+            <li>🛡️ <strong>Shield</strong> — obrona jednorazowa: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika. Gracze z tarczą mają 🛡️ przy pionku, więc widać, kogo nie opłaca się atakować.</li>
+          </ul>
+          Przy Freeze i Curse wybierasz <strong>cel</strong> — innego gracza. Jeśli cel ma tarczę, atak przepada.</li>
+        <li><strong>Wspólna pula 🤝 i walka z bossem.</strong> Możesz dobrowolnie dorzucić swoje punkty do <strong>wspólnej puli</strong> (osobny worek — nie miesza się z saldem na power-upy). Gdy pula przekroczy próg, budzi się losowy <strong>biurowy boss</strong> z paskiem HP i limitem czasu na pokonanie (liczą się tylko dni robocze — weekend nie płynie). Każdy Twój rzut kostką zadaje mu obrażenia (bez dodatkowej akcji — zwykłe granie już pomaga!), a dodatkowo można go dobijać <strong>ręcznym atakiem za monety</strong>. <strong>Pokonacie go na czas</strong> — kontrybutorzy dzielą pulę + premię, a kolejna edycja od razu rusza z wyższym progiem i krótszym czasem (trudniej, bo lepiej wam idzie). <strong>Nie zdążycie</strong> — boss atakuje i zabiera po monety KAŻDEMU graczowi (nie tylko kontrybutorom), zwykła nagroda i tak trafia do kontrybutorów, a kolejna edycja robi się odrobinę łatwiejsza, żeby dać się odbić. W obu przypadkach kolejny boss pojawia się natychmiast. Wpłaty do puli są zawsze możliwe, nawet w trakcie walki (dokładają się na poczet kolejnej edycji).</li>
+        <li><strong>Rywalizacja bez końca.</strong> Nie ma zwycięskiego pola — liczy się, kto uzbiera najwięcej punktów i zrobi najwięcej okrążeń.</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- MAIN — wąski lewy panel + plansza na całą resztę ekranu -->
+  <main class="main-grid-snakes" id="main-content" style="display:none">
+
+    <!-- LEWY PANEL (jedyny) — staty, sklep, ranking; wszystko w kompakcie -->
+    <aside class="col-side">
+
+      <div class="mini-card">
+        <div class="mini-head">TWOJE STATY</div>
+        <div class="my-avatar-row">
+          <img class="my-avatar-thumb" id="my-avatar-thumb" alt="" />
+          <button class="btn-ghost my-avatar-change" id="btn-change-avatar">🔄 Zmień zdjęcie</button>
+        </div>
+        <div class="sl-stats">
+          <div class="sl-stat"><span class="sl-stat-num accent" id="stat-points">–</span><span class="sl-stat-lbl">⭐ pkt</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-balance">–</span><span class="sl-stat-lbl">💰 saldo</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-tile">–</span><span class="sl-stat-lbl">📍 pole</span></div>
+          <div class="sl-stat"><span class="sl-stat-num" id="stat-laps">–</span><span class="sl-stat-lbl">🔁 okr.</span></div>
+        </div>
+        <div class="sl-shield-status" id="shield-status"></div>
+      </div>
+
+      <div class="mini-card">
+        <div class="mini-head">🛒 POWER-UPY</div>
+        <div id="shop-list"></div>
+        <div class="sl-hint text-muted small" id="effects-hint"></div>
+      </div>
+
+      <div class="mini-card">
+        <div class="mini-head">🏆 RANKING <span class="text-muted" id="players-count"></span></div>
+        <div id="leaderboard-list"></div>
+      </div>
+    </aside>
+
+    <!-- PLANSZA — zajmuje całą pozostałą przestrzeń -->
+    <section class="col-game">
+
+      <div class="game-bar">
+        <div class="game-bar-title">
+          <h2>WSPÓLNA PLANSZA</h2>
+          <span class="game-bar-sub">7×7 · wszystkie pionki na jednej pętli</span>
+        </div>
+        <button class="btn-primary btn-roll" id="btn-roll">🎲 Rzuć kostką</button>
+        <div class="roll-result" id="roll-result"></div>
+      </div>
+
+      <div id="board-area"></div>
+
+      <!-- WYDARZENIE KOOPERACYJNE — pod planszą, widoczne dla wszystkich -->
+      <div class="coop-card" id="coop-panel"></div>
+    </section>
+
+    <!-- PRAWA KOLUMNA — HISTORIA AKTYWNOŚCI (ruchy + sklep + pula, kto/co/którego dnia) -->
+    <aside class="col-activity">
+      <div class="mini-card activity-card">
+        <div class="mini-head">
+          📜 HISTORIA
+          <select class="activity-date-select" id="activity-date"></select>
+        </div>
+        <div id="activity-list"></div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <span class="bank-info">🐍 Nieskończona pętla · trzy ruchy dziennie, 8:00–16:00 (pon–pt) · punkty się kumulują</span>
+    <span class="footer-copy text-muted">made with ❤️ i poranną kawą</span>
+  </footer>
+
+  <!-- TARGET PICKER MODAL -->
+  <div class="how-it-works" id="target-modal" style="display:none">
+    <div class="how-inner target-inner">
+      <button class="how-close" id="target-close">✕</button>
+      <h3 id="target-title">Wybierz cel</h3>
+      <p class="how-intro" id="target-sub"></p>
+      <div id="target-list" class="target-list"></div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast" style="display:none"><span id="toast-text"></span></div>
+
+  <!-- CONFETTI -->
+  <div class="confetti-container" id="confetti-container"></div>
+
+  <!-- WIĘKSZY PODGLĄD ZDJĘCIA PO NAJECHANIU (pionki na planszy + wybór celu) -->
+  <div class="avatar-hover-preview" id="avatar-hover-preview" style="display:none">
+    <img id="avatar-hover-img" alt="" />
+  </div>
+
+  <script src="snakes.js"></script>
+</body>
+</html>
