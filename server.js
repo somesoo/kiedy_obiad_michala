@@ -1299,7 +1299,9 @@ const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportio
 
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 // Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
-const SL_KNOCKBACK_COIN_STEAL = 50;
+const SL_KNOCKBACK_COIN_STEAL = 20;
+// O ile pól cofa się wypchnięty gracz (nie na start okrążenia/planszy — tylko lokalnie w tył).
+const SL_KNOCKBACK_TILES_BACK = 10;
 
 // Ile ruchów (rzutów) dziennie ma każdy gracz. Freeze blokuje JEDEN z nich (nie cały
 // dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
@@ -1806,9 +1808,9 @@ function slFindOccupant(tile, excludeIds) {
   return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
 }
 
-// Gracz, który ląduje na zajętym polu, wypycha okupanta na START JEGO BIEŻĄCEGO
-// OKRĄŻENIA (pole 0 tego okrążenia, nie pole 0 planszy globalnie — kto jest na 2.
-// okrążeniu, wraca na start 2. okrążenia). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
+// Gracz, który ląduje na zajętym polu, wypycha okupanta o SL_KNOCKBACK_TILES_BACK pól
+// do tyłu (nie na start okrążenia ani planszy — jeśli to zeszłoby poniżej pola 0,
+// ofiara staje na polu 0). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
 // monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
 // TO konkretne wypchnięcie — przy kaskadzie to nie zawsze roller: gdy wypchnięty gracz
 // sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej ofiary w łańcuchu.
@@ -1825,8 +1827,8 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     const occ = slFindOccupant(targetTile, pushedIds);
     if (!occ) break;
     const fromAbs = Number(occ.abs_pos);
-    const lapStart = Math.floor(fromAbs / SL_BOARD_SIZE) * SL_BOARD_SIZE;
-    const resolved = slResolveTileEffect(lapStart, board);
+    const knockedAbs = Math.max(0, fromAbs - SL_KNOCKBACK_TILES_BACK);
+    const resolved = slResolveTileEffect(knockedAbs, board);
     const toAbs = resolved.abs;
     const bonusPoints = resolved.tilePoints;
 
@@ -1855,7 +1857,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     };
     chain.push(entry);
 
-    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (start okrążenia)`];
+    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (-${SL_KNOCKBACK_TILES_BACK} pól)`];
     if (resolved.note === 'ladder') bits.push('🪜 i wjechał na drabinę!');
     if (resolved.note === 'snake') bits.push('🐍 i zjechał wężem niżej!');
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
