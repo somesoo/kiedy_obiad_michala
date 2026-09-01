@@ -828,7 +828,7 @@ function renderCoop(g) {
   const prevTxt = c.previous_result
     ? `<span class="coop-prev">${c.previous_result.defeated
         ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany +${c.previous_result.bonus}`
-        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, -${c.previous_result.timeout_penalty} monet każdemu`}</span>`
+        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} monet (kontrybutorom mniej)`}</span>`
     : '';
 
   el.innerHTML = `
@@ -841,7 +841,7 @@ function renderCoop(g) {
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>🤝 Wpłacajcie do puli — gdy padnie próg, budzi się boss. Zaatakuje i zabierze ${c.timeout_penalty} monet każdemu, jeśli go nie pokonacie na czas — pokonacie? nagroda i od razu kolejny, trudniejszy.</span>
+      <span>🤝 Wpłacajcie do puli — gdy padnie próg, budzi się boss. Zaatakuje i zabierze do ${c.timeout_penalty} monet każdemu (kontrybutorom pomniejszone o wkład — Ty stracisz ${c.my_timeout_penalty}), jeśli go nie pokonacie na czas — pokonacie? nagroda i od razu kolejny, trudniejszy.</span>
       <span class="coop-kara">${karaTxt}</span>
       ${prevTxt}
     </div>
