@@ -46,6 +46,10 @@ const avatarsDir = path.join(__dirname, 'public', 'avatars');
 if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
 
 const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
+// Snakes & Ladders trzyma swoje dane (sl_*) we własnym pliku, dołączonym pod schemat
+// „snakes" — fizycznie osobno od Wordle, ale w jednej transakcji/połączeniu, więc
+// JOIN-y z tabelą players nadal działają bez zmian w resztcie zapytań.
+db.exec(`ATTACH DATABASE '${path.join(dbDir, 'snakes.db').replace(/'/g, "''")}' AS snakes`);
 
 // ── MIGRACJA ──
 // Poprzedni rozdział to biurowa bukmacherka mundialowa. Office Wordle to nowy tryb —
@@ -1402,11 +1406,46 @@ const SL_BOSS_DEFEAT_BONUS = parseInt(process.env.SNAKES_BOSS_DEFEAT_BONUS, 10) 
 // łagodniejszy próg na następną rundę. Nigdy nie schodzi poniżej salda gracza (0 min).
 const SL_BOSS_TIMEOUT_PENALTY = parseInt(process.env.SNAKES_BOSS_TIMEOUT_PENALTY, 10) || 50;
 
+// ── MIGRACJA: Snakes trzymał dotąd tabele sl_* w tym samym pliku co Wordle
+// (michal.db). Od teraz mają własny plik (snakes.db, dołączony wyżej jako "snakes").
+// Jeśli w michal.db wykryjemy stare tabele sl_*, przenosimy je 1:1 (razem z kolumnami
+// dołożonymi wcześniej przez ensureColumn) do snakes.db i kasujemy stare — inaczej
+// zostałyby dwie tabele o tej samej nazwie, a "main" jest sprawdzane przed dołączoną
+// bazą, więc zapytania bez prefiksu po cichu trafiałyby w martwą kopię w michal.db.
+// REFERENCES players(id) w starym DDL usuwamy przy przenoszeniu — SQLite nie
+// pozwala na klucze obce między różnymi plikami bazy, a i tak nie były egzekwowane
+// (brak PRAGMA foreign_keys = ON), więc to czysta kosmetyka schematu.
+(function migrateSnakesToOwnDbFile() {
+  const oldTables = db.prepare(
+    `SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name LIKE 'sl_%'`
+  ).all();
+  if (oldTables.length === 0) return;
+  let moved = 0;
+  transaction(() => {
+    for (const { name, sql } of oldTables) {
+      const alreadyMoved = db.prepare(
+        `SELECT COUNT(*) AS c FROM snakes.sqlite_master WHERE type = 'table' AND name = ?`
+      ).get(name).c > 0;
+      if (alreadyMoved) continue;
+      const newSql = sql
+        .replace(/^CREATE TABLE\s+/i, 'CREATE TABLE snakes.')
+        .replace(/\s*REFERENCES\s+players\s*\([^)]*\)/gi, '');
+      db.exec(newSql);
+      db.exec(`INSERT INTO snakes.${name} SELECT * FROM main.${name}`);
+      db.exec(`DROP TABLE main.${name}`);
+      moved++;
+    }
+  });
+  if (moved > 0) {
+    console.log(`Snakes & Ladders: przeniesiono ${moved} tabel(e) z michal.db do własnego pliku snakes.db`);
+  }
+})();
+
 // ── SCHEMAT (addytywny, CREATE IF NOT EXISTS — nie rusza tabel Wordle) ──
 db.exec(`
   -- Stan gracza w Wężach i Drabinach
-  CREATE TABLE IF NOT EXISTS sl_state (
-    player_id         INTEGER PRIMARY KEY REFERENCES players(id),
+  CREATE TABLE IF NOT EXISTS snakes.sl_state (
+    player_id         INTEGER PRIMARY KEY,
     abs_pos           INTEGER DEFAULT 0,   -- łączny przebyty dystans (pól od startu)
     laps              INTEGER DEFAULT 0,   -- ukończone okrążenia
     balance           INTEGER DEFAULT 0,   -- punkty do wydania w sklepie
@@ -1419,7 +1458,7 @@ db.exec(`
   );
 
   -- Konfiguracja wspólnej planszy: typ pola i (dla węża/drabiny) cel skoku.
-  CREATE TABLE IF NOT EXISTS sl_board (
+  CREATE TABLE IF NOT EXISTS snakes.sl_board (
     position INTEGER PRIMARY KEY,       -- 0..SL_BOARD_SIZE-1
     kind     TEXT NOT NULL,             -- 'ladder' | 'snake' | 'bonus'
     target   INTEGER,                   -- pole docelowe (ladder/snake), NULL dla bonus
@@ -1429,9 +1468,9 @@ db.exec(`
   -- Dziennik ruchów — blokada „SL_DAILY_ROLLS ruchów dziennie" przez
   -- UNIQUE(player_id, move_date, move_seq): move_seq numeruje kolejne ruchy tego
   -- samego dnia (1, 2, ...), więc każdy z dziennych ruchów dostaje własny wiersz.
-  CREATE TABLE IF NOT EXISTS sl_moves (
+  CREATE TABLE IF NOT EXISTS snakes.sl_moves (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id  INTEGER REFERENCES players(id),
+    player_id  INTEGER,
     move_date  TEXT NOT NULL,           -- YYYY-MM-DD (Europe/Warsaw)
     move_seq   INTEGER NOT NULL DEFAULT 1, -- który to ruch danego dnia (1, 2, ...)
     rolls      TEXT DEFAULT '[]',       -- JSON: rzucone wartości (1 lub 2 przy Double Move)
@@ -1444,8 +1483,8 @@ db.exec(`
   );
 
   -- Ekwipunek power-upów (ile sztuk danego typu ma gracz).
-  CREATE TABLE IF NOT EXISTS sl_inventory (
-    player_id INTEGER REFERENCES players(id),
+  CREATE TABLE IF NOT EXISTS snakes.sl_inventory (
+    player_id INTEGER,
     type      TEXT NOT NULL,            -- 'freeze' | 'curse' | 'double_move' | 'shield'
     qty       INTEGER DEFAULT 0,
     PRIMARY KEY (player_id, type)
@@ -1453,10 +1492,10 @@ db.exec(`
 
   -- Aktywne efekty power-upów oczekujące na „następną turę" celu.
   -- Shield leży tu jako 'pending' aż do momentu, w którym zablokuje cudzy atak.
-  CREATE TABLE IF NOT EXISTS sl_effects (
+  CREATE TABLE IF NOT EXISTS snakes.sl_effects (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    target_player_id INTEGER REFERENCES players(id),
-    source_player_id INTEGER REFERENCES players(id),
+    target_player_id INTEGER,
+    source_player_id INTEGER,
     type             TEXT NOT NULL,     -- 'freeze' | 'curse' | 'double_move' | 'shield'
     variant          INTEGER,           -- dla 'curse': 1..3 (który wariant); inaczej NULL
     status           TEXT DEFAULT 'pending',  -- 'pending' | 'consumed' | 'blocked'
@@ -1465,13 +1504,13 @@ db.exec(`
   );
 
   -- Klucz-wartość na ustawienia trybu (rozmiar planszy do migracji, przełączniki Discorda…)
-  CREATE TABLE IF NOT EXISTS sl_meta (
+  CREATE TABLE IF NOT EXISTS snakes.sl_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
   );
 
   -- Wydarzenie kooperacyjne: jedna aktywna „edycja" (cykl) zbiórki naraz.
-  CREATE TABLE IF NOT EXISTS sl_coop (
+  CREATE TABLE IF NOT EXISTS snakes.sl_coop (
     cycle            INTEGER PRIMARY KEY,
     threshold        INTEGER NOT NULL,
     total            INTEGER DEFAULT 0,
@@ -1489,19 +1528,19 @@ db.exec(`
   );
 
   -- Wkłady graczy do puli (per cykl) — na ich podstawie liczymy nagrody.
-  CREATE TABLE IF NOT EXISTS sl_coop_contributions (
+  CREATE TABLE IF NOT EXISTS snakes.sl_coop_contributions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     cycle      INTEGER NOT NULL,
-    player_id  INTEGER REFERENCES players(id),
+    player_id  INTEGER,
     amount     INTEGER NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Dziennik aktywności (ruchy + sklep + wpłaty do puli + knockback) — widoczny dla
   -- wszystkich, do przeglądania "kto co zrobił którego dnia" w prawej kolumnie UI.
-  CREATE TABLE IF NOT EXISTS sl_activity (
+  CREATE TABLE IF NOT EXISTS snakes.sl_activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id  INTEGER REFERENCES players(id),
+    player_id  INTEGER,
     type       TEXT NOT NULL,   -- 'roll' | 'shop_buy' | 'shop_use' | 'coop_contribute' | 'knockback' | 'boss_hit'
     detail     TEXT NOT NULL,
     day        TEXT NOT NULL,   -- YYYY-MM-DD wg Europe/Warsaw (do grupowania/filtrowania)
@@ -1534,13 +1573,13 @@ ensureColumn('sl_coop', 'boss_deadline_at', 'DATETIME');
 // błąd unikalności, więc trzeba przebudować tabelę (SQLite nie zmienia constraintów
 // przez ALTER). Bezpieczne: to tylko dziennik/log, nie trzyma stanu gry (to sl_state).
 (function migrateSlMovesUniqueConstraint() {
-  const ddl = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='sl_moves'`).get();
+  const ddl = db.prepare(`SELECT sql FROM snakes.sqlite_master WHERE type='table' AND name='sl_moves'`).get();
   if (!ddl || !ddl.sql.includes('UNIQUE(player_id, move_date)') || ddl.sql.includes('move_seq')) return;
   transaction(() => {
     db.exec(`
-      CREATE TABLE sl_moves_new (
+      CREATE TABLE snakes.sl_moves_new (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id  INTEGER REFERENCES players(id),
+        player_id  INTEGER,
         move_date  TEXT NOT NULL,
         move_seq   INTEGER NOT NULL DEFAULT 1,
         rolls      TEXT DEFAULT '[]',
