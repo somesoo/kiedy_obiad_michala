@@ -160,6 +160,7 @@ function renderGame() {
           <div class="season-over-emoji">🏆</div>
           <h3>Gra zakończona!</h3>
           <p class="text-muted">Dziękujemy za udział — wpisywanie haseł jest już zamknięte na stałe. Oto ranking końcowy:</p>
+          <button class="btn-primary" id="btn-play-snakes" style="margin:16px auto 0;display:block">🐍 Zagraj w węże</button>
           <div class="sidebar-card leaderboard-card leaderboard-card-center" style="text-align:left;width:100%;max-width:480px;margin:16px auto 0">
             <div class="sidebar-card-header">
               <h3>🏆 RANKING KOŃCOWY</h3>
@@ -320,6 +321,8 @@ document.getElementById('game-area').addEventListener('click', e => {
   }
   const share = e.target.closest('#btn-share');
   if (share) shareResult();
+  const playSnakes = e.target.closest('#btn-play-snakes');
+  if (playSnakes) window.location.href = '/snakes';
 });
 
 function pushLetter(ch) {
