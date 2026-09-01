@@ -1391,9 +1391,10 @@ const SL_COOP_RELIEF_FACTOR = Number(process.env.SNAKES_COOP_RELIEF_FACTOR || 0.
 // kostką (nie tylko kontrybutora) w trakcie eventu zadaje mu darmowe obrażenia — więc
 // zwykłe granie już "walczy". Dodatkowo każdy może dobić bossa ręcznym atakiem za
 // monety — realny sposób na wydawanie salda poza sklepem, nie tylko nagroda na końcu.
-// Pokonanie bossa PRZED rozliczeniem okna dorzuca każdemu kontrybutorowi premię ponad
-// zwykłą pulę nagród; jeśli czas minie, a boss przeżyje, zwykła nagroda i tak się należy
-// (próg padł), tylko premii za "zabicie" już nie ma — to jest ta dodatkowa zachęta.
+// Pokonanie bossa PRZED rozliczeniem okna wypłaca kontrybutorom pulę nagród + premię za
+// "zabicie" ponad nią; jeśli czas minie, a boss przeżyje, NIE MA żadnej nagrody — wpłacona
+// kasa przepada — a boss jeszcze "atakuje" (patrz slFinishBossEvent) — realna stawka za
+// niedobicie na czas, nie tylko brak bonusu.
 const SL_BOSS_NAMES = [
   'Ksero-Golem', 'Duch Deadline\'u', 'Hydra Niekończących Się Maili',
   'Excel Behemot', 'Automat do Kawy Zła', 'Syndrom Poniedziałku', 'Rozdzielacz Wi-Fi Zagłady'
@@ -2148,21 +2149,26 @@ function slCoopNextDifficulty(coop, defeated) {
 // Zamyka event bossowy, wypłaca nagrody/karę i OD RAZU otwiera kolejną edycję (trudniejszą
 // po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty). Wołane
 // automatycznie, gdy HP bossa spadnie do zera (zwykły rzut lub ręczny atak), albo gdy
-// minie termin (scheduler niżej), a boss wciąż żyje. Pokonanie bossa dorzuca
-// SL_BOSS_DEFEAT_BONUS na KAŻDEGO kontrybutora ponad zwykłą pulę — to zachęta, żeby nie
-// tylko wpłacać, ale i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack).
-// Nie pokonanie na czas = boss "atakuje": zabiera do SL_BOSS_TIMEOUT_PENALTY monet
+// minie termin (scheduler niżej), a boss wciąż żyje. Pokonanie bossa wypłaca kontrybutorom
+// pulę nagród (próg × SL_COOP_REWARD_MULTIPLIER, podział wg SL_COOP_REWARD_SPLIT) +
+// SL_BOSS_DEFEAT_BONUS na KAŻDEGO kontrybutora ponad pulę — to zachęta, żeby nie tylko
+// wpłacać, ale i faktycznie dobijać bossa (ręczne ataki, patrz /coop/attack).
+// Nie pokonanie na czas = PRZEGRANA: nagrody NIE MA (wpłacona kasa przepada — próg padł,
+// ale okazji nie wykorzystano), a boss "atakuje" i zabiera do SL_BOSS_TIMEOUT_PENALTY monet
 // KAŻDEMU graczowi (nie tylko kontrybutorom) — realna stawka za bierność. Kontrybutorzy
 // mają jednak karę pomniejszoną o to, ile wpłacili w TYM cyklu (wpłacił 30 → traci 20;
-// wpłacił tyle, ile pełna kara, lub więcej → nic nie traci) — kto już brał udział
-// w zbiórce, nie płaci pełnej ceny za porażkę, mimo że nagroda z puli i tak mu się należy.
+// wpłacił tyle, ile pełna kara, lub więcej → nic nie traci) — jedyna ulga za udział
+// w zbiórce, gdy się nie uda.
 function slFinishBossEvent(coop, defeated) {
   const contributors = slCoopContributors(coop.cycle);
   const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
   const bonus = defeated ? SL_BOSS_DEFEAT_BONUS : 0;
-  const payouts = slCoopRewardSplit(contributors, rewardPool).map(p => ({ ...p, reward: p.reward + bonus }));
+  const payouts = defeated
+    ? slCoopRewardSplit(contributors, rewardPool).map(p => ({ ...p, reward: p.reward + bonus }))
+    : contributors.map(c => ({ ...c, reward: 0 }));
 
   for (const p of payouts) {
+    if (!p.reward) continue;
     db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
       .run(p.reward, p.reward, p.player_id);
   }
@@ -2363,7 +2369,7 @@ function slEmitBossTimeout(outcome) {
       url: SNAKES_URL,
       description: (outcome.defeated
         ? `Kontrybutorzy dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
-        : `Próg został osiągnięty, więc pula **${outcome.reward_pool} pkt** i tak trafia do kontrybutorów. Nie zdążyliście dobić bossa na czas — zaatakował i zabrał do **${outcome.timeout_penalty} monet** każdemu graczowi (kontrybutorom pomniejszone o wpłacony wkład; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
+        : `Nie zdążyliście dobić bossa na czas — nagrody nie ma, wpłacona kasa przepada. Boss zaatakował i zabrał do **${outcome.timeout_penalty} monet** każdemu graczowi (kontrybutorom pomniejszone o wpłacony wkład; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
       ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: próg **${outcome.next_cycle.threshold}** pkt, **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie bossa.`,
       color: outcome.defeated ? 0x53D06B : 0xE85D4A
     }]
@@ -3177,7 +3183,7 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
     return res.status(400).json({ error: `Żadne wydarzenie nie trwa (status: ${out.status}).` });
   }
   if (out.notDefeated) {
-    return res.status(400).json({ error: 'Boss jeszcze nie pokonany (dodaj force:true, żeby zamknąć mimo to — bez premii).' });
+    return res.status(400).json({ error: 'Boss jeszcze nie pokonany (dodaj force:true, żeby zamknąć mimo to — bez nagrody, jak przy przegranej).' });
   }
 
   slEmit('coop_completed', () => ({
@@ -3185,8 +3191,11 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
     embeds: [{
       title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
       url: SNAKES_URL,
-      description: `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).${out.timeout_penalty ? ` Boss zaatakował — zabrał do **${out.timeout_penalty} monet** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).` : ''}\n\n` +
-        out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n'),
+      description: (out.defeated
+        ? `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
+          out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n')
+        : `Nagrody nie ma, wpłacona kasa przepada. Boss zaatakował — zabrał do **${out.timeout_penalty} monet** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).`
+      ),
       color: 0xC8F135
     }]
   }));

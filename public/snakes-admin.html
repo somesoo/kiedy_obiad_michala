@@ -348,7 +348,10 @@
       const force = document.getElementById('coop-force-checkbox').checked;
       try {
         const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass, force });
-        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt.${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} monet każdemu, kontrybutorom pomniejszone o wkład (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle}: próg ${res.next_cycle.threshold}, ${res.next_cycle.time_limit_days} dni na pokonanie.`);
+        const rewardTxt = res.defeated
+          ? `wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt.`
+          : `nagrody nie ma, kasa przepadła.`;
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} monet każdemu, kontrybutorom pomniejszone o wkład (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle}: próg ${res.next_cycle.threshold}, ${res.next_cycle.time_limit_days} dni na pokonanie.`);
         await loadSettings();
       } catch (e) {
         showToast(e.message);
