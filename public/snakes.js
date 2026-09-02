@@ -12,7 +12,7 @@ let state = {
 const POWERUP_META = {
   freeze:      { icon: '❄️', name: 'Freeze',      desc: 'Zatrzymuje wybranego gracza w jego następnej turze.', targeted: true },
   curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 7 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież monet i inne). Cel dowie się, jaka, dopiero gdy odpali.', targeted: true },
-  double_move: { icon: '⏩', name: 'Double Move',  desc: 'Twój następny ruch to dwa rzuty naraz.', targeted: false },
+  double_move: { icon: '⏩', name: 'Double Move',  desc: 'Dokłada Ci jeden ruch ponad dzienny limit — do wykonania od razu po użyciu.', targeted: false },
   shield:      { icon: '🛡️', name: 'Shield',       desc: 'Obrona: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika.', targeted: false },
 };
 
@@ -700,7 +700,6 @@ function showRollResult(m) {
   if (m.notes.includes('ladder')) noteTxt.push('🪜 drabina w górę!');
   if (m.notes.includes('snake')) noteTxt.push('🐍 wąż w dół!');
   if (m.notes.includes('bonus')) noteTxt.push('⭐ pole bonusowe!');
-  if (m.double_move) noteTxt.push('⏩ podwójny ruch!');
   if (m.curse_variant) {
     noteTxt.push(`💀 Klątwa: ${esc(m.curse_label)}!${m.curse_coin_steal ? ` (-${m.curse_coin_steal} 💰)` : ''}`);
   }
@@ -790,6 +789,10 @@ async function doUse(type, targetId) {
     const meta = POWERUP_META[type];
     if (res.blocked) {
       showToast(`🛡️ Cel miał tarczę — atak zablokowany! Power-up przepadł.`);
+    } else if (res.extra_roll) {
+      // Double Move działa od ręki — stan już przyszedł z dodatkowym slotem, więc
+      // przycisk „Rzuć" jest w tym momencie odblokowany.
+      showToast(`⏩ Dodatkowy ruch gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`);
     } else if (type === 'curse') {
       showToast(`💀 Klątwa (wariant ${res.curse_variant}) rzucona!`);
     } else {
