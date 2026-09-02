@@ -76,31 +76,24 @@
         <div id="boss-info"></div>
 
         <div class="adm-note" style="margin-top:12px">
-          <strong>Podnieś próg</strong> — działa od razu na bieżący cykl (jeśli wciąż zbiera)
-          i zapisuje się jako domyślny dla wszystkich kolejnych edycji.
+          <strong>Ustaw godzinę końcową walki</strong> — dokładny termin (data + godzina),
+          do którego trzeba pokonać AKTUALNEGO bossa. Działa zawsze, można zmieniać
+          dowolną liczbę razy — jeśli ustawisz termin, który już minął, walka rozlicza się
+          natychmiast (tak jakby czas właśnie upłynął).
+        </div>
+        <div class="adm-actions">
+          <input type="datetime-local" id="coop-deadline-input" style="width:200px" />
+          <button class="btn-ghost" id="btn-coop-deadline">Ustaw termin</button>
+        </div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Podnieś suwak trudności</strong> — nie działa na bieżącego bossa (jego HP
+          i pula nagród są już przyznane), tylko zapisuje się jako baza dla WSZYSTKICH
+          kolejnych edycji (skaluje HP i pulę nagród następnego bossa).
         </div>
         <div class="adm-actions">
           <input type="number" id="coop-threshold-input" min="1" step="1" placeholder="nowy próg" style="width:110px" />
           <button class="btn-ghost" id="btn-coop-threshold">Zapisz próg</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Przyspiesz termin walki</strong> — cofa termin pokonania AKTYWNEGO bossa
-          o tyle godzin (działa tylko, gdy boss właśnie walczy — zbiórka nie ma już terminu).
-          Nie rusza puli ani progu.
-        </div>
-        <div class="adm-actions">
-          <input type="number" id="coop-speedup-input" min="0.1" step="0.5" placeholder="ile godzin" style="width:110px" />
-          <button class="btn-ghost" id="btn-coop-speedup">Przyspiesz</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Wymuś start bossa</strong> — natychmiast dobija próg i budzi bossa, bez
-          czekania na realne wpłaty (tylko gdy cykl wciąż zbiera). Realne wpłaty nadal
-          liczą się normalnie do podziału nagród.
-        </div>
-        <div class="adm-actions">
-          <button class="btn-ghost" id="btn-coop-force-trigger">👹 Wymuś start bossa teraz</button>
         </div>
 
         <div class="adm-note" style="margin-top:12px">
@@ -124,7 +117,7 @@
           ruch i pozwala rzucić jeszcze raz OD RAZU (o ile trwają godziny gry, 8:00–16:00).
           Nie cofa punktów z poprzednich rzutów, to dodatkowa szansa, nie cofnięcie. Kliknij ponownie, żeby oddać kolejny slot.
           „Usuń” kasuje gracza WYŁĄCZNIE
-          z trybu Snakes (stan, ekwipunek, historia, wpłaty do puli) — konto i wyniki
+          z trybu Snakes (stan, ekwipunek, historia, zadane bossowi obrażenia) — konto i wyniki
           w Wordle zostają nietknięte; gracz wystartuje w Snakes od zera przy powrocie.
         </div>
         <div id="players-list"></div>
@@ -292,10 +285,10 @@
     function renderInfo() {
       const c = cfg.coop;
       document.getElementById('coop-info').innerHTML =
-        `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong> · pula: ${c.total}/${c.threshold} (${c.percent}%)<br>` +
+        `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong><br>` +
         `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}<br>` +
         `Start edycji: ${fmtDate(c.started_at)} · limit na pokonanie bossa: <strong>${c.time_limit_days} dni robocze</strong><br>` +
-        `Bazowy próg (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
+        `Suwak trudności (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
         (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? `pokonany, +${c.previous_result.bonus} pkt premii/os.` : 'nie zdążono, bez premii'}` : '');
 
       const bossEl = document.getElementById('boss-info');
@@ -304,16 +297,21 @@
         bossEl.innerHTML = `
           <div class="adm-note" style="margin-top:10px">
             👹 <strong>${esc(b.name)}</strong> — HP ${b.hp}/${b.max_hp} (${b.percent}%)
-            ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : b.active ? ' · <strong>WALKA TRWA</strong>' : ''}
-            ${b.active && b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
+            ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : ' · <strong>WALKA TRWA</strong>'}
+            ${b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
             Obrażenia od kości: oczka × ${b.dice_damage_mult} · ręczny atak: ${b.attack_cost} monet za ${b.attack_damage} obr. · premia za zabicie: +${b.defeat_bonus} pkt/os.
           </div>`;
+        const deadlineInput = document.getElementById('coop-deadline-input');
+        if (b.deadline_at && document.activeElement !== deadlineInput) {
+          const d = new Date(b.deadline_at);
+          const pad = n => String(n).padStart(2, '0');
+          deadlineInput.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
       } else {
-        bossEl.innerHTML = `<div class="adm-note" style="margin-top:10px">Boss śpi — pula wciąż się zbiera, nikt jeszcze nie obudził bossa w tej edycji.</div>`;
+        bossEl.innerHTML = `<div class="adm-note" style="margin-top:10px">Boss nie walczy — brak aktywnej edycji.</div>`;
       }
 
       document.getElementById('coop-threshold-input').value = c.threshold;
-      document.getElementById('btn-coop-force-trigger').disabled = c.status !== 'collecting';
       document.getElementById('btn-coop-complete').disabled = c.status !== 'event_active';
 
       document.getElementById('cfg-info').innerHTML =
@@ -351,7 +349,7 @@
         const rewardTxt = res.defeated
           ? `wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt.`
           : `nagrody nie ma, kasa przepadła.`;
-        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} monet każdemu, kontrybutorom pomniejszone o wkład (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle}: próg ${res.next_cycle.threshold}, ${res.next_cycle.time_limit_days} dni na pokonanie.`);
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} monet każdemu, walczącym pomniejszone o zadane obrażenia (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle} rusza od razu: ${res.next_cycle.time_limit_days} dni na pokonanie kolejnego bossa.`);
         await loadSettings();
       } catch (e) {
         showToast(e.message);
@@ -368,37 +366,26 @@
         const res = await api('POST', '/api/snakes/admin/coop/config', { password: pass, threshold });
         cfg.coop = res.coop;
         renderInfo();
-        showToast(res.threshold_changed
-          ? `✅ Próg bieżącego cyklu i domyślny ustawiony na ${threshold}`
-          : `✅ Domyślny próg dla przyszłych cykli ustawiony na ${threshold} (bieżący cykl już nie zbiera, więc jego progu nie ruszono)`);
+        showToast(`✅ Suwak trudności dla przyszłych edycji ustawiony na ${threshold} (bieżącego bossa to nie rusza).`);
       } catch (e) {
         showToast(e.message);
       }
     });
 
-    document.getElementById('btn-coop-speedup').addEventListener('click', async () => {
-      const hours = Number(document.getElementById('coop-speedup-input').value);
-      if (!Number.isFinite(hours) || hours <= 0) {
-        showToast('Podaj dodatnią liczbę godzin.');
+    document.getElementById('btn-coop-deadline').addEventListener('click', async () => {
+      const raw = document.getElementById('coop-deadline-input').value;
+      const deadlineMs = raw ? new Date(raw).getTime() : NaN;
+      if (!Number.isFinite(deadlineMs)) {
+        showToast('Wybierz datę i godzinę.');
         return;
       }
       try {
-        const res = await api('POST', '/api/snakes/admin/coop/config', { password: pass, speed_up_hours: hours });
+        const res = await api('POST', '/api/snakes/admin/coop/config', { password: pass, deadline_at: new Date(deadlineMs).toISOString() });
         cfg.coop = res.coop;
         renderInfo();
-        showToast(`⏩ Harmonogram przyspieszony o ${hours}h`);
-      } catch (e) {
-        showToast(e.message);
-      }
-    });
-
-    document.getElementById('btn-coop-force-trigger').addEventListener('click', async () => {
-      if (!confirm('Wymusić start bossa teraz, dobijając próg sztucznie?')) return;
-      try {
-        const res = await api('POST', '/api/snakes/admin/coop/force-trigger', { password: pass });
-        cfg.coop = res.coop;
-        renderInfo();
-        showToast(`👹 ${res.boss_name} obudzony — edycja #${res.cycle} rusza!`);
+        showToast(res.resolved
+          ? `⏰ Termin już minął — walka rozliczona od razu (${res.resolved.defeated ? 'pokonany' : 'boss zaatakował'}).`
+          : `✅ Termin walki ustawiony na ${fmtDate(new Date(deadlineMs).toISOString())}`);
       } catch (e) {
         showToast(e.message);
       }
