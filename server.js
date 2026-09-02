@@ -1307,7 +1307,7 @@ const SL_CURSE_DESCRIPTIONS = {
   2: 'rzut liczy się w połowie, w dół (rzut 5 = ruch o 2 pola)',
   3: `traci ${SL_CURSE_COIN_STEAL} monet na rzecz tego, kto rzucił klątwę`,
   4: 'połowa punktów zdobytych tym ruchem przepada',
-  5: 'na ten ruch drabiny i węże zamieniają się rolami',
+  5: 'na ten ruch drabiny i węże działa się od drugiego końca — ze szczytu drabiny zjeżdżasz na dół, z ogona węża wjeżdżasz do góry',
   6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
   7: 'pole bonusowe na ten ruch nie działa',
   8: `najbliższy zakup w sklepie kosztuje o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% więcej`
@@ -1818,30 +1818,50 @@ function slHasShield(playerId) {
 // `invertBoard` (klątwa „Odwrócone Zasady") sprawia, że drabiny działają jak węże i
 // odwrotnie na TEN JEDEN ruch: cel odbija się względem pola lądowania (2×landed - target),
 // więc drabina w górę o X pól staje się zjazdem w dół o X pól, i vice versa.
+// Przy ODWRÓCONYCH ZASADACH (klątwa 5) szukamy połączenia, które normalnie KOŃCZY się na
+// danym polu — bo na ten ruch przechodzi się je w drugą stronę, z celu do źródła.
+// Gdyby po edycji planszy w adminie dwa połączenia celowały w to samo pole, wygrywa to
+// o najniższym numerze pola, żeby wynik był powtarzalny, a nie zależny od kolejności klucza.
+function slReverseLink(board, tile) {
+  let found = null;
+  for (const key of Object.keys(board)) {
+    const t = board[key];
+    if (t.kind !== 'ladder' && t.kind !== 'snake') continue;
+    if (Number(t.target) !== tile) continue;
+    if (!found || Number(t.position) < Number(found.position)) found = t;
+  }
+  return found;
+}
+
 function slResolveTileEffect(landedAbs, board, invertBoard = false) {
   let abs = Math.max(0, landedAbs); // nie schodzimy poniżej startu (np. klątwa Odwrotny Ruch)
   let tilePoints = 0;
   let note = null;
   const landed = slTileOf(abs);
+  const base = abs - landed;   // pole 0 bieżącego okrążenia — skok liczymy względem niego
   const tile = board[landed];
-  if (tile) {
-    if (tile.kind === 'ladder' || tile.kind === 'snake') {
-      // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
-      // zachowując bieżące okrążenie jako bazę.
-      const base = abs - landed;
-      let target = tile.target;
-      let kind = tile.kind;
-      if (invertBoard) {
-        target = Math.min(SL_BOARD_SIZE - 1, Math.max(0, 2 * landed - tile.target));
-        kind = tile.kind === 'ladder' ? 'snake' : 'ladder';
-      }
-      abs = base + target;
-      if (abs < 0) abs = 0; // nie schodzimy poniżej startu
-      note = kind;
-    } else if (tile.kind === 'bonus') {
-      tilePoints += tile.value;
-      note = 'bonus';
-    }
+
+  // ODWRÓCONE ZASADY: nie liczymy żadnego lustra, tylko przechodzimy TO SAMO połączenie od
+  // drugiego końca. Staniesz na ogonie węża (na jego celu) — wjeżdżasz do głowy; staniesz
+  // na szczycie drabiny — zjeżdżasz na dół. Oba końce są prawdziwymi polami planszy, więc
+  // z definicji nie da się wyjechać poza nią ani zmienić okrążenia — żadnego przycinania.
+  // Wejście od „normalnej" strony (dół drabiny, głowa węża) na ten ruch nic nie robi:
+  // połączenie po odwróceniu po prostu się tam nie zaczyna.
+  const reverse = invertBoard ? slReverseLink(board, landed) : null;
+
+  if (reverse) {
+    abs = base + Number(reverse.position);
+    note = reverse.kind === 'ladder' ? 'snake' : 'ladder'; // drabina od góry to zjazd, i odwrotnie
+  } else if (tile && !invertBoard && (tile.kind === 'ladder' || tile.kind === 'snake')) {
+    // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
+    // zachowując bieżące okrążenie jako bazę.
+    abs = base + tile.target;
+    if (abs < 0) abs = 0; // nie schodzimy poniżej startu
+    note = tile.kind;
+  } else if (tile && tile.kind === 'bonus') {
+    // Bonusów klątwa nie dotyczy — działają tak samo w obie strony.
+    tilePoints += tile.value;
+    note = 'bonus';
   }
   return { abs, tilePoints, note };
 }
