@@ -1325,9 +1325,11 @@ const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportio
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 // Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
 const SL_KNOCKBACK_COIN_STEAL = 20;
-// O ile pól cofa się wypchnięty gracz — lokalnie w tył, z twardym progiem na polu 0
-// bieżącego okrążenia (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
-const SL_KNOCKBACK_TILES_BACK = 10;
+// O ile pól cofa się wypchnięty gracz — losowo z tego zakresu, osobne losowanie dla
+// KAŻDEJ ofiary (także w kaskadzie), z twardym progiem na polu 0 bieżącego okrążenia
+// (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
+const SL_KNOCKBACK_TILES_BACK_MIN = 3;
+const SL_KNOCKBACK_TILES_BACK_MAX = 6;
 
 // Ile ruchów (rzutów) dziennie ma każdy gracz na starcie dnia. Freeze blokuje JEDEN
 // z nich (nie cały dzień), a Double Move DOKŁADA jeden ruch ponad ten limit — od ręki,
@@ -1761,6 +1763,12 @@ function d6() {
   return 1 + Math.floor(Math.random() * 6);
 }
 
+// Losuje siłę pojedynczego wypchnięcia (w polach) z zakresu SL_KNOCKBACK_TILES_BACK_MIN..MAX.
+function slKnockbackTilesBack() {
+  const span = SL_KNOCKBACK_TILES_BACK_MAX - SL_KNOCKBACK_TILES_BACK_MIN + 1;
+  return SL_KNOCKBACK_TILES_BACK_MIN + Math.floor(Math.random() * span);
+}
+
 // Ile ruchów ma DZIŚ dany gracz: bazowy limit plus dodatkowe sloty kupione Double
 // Move'em. Dodatki liczą się tylko w dniu, w którym power-up został użyty — inny dzień
 // (albo pusta data) znaczy zero, więc kolumny nie trzeba zerować o północy. `st` to
@@ -1850,8 +1858,9 @@ function slFindOccupant(tile, excludeIds) {
   return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
 }
 
-// Gracz, który ląduje na zajętym polu, wypycha okupanta o SL_KNOCKBACK_TILES_BACK pól
-// do tyłu — ale najdalej na pole 0 BIEŻĄCEGO okrążenia: cofnięcie nigdy nie przenosi
+// Gracz, który ląduje na zajętym polu, wypycha okupanta o losowe
+// SL_KNOCKBACK_TILES_BACK_MIN..MAX pól do tyłu (losowane osobno dla każdej ofiary)
+// — ale najdalej na pole 0 BIEŻĄCEGO okrążenia: cofnięcie nigdy nie przenosi
 // ofiary na poprzednią pętlę ani nie odbiera jej okrążenia. Do tego zabiera mu
 // SL_KNOCKBACK_COIN_STEAL
 // monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
@@ -1876,11 +1885,15 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     const occ = slFindOccupant(targetTile, pushedIds);
     if (!occ) break;
     const fromAbs = Number(occ.abs_pos);
-    // Cofnięcie zatrzymuje się na polu 0 BIEŻĄCEGO okrążenia — wypchnięcie nigdy nie
-    // zabiera całego okrążenia. Gracz tuż po starcie kolejnej pętli (np. pole 6) ląduje
-    // na polu 0 tej pętli, a nie na końcówce poprzedniej.
+    // Siła wypchnięcia jest losowa przy każdym zbiciu — patrz slKnockbackTilesBack().
+    // Cofnięcie zatrzymuje się na polu 0 BIEŻĄCEGO okrążenia: wypchnięcie nigdy nie
+    // zabiera całego okrążenia. Gracz tuż po starcie kolejnej pętli (np. pole 2) ląduje
+    // na polu 0 tej pętli, a nie na końcówce poprzedniej — dlatego do dziennika i do
+    // odpowiedzi trafia tilesBack, czyli faktyczne cofnięcie po przycięciu, nie samo
+    // wylosowanie.
     const lapStartAbs = fromAbs - slTileOf(fromAbs);
-    const knockedAbs = Math.max(lapStartAbs, fromAbs - SL_KNOCKBACK_TILES_BACK);
+    const knockedAbs = Math.max(lapStartAbs, fromAbs - slKnockbackTilesBack());
+    const tilesBack = fromAbs - knockedAbs;
     const resolved = slResolveTileEffect(knockedAbs, board);
     const toAbs = resolved.abs;
     const bonusPoints = resolved.tilePoints;
@@ -1904,6 +1917,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
       nickname: occ.nickname,
       from_tile: slTileOf(fromAbs),
       to_tile: slTileOf(toAbs),
+      tiles_back: tilesBack,
       tile_effect: resolved.note,
       bonus_points: bonusPoints,
       coins_stolen: stolen,
@@ -1911,7 +1925,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     };
     chain.push(entry);
 
-    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (-${SL_KNOCKBACK_TILES_BACK} pól)`];
+    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (-${tilesBack} pól)`];
     if (resolved.note === 'ladder') bits.push('🪜 i wjechał na drabinę!');
     if (resolved.note === 'snake') bits.push('🐍 i zjechał wężem niżej!');
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
