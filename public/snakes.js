@@ -902,9 +902,16 @@ function renderCoop(g) {
   const statTxt = active ? `${c.boss.hp}/${c.boss.max_hp} HP` : `${c.total}/${c.threshold} pkt`;
   const nameTxt = active ? esc(c.boss.name) : 'Boss nadchodzi';
 
-  const timerHtml = active
-    ? `<span class="boss-timer mono" id="coop-deadline" data-until="${esc(c.boss.deadline_at)}" data-label="">⏳ –</span>`
+  // Zegar leci w OBU fazach, tylko mierzy co innego: w zbiórce czas do przebudzenia
+  // bossa, w walce czas do jego pokonania. Pasek pod spodem narasta tak samo w obu.
+  const timerUntil = active ? c.boss.deadline_at : c.collect_deadline_at;
+  const timerFrom = active ? (c.boss.started_at || '') : (c.collect_started_at || '');
+  const timerHtml = timerUntil
+    ? `<span class="boss-timer mono" id="coop-deadline" data-until="${esc(timerUntil)}" data-label="${active ? '' : 'do ataku'}">⏳ –</span>`
     : `<span class="coop-stat">${c.time_limit_days}d na pokonanie</span>`;
+  const timeBarHtml = timerUntil
+    ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(timerFrom)}" data-until="${esc(timerUntil)}" title="${active ? 'Czas na pokonanie bossa' : 'Czas do przebudzenia bossa'}"><div class="boss-time-fill"></div></div>`
+    : '';
 
   const actionHtml = active
     ? `<button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${g.me.balance >= c.boss.attack_cost ? '' : 'disabled'}>🗡️ -${c.boss.attack_cost}</button>`
@@ -923,16 +930,14 @@ function renderCoop(g) {
       <span class="coop-name">${nameTxt}</span>
       <div class="coop-bar-flex">
         <div class="coop-bar"><div class="coop-bar-fill${active ? ' boss-hp-fill' : ''}" style="width:${barPct}%"></div></div>
-        ${active && c.boss.deadline_at
-          ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(c.boss.started_at || '')}" data-until="${esc(c.boss.deadline_at)}" title="Czas bossa"><div class="boss-time-fill"></div></div>`
-          : ''}
+        ${timeBarHtml}
       </div>
       <span class="coop-stat mono">${statTxt}</span>
       ${timerHtml}
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>🤝 Wpłacajcie do puli — gdy padnie próg, budzi się boss. Zaatakuje i zabierze do ${c.timeout_penalty} monet każdemu (kontrybutorom pomniejszone o wkład — Ty stracisz ${c.my_timeout_penalty}), jeśli go nie pokonacie na czas — pokonacie? nagroda i od razu kolejny, trudniejszy.</span>
+      <span>🤝 Wpłacajcie do puli — gdy padnie próg, budzi się boss. Nie zdążycie w ${c.collect_days} dni robocze — wstanie sam i uderzy bez walki. Zaatakuje i zabierze do ${c.timeout_penalty} monet każdemu (kontrybutorom pomniejszone o wkład — Ty stracisz ${c.my_timeout_penalty}), jeśli go nie pokonacie na czas — pokonacie? nagroda i od razu kolejny, trudniejszy.</span>
       <span class="coop-kara">${karaTxt}</span>
       ${prevTxt}
     </div>
