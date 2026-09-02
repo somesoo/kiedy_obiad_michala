@@ -1286,8 +1286,12 @@ const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
 // zadziałać PRZED odpaleniem węży/drabin/bonusów (patrz slCurseAdjustRoll + invertBoard
 // w slResolveTileEffect) — inaczej gracz lądowałby na złym polu. Warianty 3/4/6/7
 // działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
-const SL_CURSE_VARIANTS = 7;
+const SL_CURSE_VARIANTS = 8;
 const SL_CURSE_COIN_STEAL = 50; // ile monet zabiera Kieszonkowiec (wariant 3)
+// Drożyzna (wariant 8) jako JEDYNA klątwa nie odpala się na ruchu, tylko przy najbliższym
+// zakupie w sklepie — podbija jego cenę o ten mnożnik i dopiero wtedy się zużywa.
+const SL_CURSE_PRICE_VARIANT = 8;
+const SL_CURSE_PRICE_MARKUP = 1.5;
 const SL_CURSE_LABELS = {
   1: '↩️ Odwrotny Ruch',
   2: '➗ Rozdwojona Kostka',
@@ -1295,7 +1299,8 @@ const SL_CURSE_LABELS = {
   4: '📉 Chciwość',
   5: '🔀 Odwrócone Zasady',
   6: '🌀 Chaos',
-  7: '🚫 Bez Bonusu'
+  7: '🚫 Bez Bonusu',
+  8: '🧾 Drożyzna'
 };
 const SL_CURSE_DESCRIPTIONS = {
   1: 'kość cofa zamiast pchać do przodu (np. rzut 4 = 4 pola W TYŁ)',
@@ -1304,7 +1309,8 @@ const SL_CURSE_DESCRIPTIONS = {
   4: 'połowa punktów zdobytych tym ruchem przepada',
   5: 'na ten ruch drabiny i węże zamieniają się rolami',
   6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
-  7: 'pole bonusowe na ten ruch nie działa'
+  7: 'pole bonusowe na ten ruch nie działa',
+  8: `najbliższy zakup w sklepie kosztuje o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% więcej`
 };
 
 // Warianty 1/2 zmieniają wartość kości PRZED ruchem — reszta rzutów nie rusza.
@@ -2046,16 +2052,24 @@ function slPlayersPayload(meId) {
   });
 }
 
-// Oczekujące efekty na danym graczu (do pokazania „co Cię czeka w następnej turze").
+// Oczekujące efekty na danym graczu (do pokazania „co Cię czeka").
+// FREEZE JEST TU CELOWO POMINIĘTY: ofiara nie ma prawa wiedzieć, że jest zamrożona,
+// dopóki nie kliknie „Rzuć" i sama się nie przekona (patrz POST /api/snakes/roll).
+// Freeze widzi wyłącznie ten, kto go rzucił — w dzienniku ma własny wpis, ale bez celu,
+// więc reszta stołu wie tylko TYLE, że ktoś kogoś zamroził.
 function slPendingEffects(playerId) {
   return db.prepare(`
     SELECT e.type, e.variant, p.nickname AS source_nickname
     FROM sl_effects e LEFT JOIN players p ON p.id = e.source_player_id
-    WHERE e.target_player_id = ? AND e.status = 'pending'
+    WHERE e.target_player_id = ? AND e.status = 'pending' AND e.type != 'freeze'
     ORDER BY e.id
   `).all(playerId).map(e => ({
     type: e.type,
-    variant: e.variant == null ? null : Number(e.variant),
+    // WARIANT KLĄTWY CELOWO NIE WYCHODZI NA ZEWNĄTRZ: cel ma wiedzieć, że coś na nim
+    // wisi i od kogo, ale nie CO — inaczej wystarczyłoby zajrzeć w odpowiedź API, żeby
+    // rozbroić całą niespodziankę. Wariant ujawnia się dopiero, gdy klątwa odpali
+    // (na ruchu albo — przy Drożyźnie — przy zakupie).
+    variant: null,
     source_nickname: e.source_nickname
   }));
 }
@@ -2673,7 +2687,9 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       `SELECT * FROM sl_effects WHERE target_player_id = ? AND status = 'pending' ORDER BY id`
     ).all(playerId);
     const freeze = pending.find(e => e.type === 'freeze');
-    const curse = pending.find(e => e.type === 'curse');
+    // Drożyzna czeka na zakup, nie na ruch — pomijamy ją przy szukaniu klątwy na turę,
+    // żeby nie zużyła się na rzucie, nie odpaliwszy swojego efektu.
+    const curse = pending.find(e => e.type === 'curse' && Number(e.variant) !== SL_CURSE_PRICE_VARIANT);
 
     const consume = id => db.prepare(
       `UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`
@@ -2905,25 +2921,67 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 // POST /api/snakes/shop/buy { type } — kup power-up za punkty.
 app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
   const playerId = req.player.id;
+  const nickname = req.player.nickname;
   const type = String(req.body.type || '');
   if (!SL_POWERUP_TYPES.includes(type)) {
     return res.status(400).json({ error: 'Nieznany power-up' });
   }
-  const cost = SL_POWERUP_COSTS[type];
+  const baseCost = SL_POWERUP_COSTS[type];
+  const priceCurseLabel = SL_CURSE_LABELS[SL_CURSE_PRICE_VARIANT];
 
   const out = transaction(() => {
     const st = slEnsureState(playerId);
-    if (st.balance < cost) return { poor: true, balance: st.balance };
+
+    // KLĄTWA DROŻYZNA: czeka w kolejce jak każda inna, ale odpala się dopiero TUTAJ —
+    // przy pierwszym zakupie po jej rzuceniu. Podbija cenę i zużywa się WYŁĄCZNIE przy
+    // udanym zakupie: gdy graczowi zabraknie punktów, klątwa zostaje na kolejną próbę
+    // (inaczej dałoby się ją zdjąć klikaniem „Kup" bez grosza przy duszy).
+    const priceCurse = db.prepare(`
+      SELECT id, source_player_id FROM sl_effects
+      WHERE target_player_id = ? AND type = 'curse' AND status = 'pending' AND variant = ?
+      ORDER BY id LIMIT 1
+    `).get(playerId, SL_CURSE_PRICE_VARIANT);
+    const cost = priceCurse ? Math.ceil(baseCost * SL_CURSE_PRICE_MARKUP) : baseCost;
+
+    if (st.balance < cost) return { poor: true, balance: st.balance, cost, cursed: !!priceCurse };
+
     db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(cost, playerId);
     slAddPowerup(playerId, type, 1);
-    slLogActivity(playerId, 'shop_buy', `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} pkt)`);
-    return { poor: false };
+    if (priceCurse) {
+      db.prepare(`UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(priceCurse.id);
+    }
+    slLogActivity(playerId, 'shop_buy',
+      `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} pkt)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
+    if (priceCurse && priceCurse.source_player_id) {
+      slLogActivity(priceCurse.source_player_id, 'shop_use',
+        `🧾 Twoja klątwa ${priceCurseLabel} odpaliła — ${nickname} przepłacił o ${cost - baseCost} pkt!`);
+    }
+    return { poor: false, cost, cursed: !!priceCurse, extra: cost - baseCost };
   });
 
   if (out.poor) {
-    return res.status(400).json({ error: `Za mało punktów — koszt ${cost}, masz ${out.balance}.` });
+    // Cena z klątwy nie jest zagadką w momencie, w którym zaczyna boleć — mówimy wprost,
+    // czemu w sklepie widniało mniej.
+    return res.status(400).json({
+      error: `Za mało punktów — koszt ${out.cost}${out.cursed ? ` (klątwa ${priceCurseLabel}: +${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}%)` : ''}, masz ${out.balance}.`,
+      price_curse: out.cursed ? { label: priceCurseLabel, cost: out.cost, base_cost: baseCost } : null
+    });
   }
-  res.json({ success: true, state: slBuildState(playerId) });
+
+  // Klątwa ujawnia się dokładnie w chwili, w której zadziałała — tak jak każda inna.
+  if (out.cursed) {
+    slEmit('powerup_curse', () =>
+      `🧾 **${nickname}** wpadł na klątwę **${priceCurseLabel}** — za ${SL_POWERUP_LABELS[type]} zapłacił ${out.cost} zamiast ${baseCost} pkt.`);
+  }
+
+  res.json({
+    success: true,
+    cost: out.cost,
+    base_cost: baseCost,
+    price_curse: out.cursed ? { label: priceCurseLabel, extra: out.extra } : null,
+    state: slBuildState(playerId)
+  });
 });
 
 // POST /api/snakes/shop/use { type, target_player_id? } — użyj power-up z ekwipunku.
@@ -3029,15 +3087,16 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   }
 
   // ── DZIENNIK AKTYWNOŚCI (obie strony, gdy dotyczy) ──
-  // Freeze celowo NIE trafia tu do dziennika, gdy tylko czeka jako pending — nikt (nawet
-  // cel) nie ma widzieć, że został zamrożony, dopóki faktycznie nie kliknie "rzuć" i się
-  // o tym nie przekona (patrz POST /api/snakes/roll, gdzie dopiero wtedy to się loguje).
+  // Freeze dostaje wpis BEZ CELU: stół ma wiedzieć, że ktoś zamroził kogoś (bo to zmienia
+  // rachuby), ale na kogo padło — wie tylko rzucający. Ofiara nie dostaje własnego wpisu
+  // i nie widzi Freeze'a w swoim panelu (patrz slPendingEffects); dowie się dopiero, gdy
+  // kliknie „Rzuć" (wtedy POST /api/snakes/roll dopisuje obu stronom pełną wersję).
   const label = SL_POWERUP_LABELS[type];
   if (out.blocked) {
     slLogActivity(playerId, 'shop_use', `${label} na ${targetNick} zablokowany tarczą`);
     slLogActivity(targetId, 'shop_use', `🛡️ Zablokował ${label} od ${nickname} tarczą`);
   } else if (type === 'freeze') {
-    // brak wpisu — patrz komentarz wyżej
+    slLogActivity(playerId, 'shop_use', `❄️ Użył Freeze — kogo zamroził, okaże się przy jego następnym ruchu`);
   } else if (out.extra_roll) {
     slLogActivity(playerId, 'shop_use', `⏩ Użył ${label} — dodatkowy ruch do wykonania od razu`);
   } else if (needsTarget) {

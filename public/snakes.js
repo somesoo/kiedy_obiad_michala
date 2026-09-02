@@ -10,8 +10,8 @@ let state = {
 };
 
 const POWERUP_META = {
-  freeze:      { icon: '❄️', name: 'Freeze',      desc: 'Zatrzymuje wybranego gracza w jego następnej turze.', targeted: true },
-  curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 7 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież monet i inne). Cel dowie się, jaka, dopiero gdy odpali.', targeted: true },
+  freeze:      { icon: '❄️', name: 'Freeze',      desc: 'Zatrzymuje wybranego gracza w jego następnej turze. Cel nic nie widzi — reszta stołu wie tylko, że użyłeś Freeze, nie na kim.', targeted: true },
+  curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 8 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież monet, droższe zakupy i inne). Cel dowie się, jaka, dopiero gdy odpali.', targeted: true },
   double_move: { icon: '⏩', name: 'Double Move',  desc: 'Dokłada Ci jeden ruch ponad dzienny limit — do wykonania od razu po użyciu.', targeted: false },
   shield:      { icon: '🛡️', name: 'Shield',       desc: 'Obrona: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika.', targeted: false },
 };
@@ -613,12 +613,13 @@ function renderLegend() {
 // ── PRZYCISK RZUTU ──
 function renderRollButton(g) {
   const btn = document.getElementById('btn-roll');
-  const frozen = g.pending_effects.some(e => e.type === 'freeze');
   const left = g.me.rolls_remaining_today;
   if (g.me.can_roll) {
     btn.disabled = false;
+    // Żadnej wzmianki o Freeze — serwer w ogóle nie zdradza nam, że ktoś nas zamroził
+    // (patrz slPendingEffects). Dowiadujemy się dopiero po kliknięciu.
     const countTxt = g.me.daily_rolls > 1 ? ` (${left}/${g.me.daily_rolls})` : '';
-    btn.textContent = frozen ? `🎲 Rzuć (uwaga: masz Freeze!)${countTxt}` : `🎲 Rzuć kostką${countTxt}`;
+    btn.textContent = `🎲 Rzuć kostką${countTxt}`;
   } else {
     btn.disabled = true;
     if (g.me.is_weekend) {
@@ -759,7 +760,9 @@ async function buyPowerup(type) {
     const res = await api('POST', '/api/snakes/shop/buy', { type });
     state.game = res.state;
     renderAll();
-    showToast(`🛒 Kupiono: ${POWERUP_META[type].name}`);
+    showToast(res.price_curse
+      ? `${res.price_curse.label}! Kupiono ${POWERUP_META[type].name} za ${res.cost} pkt zamiast ${res.base_cost} (+${res.price_curse.extra}) — klątwa zdjęta.`
+      : `🛒 Kupiono: ${POWERUP_META[type].name}`);
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
     showToast(e.message);
@@ -857,7 +860,7 @@ function renderEffectsHint(g) {
     const from = e.source_nickname ? ` od ${esc(e.source_nickname)}` : '';
     return `${meta.icon} ${meta.name}${from}`;
   }).join(', ');
-  el.innerHTML = `⚠️ Czeka Cię w następnej turze: ${txt}`;
+  el.innerHTML = `⚠️ Czeka Cię: ${txt}`;
 }
 
 // ── WYDARZENIE KOOPERACYJNE ──
