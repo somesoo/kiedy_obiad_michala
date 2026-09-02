@@ -1391,6 +1391,10 @@ function slOfficeCloseMs(ms = Date.now()) {
 //   • przegrana (czas minął, boss przeżył): próg i czas łagodnieją o RELIEF_FACTOR,
 //     ale nigdy poniżej/powyżej wartości bazowej (BASE) — to tylko "odbicie", nie reset.
 const SL_COOP_BASE_TIME_DAYS = Number(process.env.SNAKES_COOP_BASE_TIME_DAYS || 5);
+// Ile DNI ROBOCZYCH trwa zbiórka, zanim boss obudzi się sam. Zbiórka to wyścig: uzbieracie
+// próg na czas — budzi się boss i macie osobny termin na jego pokonanie; nie uzbieracie —
+// boss i tak wstaje i OD RAZU atakuje (rozliczenie jak przegrana, patrz slResolveCollectTimeout).
+const SL_COOP_COLLECT_DAYS = Number(process.env.SNAKES_COOP_COLLECT_DAYS || 5);
 const SL_COOP_MIN_TIME_DAYS = Number(process.env.SNAKES_COOP_MIN_TIME_DAYS || 2);
 const SL_COOP_THRESHOLD_GROWTH = Number(process.env.SNAKES_COOP_THRESHOLD_GROWTH || 1.2);
 const SL_COOP_TIME_SHRINK = Number(process.env.SNAKES_COOP_TIME_SHRINK || 0.8);
@@ -1589,6 +1593,9 @@ ensureColumn('sl_coop', 'boss_deadline_at', 'DATETIME');
 // boss_deadline_at), ale bez niego nie da się narysować paska „ile czasu zostało",
 // bo termin liczy się w DNIACH ROBOCZYCH i długość walki w zegarze bywa różna.
 ensureColumn('sl_coop', 'boss_started_at', 'DATETIME');
+// Termin zbiórki — po nim boss budzi się sam i atakuje. Liczony w dniach roboczych przy
+// zakładaniu cyklu, więc zmiana SL_COOP_COLLECT_DAYS nie przesuwa już trwających zbiórek.
+ensureColumn('sl_coop', 'collect_deadline_at', 'DATETIME');
 
 // sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
 // jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
@@ -2132,14 +2139,15 @@ function slCoopDefaultThreshold() {
 // Wstawia nowy cykl co-op — rusza NATYCHMIAST (started_at = teraz, domyślnie w schemacie),
 // z podanym progiem i limitem dni roboczych na pokonanie bossa, gdy ten padnie.
 function slCoopInsertCycle(cycle, threshold, timeLimitDays) {
+  const collectDeadlineMs = addBusinessDaysMs(Date.now(), SL_COOP_COLLECT_DAYS);
   db.prepare(`
-    INSERT INTO sl_coop (cycle, threshold, time_limit_days) VALUES (?, ?, ?)
-  `).run(cycle, threshold, timeLimitDays);
+    INSERT INTO sl_coop (cycle, threshold, time_limit_days, collect_deadline_at)
+    VALUES (?, ?, ?, datetime(?, 'unixepoch'))
+  `).run(cycle, threshold, timeLimitDays, Math.floor(collectDeadlineMs / 1000));
   return db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
 }
 
-// Zwraca bieżący cykl co-op — zbiórka nie ma już terminu (patrz nagłówek sekcji), więc
-// wystarczy ostatni wiersz; jeśli baza jest zupełnie pusta, zakłada świeży cykl #1
+// Zwraca bieżący cykl co-op — wystarczy ostatni wiersz; jeśli baza jest zupełnie pusta, zakłada świeży cykl #1
 // z wartościami bazowymi (próg z ewentualnego override'u admina, czas z SL_COOP_BASE_TIME_DAYS).
 function slCurrentCoop() {
   const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
@@ -2197,6 +2205,15 @@ function slCoopPayload(meId) {
     my_contribution: mine,
     contributors,
     time_limit_days: Number(coop.time_limit_days),
+    collect_days: SL_COOP_COLLECT_DAYS,
+    // Okno zbiórki — od startu cyklu do terminu, po którym boss wstaje sam i atakuje.
+    // Stąd UI rysuje narastający pasek „ile czasu na przygotowania już minęło".
+    collect_started_at: coop.started_at
+      ? new Date(String(coop.started_at).replace(' ', 'T') + 'Z').toISOString()
+      : null,
+    collect_deadline_at: coop.collect_deadline_at
+      ? new Date(String(coop.collect_deadline_at).replace(' ', 'T') + 'Z').toISOString()
+      : null,
     default_threshold: slCoopDefaultThreshold(),
     previous_result: previousResult,
     timeout_penalty: SL_BOSS_TIMEOUT_PENALTY,
@@ -2494,14 +2511,31 @@ function startSnakesDiscordScheduler() {
 }
 startSnakesDiscordScheduler();
 
-// ── SCHEDULER TERMINU WALKI Z BOSSEM ──
-// Zbiórka ('collecting') nie ma już terminu — jedyny zegar dotyczy AKTYWNEJ walki:
+// ── SCHEDULER TERMINÓW CO-OPU ──
+// Zegary są DWA. Pierwszy pilnuje ZBIÓRKI: jeśli minie collect_deadline_at, a próg wciąż
+// nie padł, boss budzi się sam i OD RAZU atakuje — nikt niczego nie zdążył przygotować,
+// więc rozliczamy to jak przegraną (brak nagrody, wpłacona kasa przepada, kara dla
+// wszystkich) i od razu rusza kolejna, łagodniejsza edycja. Drugi dotyczy AKTYWNEJ walki:
 // jeśli minie boss_deadline_at, a boss wciąż żyje, próg i tak padł (należy się zwykła
 // nagroda), więc rozliczamy jak przegraną i OD RAZU startuje kolejna, łagodniejsza
 // edycja (patrz slFinishBossEvent). Jeśli boss padł wcześniej w grze, status jest już
 // 'completed' i ten kod nigdy się nie odpala — brak podwójnego rozliczenia. Działa
 // ZAWSZE (niezależnie od webhooka) — slEmit sam pomija wysyłkę, gdy webhook nie jest
 // skonfigurowany. Tick co minutę + raz od razu przy starcie (samo-naprawa po restarcie).
+// Zbiórka nie dowiozła progu na czas: budzimy bossa (żeby rozliczenie miało nazwę i HP,
+// a gracze zobaczyli, KTO ich zaatakował) i natychmiast domykamy cykl jako porażkę.
+// Boss nie dostaje swojego okna na walkę — na to trzeba było uzbierać próg.
+function slResolveCollectTimeout(cycle) {
+  return transaction(() => {
+    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
+    if (!fresh || fresh.status !== 'collecting' || !fresh.collect_deadline_at) return null;
+    if (Date.now() < Date.parse(fresh.collect_deadline_at.replace(' ', 'T') + 'Z')) return null;
+    startCoopBossEvent(fresh);
+    const woken = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
+    return { ...slFinishBossEvent(woken, false), collect_timeout: true };
+  });
+}
+
 function slResolveBossTimeout(cycle) {
   return transaction(() => {
     const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
@@ -2512,13 +2546,17 @@ function slResolveBossTimeout(cycle) {
 
 function slEmitBossTimeout(outcome) {
   slEmit('coop_completed', () => ({
-    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '💥 **Czas minął — boss zaatakował!**',
+    content: outcome.defeated
+      ? '🏆 **Boss pokonany!**'
+      : (outcome.collect_timeout ? '💥 **Nie uzbieraliście na czas — boss obudził się sam!**' : '💥 **Czas minął — boss zaatakował!**'),
     embeds: [{
       title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
       url: SNAKES_URL,
       description: (outcome.defeated
         ? `Kontrybutorzy dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
-        : `Nie zdążyliście dobić bossa na czas — nagrody nie ma, wpłacona kasa przepada. Boss zaatakował i zabrał do **${outcome.timeout_penalty} monet** każdemu graczowi (kontrybutorom pomniejszone o wpłacony wkład; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
+        : `${outcome.collect_timeout
+            ? 'Pula nie dobiła do progu w wyznaczonym czasie — boss wstał sam i uderzył bez walki.'
+            : 'Nie zdążyliście dobić bossa na czas.'} Nagrody nie ma, wpłacona kasa przepada. Boss zabrał do **${outcome.timeout_penalty} monet** każdemu graczowi (kontrybutorom pomniejszone o wpłacony wkład; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
       ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: próg **${outcome.next_cycle.threshold}** pkt, **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie bossa.`,
       color: outcome.defeated ? 0x53D06B : 0xE85D4A
     }]
@@ -2528,6 +2566,11 @@ function slEmitBossTimeout(outcome) {
 function startCoopBossDeadlineScheduler() {
   const tick = () => {
     const coop = slCurrentCoop();
+    if (coop.status === 'collecting') {
+      const outcome = slResolveCollectTimeout(coop.cycle);
+      if (outcome) slEmitBossTimeout(outcome);
+      return;
+    }
     if (coop.status !== 'event_active') return;
     if (!coop.boss_deadline_at) return;
     const deadlineMs = Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z');
@@ -2539,6 +2582,26 @@ function startCoopBossDeadlineScheduler() {
   setInterval(tick, 60_000);
   console.log(`Snakes/Co-op: eskalacja trudności — próg ×${SL_COOP_THRESHOLD_GROWTH} i czas ×${SL_COOP_TIME_SHRINK} po wygranej (min. ${SL_COOP_MIN_TIME_DAYS} dni robocze), ulga ×${SL_COOP_RELIEF_FACTOR} po porażce.`);
 }
+// ── MIGRACJA (jednorazowa): zbiórka, która ruszyła PRZED wprowadzeniem terminu, dostaje
+// go wyliczonego od swojego startu — dotychczasowe dni zbierania normalnie się liczą.
+// Gdyby tak policzony termin już minął (zbiórka wisi dłużej niż limit), nie karzemy
+// wstecz za regułę, której wtedy nie było: dajemy jeszcze jeden dzień roboczy od teraz,
+// żeby ludzie zdążyli dorzucić. Inaczej pierwszy tick po restarcie od razu zabrałby
+// monety wszystkim graczom.
+(function backfillCollectDeadline() {
+  const rows = db.prepare(
+    `SELECT cycle, started_at FROM sl_coop WHERE status = 'collecting' AND collect_deadline_at IS NULL`
+  ).all();
+  for (const row of rows) {
+    const startedMs = Date.parse(String(row.started_at).replace(' ', 'T') + 'Z');
+    const fromStart = addBusinessDaysMs(Number.isFinite(startedMs) ? startedMs : Date.now(), SL_COOP_COLLECT_DAYS);
+    const deadlineMs = fromStart > Date.now() ? fromStart : addBusinessDaysMs(Date.now(), 1);
+    db.prepare(`UPDATE sl_coop SET collect_deadline_at = datetime(?, 'unixepoch') WHERE cycle = ?`)
+      .run(Math.floor(deadlineMs / 1000), row.cycle);
+    console.log(`Snakes/Co-op: zbiórce #${row.cycle} dopisano termin na ${new Date(deadlineMs).toISOString()}`);
+  }
+})();
+
 startCoopBossDeadlineScheduler();
 
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
