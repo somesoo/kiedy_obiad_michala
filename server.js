@@ -1325,11 +1325,13 @@ const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportio
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 // Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
 const SL_KNOCKBACK_COIN_STEAL = 20;
-// O ile pól cofa się wypchnięty gracz (nie na start okrążenia/planszy — tylko lokalnie w tył).
+// O ile pól cofa się wypchnięty gracz — lokalnie w tył, z twardym progiem na polu 0
+// bieżącego okrążenia (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
 const SL_KNOCKBACK_TILES_BACK = 10;
 
-// Ile ruchów (rzutów) dziennie ma każdy gracz. Freeze blokuje JEDEN z nich (nie cały
-// dzień); Double Move nadal oznacza dwie kostki w JEDNYM z tych ruchów, nie osobny slot.
+// Ile ruchów (rzutów) dziennie ma każdy gracz na starcie dnia. Freeze blokuje JEDEN
+// z nich (nie cały dzień), a Double Move DOKŁADA jeden ruch ponad ten limit — od ręki,
+// w momencie użycia (patrz POST /api/snakes/shop/use i slDailyRollsFor).
 const SL_DAILY_ROLLS = 3;
 // Między ruchami NIE MA odstępu — gracz sam decyduje, jak rozłożyć swoje trzy rzuty
 // w ciągu dnia (choćby wszystkie pod rząd). Jedyne ograniczenie to okno godzin biurowych.
@@ -1562,6 +1564,11 @@ ensureColumn('sl_state', 'rolls_today', 'INTEGER DEFAULT 0');
 // Dokładny moment ostatniego ruchu — sam w sobie niczego nie blokuje (odstęp między
 // ruchami zniknął), zostaje jako ślad w danych i pod ewentualne statystyki.
 ensureColumn('sl_state', 'last_move_at', 'DATETIME');
+// Dodatkowe ruchy PONAD dzienny limit, przyznane przez Double Move (patrz
+// slDailyRollsFor). Ważne wyłącznie w dniu z extra_rolls_date — nazajutrz licznik
+// jest ignorowany, więc niewykorzystane sloty przepadają razem z resztą limitu.
+ensureColumn('sl_state', 'extra_rolls', 'INTEGER DEFAULT 0');
+ensureColumn('sl_state', 'extra_rolls_date', 'TEXT');
 
 // sl_coop: dołóż kolumny bossa dla wdrożeń sprzed walki z bossem.
 ensureColumn('sl_coop', 'boss_name', 'TEXT');
@@ -1754,6 +1761,15 @@ function d6() {
   return 1 + Math.floor(Math.random() * 6);
 }
 
+// Ile ruchów ma DZIŚ dany gracz: bazowy limit plus dodatkowe sloty kupione Double
+// Move'em. Dodatki liczą się tylko w dniu, w którym power-up został użyty — inny dzień
+// (albo pusta data) znaczy zero, więc kolumny nie trzeba zerować o północy. `st` to
+// wiersz sl_state (wystarczą kolumny extra_rolls i extra_rolls_date).
+function slDailyRollsFor(st, today) {
+  const extra = st && st.extra_rolls_date === today ? Number(st.extra_rolls || 0) : 0;
+  return SL_DAILY_ROLLS + Math.max(0, extra);
+}
+
 // Pola na planszy = abs_pos zwinięty do 0..SL_BOARD_SIZE-1
 function slTileOf(absPos) {
   return ((absPos % SL_BOARD_SIZE) + SL_BOARD_SIZE) % SL_BOARD_SIZE;
@@ -1835,8 +1851,9 @@ function slFindOccupant(tile, excludeIds) {
 }
 
 // Gracz, który ląduje na zajętym polu, wypycha okupanta o SL_KNOCKBACK_TILES_BACK pól
-// do tyłu (nie na start okrążenia ani planszy — jeśli to zeszłoby poniżej pola 0,
-// ofiara staje na polu 0). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
+// do tyłu — ale najdalej na pole 0 BIEŻĄCEGO okrążenia: cofnięcie nigdy nie przenosi
+// ofiary na poprzednią pętlę ani nie odbiera jej okrążenia. Do tego zabiera mu
+// SL_KNOCKBACK_COIN_STEAL
 // monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
 // TO konkretne wypchnięcie — tak samo jak każdy inny zarobek w grze (rzut kostką, nagroda
 // za bossa, pole bonusowe), skradzione monety liczą się RÓWNIEŻ jako punkty do rankingu,
@@ -1859,7 +1876,11 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     const occ = slFindOccupant(targetTile, pushedIds);
     if (!occ) break;
     const fromAbs = Number(occ.abs_pos);
-    const knockedAbs = Math.max(0, fromAbs - SL_KNOCKBACK_TILES_BACK);
+    // Cofnięcie zatrzymuje się na polu 0 BIEŻĄCEGO okrążenia — wypchnięcie nigdy nie
+    // zabiera całego okrążenia. Gracz tuż po starcie kolejnej pętli (np. pole 6) ląduje
+    // na polu 0 tej pętli, a nie na końcówce poprzedniej.
+    const lapStartAbs = fromAbs - slTileOf(fromAbs);
+    const knockedAbs = Math.max(lapStartAbs, fromAbs - SL_KNOCKBACK_TILES_BACK);
     const resolved = slResolveTileEffect(knockedAbs, board);
     const toAbs = resolved.abs;
     const bonusPoints = resolved.tilePoints;
@@ -1941,6 +1962,30 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
   slMetaSet('knockback_points_backfilled', '1');
 })();
 
+// ── MIGRACJA (jednorazowa): Double Move przestał być efektem czekającym na następną
+// turę (dwie kostki w jednym ruchu) — teraz dokłada osobny ruch od ręki, w momencie
+// użycia. Wpisy, które zostały w kolejce jako 'pending', nigdy by już nie odpaliły,
+// więc oddajemy graczom power-up do ekwipunku, żeby wykorzystali go na nowych zasadach.
+(function migrateDoubleMoveToInstant() {
+  if (slMetaGet('double_move_instant_migrated')) return;
+  const stale = db.prepare(
+    `SELECT id, target_player_id FROM sl_effects WHERE type = 'double_move' AND status = 'pending'`
+  ).all();
+  if (stale.length) {
+    transaction(() => {
+      for (const e of stale) {
+        db.prepare(`UPDATE sl_effects SET status = 'refunded', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(e.id);
+        slAddPowerup(e.target_player_id, 'double_move', 1);
+        slLogActivity(e.target_player_id, 'shop_use',
+          '⏩ Double Move wrócił do ekwipunku — nowe zasady: daje dodatkowy ruch od ręki, nie dwie kostki w turze.');
+      }
+    });
+    console.log(`Snakes: oddano ${stale.length} niewykorzystanych Double Move do ekwipunku (nowe zasady)`);
+  }
+  slMetaSet('double_move_instant_migrated', '1');
+})();
+
 
 // Buduje publiczny opis planszy (do rysowania w UI).
 function slBoardPayload() {
@@ -1954,7 +1999,8 @@ function slBoardPayload() {
 // bramki na rzut (patrz POST /api/snakes/roll): kto nie wgrał zdjęcia, ten "nie gra".
 function slPlayersPayload(meId) {
   const rows = db.prepare(`
-    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.rolls_today, s.avatar_updated_at
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.rolls_today,
+           s.extra_rolls, s.extra_rolls_date, s.avatar_updated_at
     FROM sl_state s JOIN players p ON p.id = s.player_id
     WHERE s.has_avatar = 1
     ORDER BY s.total_points DESC, s.abs_pos DESC
@@ -1966,6 +2012,7 @@ function slPlayersPayload(meId) {
   ).all().map(r => r.id));
   return rows.map(r => {
     const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
+    const dailyRolls = slDailyRollsFor(r, today);
     return {
       player_id: r.player_id,
       nickname: r.nickname,
@@ -1974,9 +2021,9 @@ function slPlayersPayload(meId) {
       abs_pos: Number(r.abs_pos),
       laps: Number(r.laps),
       total_points: Number(r.total_points),
-      moved_today: rollsUsedToday >= SL_DAILY_ROLLS,
+      moved_today: rollsUsedToday >= dailyRolls,
       rolls_used_today: rollsUsedToday,
-      rolls_remaining_today: Math.max(0, SL_DAILY_ROLLS - rollsUsedToday),
+      rolls_remaining_today: Math.max(0, dailyRolls - rollsUsedToday),
       // Tarcza jest widoczna TYLKO u siebie — innym graczom nie zdradzamy, kto ma
       // tarczę, żeby dało się kogoś zaskoczyć Freeze/Curse (patrz też slBuildState → me).
       has_shield: (meId && r.player_id === meId) ? shielded.has(r.player_id) : false,
@@ -2438,7 +2485,8 @@ function slBuildState(playerId) {
   const today = todayWaw();
   const isWeekend = isWeekendStr(today);
   const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
-  const rollsRemainingToday = Math.max(0, SL_DAILY_ROLLS - rollsUsedToday);
+  const dailyRolls = slDailyRollsFor(st, today);
+  const rollsRemainingToday = Math.max(0, dailyRolls - rollsUsedToday);
   const officeOpen = slOfficeOpenAt();
   return {
     board: slBoardPayload(),
@@ -2453,7 +2501,8 @@ function slBuildState(playerId) {
       moved_today: rollsRemainingToday === 0,
       rolls_used_today: rollsUsedToday,
       rolls_remaining_today: rollsRemainingToday,
-      daily_rolls: SL_DAILY_ROLLS,
+      daily_rolls: dailyRolls,
+      extra_rolls_today: dailyRolls - SL_DAILY_ROLLS,
       is_weekend: isWeekend,
       office_open: officeOpen,
       office_start_hour: SL_PLAY_START_HOUR,
@@ -2558,6 +2607,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   const nickname = req.player.nickname;
   const today = todayWaw();
   const board = slBoardMap();
+  // Pozycja, którą klient ma narysowaną na planszy (patrz weryfikacja niżej).
+  // Brak pola = null, czyli weryfikacja pominięta.
+  const knownAbsPos = Number.isInteger(req.body && req.body.known_abs_pos)
+    ? Number(req.body.known_abs_pos)
+    : null;
 
   // Bramka: bez zdjęcia profilowego nie da się zagrać. Sprawdzana przed transakcją,
   // żeby nawet nie próbować rzutu — klient i tak trzyma gracza na ekranie uploadu.
@@ -2584,8 +2638,21 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     // rolls_today liczy się dla dnia zapisanego w last_move_date — inny dzień = licznik
     // efektywnie na zero, bez potrzeby osobnego resetu o północy.
     const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
-    if (rollsUsedToday >= SL_DAILY_ROLLS) return { locked: true };
+    const dailyRolls = slDailyRollsFor(st, today); // limit bazowy + sloty z Double Move
+    if (rollsUsedToday >= dailyRolls) return { locked: true, daily_rolls: dailyRolls };
     const moveSeq = rollsUsedToday + 1;
+
+    // ── WERYFIKACJA POZYCJI ──
+    // Klient dosyła `known_abs_pos` — pole, na którym RYSUJE swój pionek w chwili
+    // klikania „Rzuć". Ruch zawsze liczy się od pozycji z bazy (`st.abs_pos`), ale gdy
+    // te dwie się rozjeżdżają, to znaczy, że gracz patrzy na nieaktualną planszę:
+    // ktoś go w międzyczasie wypchnął. Wtedy NIE ruszamy — nie zużywamy rzutu, nie
+    // odpalamy efektów, tylko odsyłamy prawdziwą pozycję, żeby front odświeżył planszę
+    // i gracz rzucił świadomie, wiedząc, skąd startuje.
+    // Pole jest opcjonalne (stary klient / inne wywołania nie muszą go znać).
+    if (knownAbsPos !== null && knownAbsPos !== Number(st.abs_pos)) {
+      return { stale: true, known_abs: knownAbsPos, actual_abs: Number(st.abs_pos) };
+    }
 
     // Zbierz oczekujące efekty na tym graczu (tarcza nie jest efektem na turę — pomijamy).
     const pending = db.prepare(
@@ -2593,7 +2660,6 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     ).all(playerId);
     const freeze = pending.find(e => e.type === 'freeze');
     const curse = pending.find(e => e.type === 'curse');
-    const doubleMove = pending.find(e => e.type === 'double_move');
 
     const consume = id => db.prepare(
       `UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`
@@ -2623,9 +2689,10 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       return { frozen: true, source: freeze.source_player_id, source_nickname: freezeSourceNick, rolls_used_today: moveSeq };
     }
 
-    // DOUBLE MOVE: dwa rzuty w jednej turze.
-    const rolls = doubleMove ? [d6(), d6()] : [d6()];
-    if (doubleMove) consume(doubleMove.id);
+    // Jedna kostka na turę. (Double Move nie dokłada tu drugiego rzutu — daje osobny,
+    // dodatkowy ruch już w momencie użycia; patrz POST /api/snakes/shop/use.) Tablica
+    // zostaje, bo klątwa „Rozdwojona Kostka" nadal potrafi zmienić wynik rzutu.
+    const rolls = [d6()];
 
     const curseVariant = curse ? Number(curse.variant) : null;
     // Warianty 1 (Odwrotny Ruch) i 2 (Rozdwojona Kostka) zmieniają wartość kości —
@@ -2635,7 +2702,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const invertBoard = curseVariant === 5;
 
     // Sekwencyjnie wykonaj kroki (każdy rzut oddzielnie, by węże/drabiny/bonusy
-    // z każdego lądowania zadziałały poprawnie także przy podwójnym ruchu).
+    // z każdego lądowania zadziałały poprawnie).
     let abs = Number(st.abs_pos);
     const from_abs = abs;
     let tilePoints = 0;
@@ -2746,7 +2813,6 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       curse_variant: curseVariant,
       curse_label: curseVariant ? SL_CURSE_LABELS[curseVariant] : null,
       curse_coin_steal: curseCoinSteal,
-      double_move: !!doubleMove,
       knockback,
       boss_hit: bossHit,
       rolls_used_today: moveSeq
@@ -2754,7 +2820,20 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   });
 
   if (result.locked) {
-    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${SL_DAILY_ROLLS} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.` });
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00 (albo dołóż sobie ruch Double Move'em).` });
+  }
+
+  // Plansza u gracza była nieaktualna — rzut się NIE odbył (limit dzienny nietknięty).
+  // Odsyłamy świeży stan, żeby front od razu przerysował planszę na prawdziwą pozycję.
+  if (result.stale) {
+    return res.status(409).json({
+      error: `Twoja pozycja zmieniła się, odkąd załadowała się plansza — stoisz teraz na polu ${slTileOf(result.actual_abs)}, nie ${slTileOf(result.known_abs)}. Plansza odświeżona, rzuć jeszcze raz.`,
+      stale_position: true,
+      known_tile: slTileOf(result.known_abs),
+      actual_tile: slTileOf(result.actual_abs),
+      actual_abs_pos: result.actual_abs,
+      state: slBuildState(playerId)
+    });
   }
 
   // ── ZDARZENIA DISCORD ──
@@ -2774,9 +2853,6 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     }
     if (result.notes.includes('snake')) {
       slEmit('tile_landing', () => `🐍 **${nickname}** wdepnął na węża i zjechał na pole **${result.to_tile}**.`);
-    }
-    if (result.double_move) {
-      slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dwa rzuty (${result.rolls.join(' + ')}) i pole **${result.to_tile}**.`);
     }
     if (result.knockback && result.knockback.length) {
       const extraFor = k => (k.tile_effect === 'ladder' ? ' 🪜 i wjechał na drabinę!'
@@ -2840,12 +2916,30 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
 // Freeze/Curse wymagają celu (innego gracza). Double Move i Shield działają na siebie.
 // Jeśli cel ma aktywny Shield, atak zostaje ZABLOKOWANY: tarcza znika, atak nie działa
 // (power-up atakującego i tak się zużywa — ryzyko wpisane w atak).
+// Freeze, Curse i Shield lądują w sl_effects i czekają na swój moment; Double Move jako
+// jedyny działa NATYCHMIAST — dokłada ruch do dzisiejszej puli, do wykonania od razu.
 app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   const playerId = req.player.id;
   const nickname = req.player.nickname;
+  const today = todayWaw();
   const type = String(req.body.type || '');
   if (!SL_POWERUP_TYPES.includes(type)) {
     return res.status(400).json({ error: 'Nieznany power-up' });
+  }
+
+  // Double Move daje ruch OD RAZU, więc poza oknem gry nie ma czego dać — zamiast
+  // spalić power-up na ruch, którego i tak nie da się wykonać, odmawiamy użycia.
+  // (Freeze/Curse/Shield celowo bez tej bramki: one czekają na swój moment.)
+  if (type === 'double_move') {
+    if (isWeekendStr(today)) {
+      return res.status(400).json({ error: 'W weekend nie gramy — zostaw Double Move na poniedziałek.', is_weekend: true });
+    }
+    if (!slOfficeOpenAt()) {
+      return res.status(400).json({
+        error: `Double Move daje ruch od ręki, a biuro jest zamknięte — użyj go między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.`,
+        office_closed: true
+      });
+    }
   }
   const needsTarget = SL_SHIELD_BLOCKS.includes(type); // freeze / curse
   let targetId = playerId;
@@ -2873,6 +2967,18 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     if (type === 'shield' && slHasShield(playerId)) return { already: true };
 
     slAddPowerup(playerId, type, -1);
+
+    // DOUBLE MOVE: nie czeka na następną turę — od razu dokłada JEDEN ruch ponad
+    // dzienny limit, do wykonania natychmiast (przycisk „Rzuć" odblokowuje się w tej
+    // samej odpowiedzi). Dodatkowe sloty żyją tylko dziś: extra_rolls_date pilnuje, żeby
+    // niewykorzystane przepadły o północy razem z resztą limitu.
+    if (type === 'double_move') {
+      const stNow = slEnsureState(playerId);
+      const extraToday = stNow.extra_rolls_date === today ? Number(stNow.extra_rolls || 0) : 0;
+      db.prepare('UPDATE sl_state SET extra_rolls = ?, extra_rolls_date = ? WHERE player_id = ?')
+        .run(extraToday + 1, today, playerId);
+      return { none: false, blocked: false, variant: null, extra_roll: true };
+    }
 
     // TARCZA CELU: przechwytuje Freeze/Curse zanim staną się efektem na turę.
     if (needsTarget) {
@@ -2918,6 +3024,8 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     slLogActivity(targetId, 'shop_use', `🛡️ Zablokował ${label} od ${nickname} tarczą`);
   } else if (type === 'freeze') {
     // brak wpisu — patrz komentarz wyżej
+  } else if (out.extra_roll) {
+    slLogActivity(playerId, 'shop_use', `⏩ Użył ${label} — dodatkowy ruch do wykonania od razu`);
   } else if (needsTarget) {
     slLogActivity(playerId, 'shop_use', `Użył ${label} na ${targetNick}`);
     slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${type === 'curse' ? ' — zobaczysz jaka, dopiero gdy odpali' : ''}`);
@@ -2932,12 +3040,15 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
       `🛡️ **${targetNick}** zablokował tarczą ${type === 'freeze' ? 'Freeze' : 'Curse'} od **${nickname}**! Tarcza zużyta.`);
   } else if (type === 'curse') {
     slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
+  } else if (out.extra_roll) {
+    slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dołożył sobie ruch ponad dzienny limit i rzuca od razu.`);
   }
 
   res.json({
     success: true,
     applied_to: targetId,
     blocked: !!out.blocked,
+    extra_roll: !!out.extra_roll, // Double Move: ruch dołożony do dzisiejszej puli, do wykonania od ręki
     curse_variant: out.variant, // wylosowany wariant (patrz SL_CURSE_LABELS) — efekt ujawnia się dopiero, gdy odpali
     state: slBuildState(playerId)
   });
@@ -3120,13 +3231,15 @@ app.get('/api/snakes/admin/players', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const today = todayWaw();
   const rows = db.prepare(`
-    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date, s.rolls_today
+    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date, s.rolls_today,
+           s.extra_rolls, s.extra_rolls_date
     FROM sl_state s JOIN players p ON p.id = s.player_id
     ORDER BY p.nickname COLLATE NOCASE ASC
   `).all();
   res.json({
     players: rows.map(r => {
       const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
+      const dailyRolls = slDailyRollsFor(r, today);
       return {
         player_id: r.player_id,
         nickname: r.nickname,
@@ -3136,8 +3249,8 @@ app.get('/api/snakes/admin/players', (req, res) => {
         total_points: Number(r.total_points),
         last_move_date: r.last_move_date,
         rolls_used_today: rollsUsedToday,
-        daily_rolls: SL_DAILY_ROLLS,
-        moved_today: rollsUsedToday >= SL_DAILY_ROLLS
+        daily_rolls: dailyRolls,
+        moved_today: rollsUsedToday >= dailyRolls
       };
     }),
     today
