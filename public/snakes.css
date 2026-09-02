@@ -522,6 +522,29 @@
   transition: width 0.5s ease;
 }
 .boss-hp-fill { background: linear-gradient(90deg, var(--gold), var(--danger)); }
+
+/* ── CZAS BOSSA ──
+   Drugi, cieńszy pasek pod paskiem wypełnienia w bloku bossa. Niebieski, żeby nie mylił
+   się ani z limonkową zbiórką, ani ze złoto-czerwonym HP. NARASTA: pokazuje, ile czasu
+   bossa już minęło, więc pełny pasek = koniec czasu. Widoczny tylko w trakcie walki. */
+.boss-time-bar {
+  height: 4px;
+  margin-top: 3px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 20px;
+  overflow: hidden;
+}
+.boss-time-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(74,163,255,0.45), var(--boss-blue));
+  transition: width 1s linear;
+  width: 0%;
+}
+/* Ostatnia doba — pasek robi się alarmowy. */
+.boss-time-bar.is-urgent .boss-time-fill {
+  background: linear-gradient(90deg, rgba(232,93,74,0.45), var(--danger));
+}
 .coop-chips {
   display: flex;
   flex-wrap: wrap;
