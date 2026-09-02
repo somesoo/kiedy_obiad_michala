@@ -41,7 +41,14 @@ async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   const data = await r.json();
-  if (!r.ok) throw new Error(data.error || 'Błąd serwera');
+  if (!r.ok) {
+    // Doklejamy pełną odpowiedź do błędu — niektóre odmowy niosą dane, na których
+    // nam zależy (np. 409 z prawdziwą pozycją i świeżym stanem przy rzucie).
+    const err = new Error(data.error || 'Błąd serwera');
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -114,6 +121,60 @@ async function startApp() {
     loadActivity();
   }
   setInterval(updateCountdown, 1000);
+  setInterval(pollState, SL_POLL_MS);
+  // Powrót do karty = natychmiastowe dociągnięcie stanu, bez czekania na tik.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollState(); });
+}
+
+// ── ODŚWIEŻANIE W TLE ──
+// Snakes jest asynchroniczne: wypchnięcia, Freeze/Curse i wpłaty do wspólnej puli
+// robią inni gracze, w dowolnym momencie. Bez tego plansza pokazywałaby stan sprzed
+// wypchnięcia aż do przeładowania strony — a gracz rzucałby „z pola", na którym już
+// nie stoi (serwer i tak liczy od prawdziwej pozycji, patrz weryfikacja przy rzucie).
+const SL_POLL_MS = 10000;
+let pollInFlight = false;
+
+// Skrót stanu — przerysowujemy TYLKO, gdy faktycznie coś się zmieniło. Inaczej co 10 s
+// gubilibyśmy kwotę wpisaną w zbiórce, focus i pozycję scrolla w dzienniku.
+function stateSignature(g) {
+  return JSON.stringify([
+    g.players.map(p => [p.player_id, p.abs_pos, p.total_points]),
+    g.me.abs_pos, g.me.balance, g.me.total_points, g.me.rolls_remaining_today,
+    g.me.can_roll, g.me.has_shield,
+    g.pending_effects.map(e => e.type),
+    g.inventory,
+    g.coop ? [g.coop.status, g.coop.total, g.coop.boss ? g.coop.boss.hp : null] : null
+  ]);
+}
+
+async function pollState() {
+  // Nie wchodzimy w drogę trwającej akcji ani otwartym modalom (wybór celu, awatar),
+  // i nie odpytujemy serwera, gdy karta siedzi w tle.
+  if (pollInFlight || state.busy || state.pendingUse) return;
+  if (!state.game || !state.token || document.hidden) return;
+  const avatarOverlay = document.getElementById('avatar-overlay');
+  if (avatarOverlay && avatarOverlay.style.display !== 'none') return;
+  pollInFlight = true;
+  try {
+    const g = await api('GET', '/api/snakes/state');
+    const prev = state.game;
+    if (!prev || stateSignature(g) === stateSignature(prev)) return;
+    // Pozycja zmieniła się bez naszego rzutu (rzut idzie przez roll(), a wtedy
+    // state.busy blokuje polling) — czyli ktoś nas wypchnął.
+    const pushedMeanwhile = prev.me.abs_pos !== g.me.abs_pos;
+    state.game = g;
+    renderAll();
+    updateCountdown();
+    loadActivity(document.getElementById('activity-date').value || null);
+    if (pushedMeanwhile) {
+      flashKnockback([{ player_id: state.playerId }]);
+      showToast(`💥 Ktoś Cię wypchnął — stoisz teraz na polu ${g.me.tile}. Kolejny rzut liczy się stąd.`);
+    }
+  } catch (e) {
+    console.error('Odświeżanie stanu w tle nie powiodło się:', e);
+  } finally {
+    pollInFlight = false;
+  }
 }
 
 // ── ZDJĘCIE PROFILOWE (wymagane, żeby zagrać — i wymienialne w każdej chwili) ──
@@ -582,14 +643,27 @@ async function roll() {
   const btn = document.getElementById('btn-roll');
   btn.disabled = true;
   try {
-    const res = await api('POST', '/api/snakes/roll', {});
+    // `known_abs_pos` = pole, na którym mamy narysowany swój pionek. Serwer porówna je
+    // ze stanem w bazie i odmówi rzutu, jeśli patrzymy na nieaktualną planszę.
+    const res = await api('POST', '/api/snakes/roll', { known_abs_pos: g.me.abs_pos });
     state.game = res.state;
     renderAll();
     showRollResult(res.move);
     if (res.move.knockback && res.move.knockback.length) flashKnockback(res.move.knockback);
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
-    showToast(e.message);
+    // Rzut odrzucony, bo ktoś nas wypchnął między odświeżeniami — NIE zużył ruchu.
+    // Serwer dosyła świeży stan: przerysowujemy planszę i prosimy o ponowny rzut,
+    // żeby gracz wiedział, z którego pola faktycznie startuje.
+    if (e.data && e.data.stale_position) {
+      state.game = e.data.state;
+      renderAll();
+      flashKnockback([{ player_id: state.playerId }]);
+      showToast(`💥 Ktoś Cię wypchnął z pola ${e.data.known_tile} na ${e.data.actual_tile} — ruch NIE przepadł, rzuć jeszcze raz.`);
+      loadActivity(document.getElementById('activity-date').value || null);
+    } else {
+      showToast(e.message);
+    }
   } finally {
     state.busy = false;
   }
@@ -807,6 +881,12 @@ function renderCoop(g) {
   const el = document.getElementById('coop-panel');
   if (!el) return;
 
+  // Panel przerysowuje się też przy odświeżaniu w tle (co 10 s), a przepisanie
+  // innerHTML skasowałoby kwotę, którą gracz właśnie wpisuje do zbiórki — i focus.
+  const amountEl = document.getElementById('coop-amount');
+  const keepAmount = amountEl ? amountEl.value : '';
+  const keepFocus = !!amountEl && document.activeElement === amountEl;
+
   const active = c.status === 'event_active' && c.boss && c.boss.active;
   const karaTxt = c.next_on_loss.threshold < c.threshold
     ? `atak → próg spadnie do ${c.next_on_loss.threshold}`
@@ -846,6 +926,14 @@ function renderCoop(g) {
       ${prevTxt}
     </div>
     ${slCoopChipsHtml(c)}`;
+
+  if (keepAmount || keepFocus) {
+    const freshAmount = document.getElementById('coop-amount');
+    if (freshAmount) {
+      freshAmount.value = keepAmount;
+      if (keepFocus) freshAmount.focus();
+    }
+  }
   updateCoopDeadline();
 }
 

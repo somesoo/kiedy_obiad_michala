@@ -2558,6 +2558,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   const nickname = req.player.nickname;
   const today = todayWaw();
   const board = slBoardMap();
+  // Pozycja, którą klient ma narysowaną na planszy (patrz weryfikacja niżej).
+  // Brak pola = null, czyli weryfikacja pominięta.
+  const knownAbsPos = Number.isInteger(req.body && req.body.known_abs_pos)
+    ? Number(req.body.known_abs_pos)
+    : null;
 
   // Bramka: bez zdjęcia profilowego nie da się zagrać. Sprawdzana przed transakcją,
   // żeby nawet nie próbować rzutu — klient i tak trzyma gracza na ekranie uploadu.
@@ -2586,6 +2591,18 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
     if (rollsUsedToday >= SL_DAILY_ROLLS) return { locked: true };
     const moveSeq = rollsUsedToday + 1;
+
+    // ── WERYFIKACJA POZYCJI ──
+    // Klient dosyła `known_abs_pos` — pole, na którym RYSUJE swój pionek w chwili
+    // klikania „Rzuć". Ruch zawsze liczy się od pozycji z bazy (`st.abs_pos`), ale gdy
+    // te dwie się rozjeżdżają, to znaczy, że gracz patrzy na nieaktualną planszę:
+    // ktoś go w międzyczasie wypchnął. Wtedy NIE ruszamy — nie zużywamy rzutu, nie
+    // odpalamy efektów, tylko odsyłamy prawdziwą pozycję, żeby front odświeżył planszę
+    // i gracz rzucił świadomie, wiedząc, skąd startuje.
+    // Pole jest opcjonalne (stary klient / inne wywołania nie muszą go znać).
+    if (knownAbsPos !== null && knownAbsPos !== Number(st.abs_pos)) {
+      return { stale: true, known_abs: knownAbsPos, actual_abs: Number(st.abs_pos) };
+    }
 
     // Zbierz oczekujące efekty na tym graczu (tarcza nie jest efektem na turę — pomijamy).
     const pending = db.prepare(
@@ -2755,6 +2772,19 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
   if (result.locked) {
     return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${SL_DAILY_ROLLS} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.` });
+  }
+
+  // Plansza u gracza była nieaktualna — rzut się NIE odbył (limit dzienny nietknięty).
+  // Odsyłamy świeży stan, żeby front od razu przerysował planszę na prawdziwą pozycję.
+  if (result.stale) {
+    return res.status(409).json({
+      error: `Twoja pozycja zmieniła się, odkąd załadowała się plansza — stoisz teraz na polu ${slTileOf(result.actual_abs)}, nie ${slTileOf(result.known_abs)}. Plansza odświeżona, rzuć jeszcze raz.`,
+      stale_position: true,
+      known_tile: slTileOf(result.known_abs),
+      actual_tile: slTileOf(result.actual_abs),
+      actual_abs_pos: result.actual_abs,
+      state: slBuildState(playerId)
+    });
   }
 
   // ── ZDARZENIA DISCORD ──
