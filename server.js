@@ -1325,7 +1325,8 @@ const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportio
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 // Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
 const SL_KNOCKBACK_COIN_STEAL = 20;
-// O ile pól cofa się wypchnięty gracz (nie na start okrążenia/planszy — tylko lokalnie w tył).
+// O ile pól cofa się wypchnięty gracz — lokalnie w tył, z twardym progiem na polu 0
+// bieżącego okrążenia (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
 const SL_KNOCKBACK_TILES_BACK = 10;
 
 // Ile ruchów (rzutów) dziennie ma każdy gracz na starcie dnia. Freeze blokuje JEDEN
@@ -1850,8 +1851,9 @@ function slFindOccupant(tile, excludeIds) {
 }
 
 // Gracz, który ląduje na zajętym polu, wypycha okupanta o SL_KNOCKBACK_TILES_BACK pól
-// do tyłu (nie na start okrążenia ani planszy — jeśli to zeszłoby poniżej pola 0,
-// ofiara staje na polu 0). Do tego zabiera mu SL_KNOCKBACK_COIN_STEAL
+// do tyłu — ale najdalej na pole 0 BIEŻĄCEGO okrążenia: cofnięcie nigdy nie przenosi
+// ofiary na poprzednią pętlę ani nie odbiera jej okrążenia. Do tego zabiera mu
+// SL_KNOCKBACK_COIN_STEAL
 // monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
 // TO konkretne wypchnięcie — tak samo jak każdy inny zarobek w grze (rzut kostką, nagroda
 // za bossa, pole bonusowe), skradzione monety liczą się RÓWNIEŻ jako punkty do rankingu,
@@ -1874,7 +1876,11 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     const occ = slFindOccupant(targetTile, pushedIds);
     if (!occ) break;
     const fromAbs = Number(occ.abs_pos);
-    const knockedAbs = Math.max(0, fromAbs - SL_KNOCKBACK_TILES_BACK);
+    // Cofnięcie zatrzymuje się na polu 0 BIEŻĄCEGO okrążenia — wypchnięcie nigdy nie
+    // zabiera całego okrążenia. Gracz tuż po starcie kolejnej pętli (np. pole 6) ląduje
+    // na polu 0 tej pętli, a nie na końcówce poprzedniej.
+    const lapStartAbs = fromAbs - slTileOf(fromAbs);
+    const knockedAbs = Math.max(lapStartAbs, fromAbs - SL_KNOCKBACK_TILES_BACK);
     const resolved = slResolveTileEffect(knockedAbs, board);
     const toAbs = resolved.abs;
     const bonusPoints = resolved.tilePoints;
