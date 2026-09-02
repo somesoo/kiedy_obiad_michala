@@ -1585,6 +1585,10 @@ ensureColumn('sl_coop', 'boss_hp', 'INTEGER DEFAULT 0');
 ensureColumn('sl_coop', 'boss_defeated_at', 'DATETIME');
 ensureColumn('sl_coop', 'time_limit_days', 'INTEGER DEFAULT 5');
 ensureColumn('sl_coop', 'boss_deadline_at', 'DATETIME');
+// Moment wybudzenia bossa — sam w sobie niczego nie rozstrzyga (o przegranej decyduje
+// boss_deadline_at), ale bez niego nie da się narysować paska „ile czasu zostało",
+// bo termin liczy się w DNIACH ROBOCZYCH i długość walki w zegarze bywa różna.
+ensureColumn('sl_coop', 'boss_started_at', 'DATETIME');
 
 // sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
 // jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
@@ -2212,6 +2216,15 @@ function slCoopPayload(meId) {
       defeated: !!coop.boss_defeated_at,
       active: coop.status === 'event_active',
       deadline_at: coop.boss_deadline_at ? new Date(coop.boss_deadline_at.replace(' ', 'T') + 'Z').toISOString() : null,
+      // Początek walki — potrzebny wyłącznie do paska postępu w nagłówku. Dla walk
+      // wybudzonych PRZED dołożeniem kolumny boss_started_at (albo gdy admin przesunął
+      // termin) wracamy do przybliżenia: termin minus limit w dobach zegarowych. Pasek
+      // wyjdzie odrobinę zaniżony, bo dni robocze bywają dłuższe niż doby, ale nigdy pusty.
+      started_at: coop.boss_started_at
+        ? new Date(coop.boss_started_at.replace(' ', 'T') + 'Z').toISOString()
+        : (coop.boss_deadline_at
+            ? new Date(Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z') - Number(coop.time_limit_days) * 86400000).toISOString()
+            : null),
       time_limit_days: Number(coop.time_limit_days),
       attack_cost: SL_BOSS_ATTACK_COST,
       attack_damage: SL_BOSS_ATTACK_DAMAGE,
@@ -2231,7 +2244,8 @@ function startCoopBossEvent(coop) {
   const maxHp = Math.round(Number(coop.threshold) * SL_BOSS_HP_MULTIPLIER);
   const deadlineMs = addBusinessDaysMs(Date.now(), Number(coop.time_limit_days));
   db.prepare(`
-    UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ?, boss_deadline_at = datetime(?, 'unixepoch')
+    UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ?,
+                       boss_started_at = CURRENT_TIMESTAMP, boss_deadline_at = datetime(?, 'unixepoch')
     WHERE cycle = ?
   `).run(name, maxHp, maxHp, Math.floor(deadlineMs / 1000), coop.cycle);
   return { started: true, cycle: Number(coop.cycle), boss_name: name, boss_max_hp: maxHp, deadline_ms: deadlineMs };
@@ -2971,9 +2985,20 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
       db.prepare(`UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(priceCurse.id);
     }
-    slLogActivity(playerId, 'shop_buy',
-      `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} pkt)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
-    if (priceCurse && priceCurse.source_player_id) {
+    // TARCZA NIE ZOSTAWIA ŚLADU W DZIENNIKU — ani przy zakupie, ani przy użyciu (patrz
+    // /shop/use). Cała jej wartość polega na tym, że atakujący nie wie, czy trafi w mur:
+    // gdyby feed pokazywał „kupił Shield", wszyscy po prostu omijaliby tego gracza.
+    // Saldo innych graczy nie jest publiczne (patrz slLeaderboard), więc brak wpisu
+    // naprawdę niczego nie zdradza.
+    if (type !== 'shield') {
+      slLogActivity(playerId, 'shop_buy',
+        `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} pkt)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
+    }
+    // Ten wpis jest publiczny, a przy zakupie tarczy zdradziłby ją okrężną drogą: „ktoś
+    // przepłacił", a w feedzie ani śladu zakupu — czyli kupił Shield. Świadomy koszt:
+    // rzucający klątwę traci powiadomienie w tym jednym przypadku, ale tarcza zostaje
+    // szczelna. Kupujący i tak widzi klątwę u siebie w toaście.
+    if (priceCurse && priceCurse.source_player_id && type !== 'shield') {
       slLogActivity(priceCurse.source_player_id, 'shop_use',
         `🧾 Twoja klątwa ${priceCurseLabel} odpaliła — ${nickname} przepłacił o ${cost - baseCost} pkt!`);
     }
@@ -2990,7 +3015,9 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
   }
 
   // Klątwa ujawnia się dokładnie w chwili, w której zadziałała — tak jak każda inna.
-  if (out.cursed) {
+  // Wyjątek: zakup tarczy zostaje niewidoczny nawet wtedy, bo komunikat nazwałby power-up
+  // (a sama kwota i tak by go zdradziła). Kupujący widzi klątwę u siebie w toaście.
+  if (out.cursed && type !== 'shield') {
     slEmit('powerup_curse', () =>
       `🧾 **${nickname}** wpadł na klątwę **${priceCurseLabel}** — za ${SL_POWERUP_LABELS[type]} zapłacił ${out.cost} zamiast ${baseCost} pkt.`);
   }
@@ -3122,6 +3149,9 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   } else if (needsTarget) {
     slLogActivity(playerId, 'shop_use', `Użył ${label} na ${targetNick}`);
     slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${type === 'curse' ? ' — zobaczysz jaka, dopiero gdy odpali' : ''}`);
+  } else if (type === 'shield') {
+    // Cisza — tarcza ujawnia się WYŁĄCZNIE wtedy, gdy coś zablokuje (gałąź out.blocked
+    // wyżej dopisuje wpis obu stronom). Inaczej cały jej sens znika.
   } else {
     slLogActivity(playerId, 'shop_use', `Użył ${label}`);
   }

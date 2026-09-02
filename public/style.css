@@ -9,6 +9,7 @@
   --text-muted:   #777777;
   --danger:       #E85D4A;
   --gold:         #F5C842;
+  --boss-blue:    #4AA3FF;
   --header-h:     64px;
 }
 
@@ -125,6 +126,49 @@ h1, h2, h3, .logo-text {
   padding: 0 16px;
   font-family: 'JetBrains Mono', monospace;
 }
+
+/* ── PASEK CZASU BOSSA ──
+   Drugi, wyraźnie cieńszy pasek pod paskiem statusu. Niebieski, żeby nie mylił się z
+   limonkowym paskiem doby ani z czerwonym HP bossa. Wypełnienie KURCZY się w miarę
+   upływu czasu — pasek pokazuje, ile go jeszcze zostało, nie ile minęło. */
+.boss-bar-wrap {
+  position: relative;
+  height: 18px;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-top: 1px solid var(--muted);
+}
+
+.boss-bar {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, rgba(74,163,255,0.35), rgba(74,163,255,0.12));
+  border-right: 2px solid var(--boss-blue);
+  transition: width 1s linear;
+  width: 0%;
+}
+
+.boss-bar-text {
+  position: relative;
+  z-index: 1;
+  font-size: 10px;
+  color: var(--boss-blue);
+  letter-spacing: 0.5px;
+  padding: 0 16px;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ostatnia doba walki — pasek robi się alarmowy, żeby dało się to zauważyć kątem oka. */
+.boss-bar-wrap.is-urgent .boss-bar {
+  background: linear-gradient(90deg, rgba(232,93,74,0.35), rgba(232,93,74,0.12));
+  border-right-color: var(--danger);
+}
+.boss-bar-wrap.is-urgent .boss-bar-text { color: var(--danger); }
 
 /* ── LOGIN OVERLAY ── */
 .overlay {
