@@ -396,7 +396,6 @@ function renderAll() {
   renderRollButton(g);
   renderEffectsHint(g);
   renderCoop(g);
-  updateBossCountdown();
 }
 
 // ── STATY ──
@@ -922,7 +921,12 @@ function renderCoop(g) {
     <div class="coop-row-main">
       <span class="coop-emoji">${active ? '👹' : '👀'}</span>
       <span class="coop-name">${nameTxt}</span>
-      <div class="coop-bar-flex"><div class="coop-bar"><div class="coop-bar-fill${active ? ' boss-hp-fill' : ''}" style="width:${barPct}%"></div></div></div>
+      <div class="coop-bar-flex">
+        <div class="coop-bar"><div class="coop-bar-fill${active ? ' boss-hp-fill' : ''}" style="width:${barPct}%"></div></div>
+        ${active && c.boss.deadline_at
+          ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(c.boss.started_at || '')}" data-until="${esc(c.boss.deadline_at)}" title="Czas bossa"><div class="boss-time-fill"></div></div>`
+          : ''}
+      </div>
       <span class="coop-stat mono">${statTxt}</span>
       ${timerHtml}
       <div class="coop-actions">${actionHtml}</div>
@@ -944,39 +948,28 @@ function renderCoop(g) {
   updateCoopDeadline();
 }
 
-// Cienki niebieski pasek pod paskiem statusu: ile czasu zostało do końca walki z bossem.
-// Wypełnienie KURCZY się do zera w miarę zbliżania się terminu, więc jednym rzutem oka
-// widać, ile jeszcze zostało. Poza walką pasek w ogóle nie jest pokazywany.
-function updateBossCountdown() {
-  const wrap = document.getElementById('boss-bar-wrap');
-  if (!wrap) return;
-  const c = state.game && state.game.coop;
-  const boss = c && c.boss;
-  if (!boss || !boss.active || !boss.deadline_at) { wrap.hidden = true; return; }
-
-  const deadline = Date.parse(boss.deadline_at);
-  const started = boss.started_at ? Date.parse(boss.started_at) : NaN;
+// Cienki pasek pod paskiem wypełnienia w bloku bossa: ile czasu bossa już MINĘŁO.
+// Narasta od zera do pełna — pełny pasek znaczy, że czas się skończył. Element powstaje
+// na nowo przy każdym renderCoop, więc dane niesie w atrybutach, a nie w domknięciu.
+function updateBossTimeBar() {
+  const bar = document.getElementById('boss-time-bar');
+  if (!bar) return; // nie ma walki — nie ma paska
+  const until = Date.parse(bar.dataset.until);
+  const from = Date.parse(bar.dataset.from);
+  if (!Number.isFinite(until)) return;
   const now = Date.now();
-  const leftMs = Math.max(0, deadline - now);
-  // Bez sensownego początku walki nie ma z czego liczyć proporcji — pokazujemy wtedy
-  // pełny pasek i sam licznik, zamiast zgadywać skalę.
-  const totalMs = Number.isFinite(started) && deadline > started ? deadline - started : 0;
-  const pct = totalMs > 0 ? Math.max(0, Math.min(100, (leftMs / totalMs) * 100)) : 100;
-
-  wrap.hidden = false;
-  wrap.classList.toggle('is-urgent', leftMs <= 86400000); // ostatnia doba
-  document.getElementById('boss-bar').style.width = pct + '%';
-  const secs = Math.round(leftMs / 1000);
-  const days = Math.floor(secs / 86400);
-  const rest = secs % 86400;
-  document.getElementById('boss-bar-text').textContent = leftMs > 0
-    ? `👹 ${boss.name} — do końca walki ${days > 0 ? days + 'd ' : ''}${fmtHMS(rest)}`
-    : `👹 ${boss.name} — czas minął, trwa rozliczenie…`;
+  // Bez wiarygodnego początku walki nie ma z czego liczyć proporcji — zostawiamy pasek
+  // pusty zamiast zgadywać skalę (sam licznik obok i tak pokazuje, ile zostało).
+  const total = Number.isFinite(from) && until > from ? until - from : 0;
+  const elapsed = total > 0 ? Math.max(0, Math.min(total, now - from)) : 0;
+  bar.querySelector('.boss-time-fill').style.width = (total > 0 ? (elapsed / total) * 100 : 0) + '%';
+  bar.classList.toggle('is-urgent', until - now <= 86400000); // ostatnia doba
 }
 
 // Odświeża licznik czasu do pokonania bossa (wołane co sekundę z updateCountdown) —
 // no-op, gdy boss nie walczy (element #coop-deadline wtedy w ogóle nie istnieje).
 function updateCoopDeadline() {
+  updateBossTimeBar();
   const el = document.getElementById('coop-deadline');
   if (!el) return;
   const until = Date.parse(el.dataset.until);
@@ -1130,7 +1123,6 @@ function updateCountdown() {
   if (barEl) barEl.style.width = ((1 - toNext / 86400) * 100) + '%';
   if (g) renderRollButton(g);
   updateCoopDeadline();
-  updateBossCountdown();
 }
 
 // ── CONFETTI ──
