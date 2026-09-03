@@ -167,6 +167,23 @@
       </div>
 
       <div class="adm-card" style="border-color: var(--danger)">
+        <h3 style="color: var(--danger)">↩️ COFNIJ CAŁY DZIEŃ</h3>
+        <div class="adm-note">
+          Kasuje wszystkie ruchy wskazanego dnia i stawia graczy tam, gdzie stali o 8:00 —
+          punkty i monety zarobione tego dnia znikają, dzienny limit rzutów (i sloty
+          z Double Move) wracają do zera, dziennik z tego dnia jest czyszczony.
+          <strong>Nie zwraca</strong> monet wydanych w sklepie ani na ataki (kupione
+          power-upy zostają w ekwipunku) i nie odkręca monet ukradzionych przy wypchnięciu.
+          Gracza, którego ktoś tego dnia zbił, a on sam nie zdążył rzucić, trzeba poprawić
+          ręcznie — panel wypisze, kogo to dotyczy. <strong>Nieodwracalne.</strong>
+        </div>
+        <div class="adm-actions">
+          <input type="date" id="rollback-date" />
+          <button class="btn-danger" id="btn-day-rollback">↩️ Cofnij dzień do 8:00</button>
+        </div>
+      </div>
+
+      <div class="adm-card" style="border-color: var(--danger)">
         <h3 style="color: var(--danger)">⚠️ RESET GRY</h3>
         <div class="adm-note">
           Zeruje CAŁĄ grę Snakes: każdy gracz wraca na pole 0 z saldem, punktami,
@@ -244,6 +261,9 @@
     async function loadPlayers() {
       const data = await api('GET', `/api/snakes/admin/players?password=${encodeURIComponent(pass)}`);
       playersToday = data.today;
+      // Data w cofaniu dnia domyślnie na dziś — wg zegara SERWERA (Europe/Warsaw),
+      // nie przeglądarki, żeby admin z innej strefy nie cofnął przypadkiem złego dnia.
+      setIfIdle('rollback-date', playersToday);
       renderPlayers(data.players);
     }
 
@@ -543,6 +563,21 @@
         showToast(res.resolved
           ? `⏰ Termin już minął — walka rozliczona od razu (${res.resolved.defeated ? 'pokonany' : 'boss zaatakował'}).`
           : `✅ Termin walki ustawiony na ${fmtDate(new Date(deadlineMs).toISOString())}`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-day-rollback').addEventListener('click', async () => {
+      const date = document.getElementById('rollback-date').value || playersToday;
+      if (!confirm(`Cofnąć CAŁY dzień ${date}? Wszystkie ruchy z tego dnia znikną, gracze wrócą na pozycje z 8:00, a zarobione tego dnia punkty i monety przepadną. Tej operacji NIE da się cofnąć.`)) return;
+      try {
+        const res = await api('POST', '/api/snakes/admin/day/rollback', { password: pass, date });
+        await loadSettings();
+        const pushed = res.pushed_not_restored.length
+          ? ` Do ręcznej poprawki (wypchnięci, sami nie rzucali): ${res.pushed_not_restored.join(', ')}.`
+          : '';
+        showToast(`↩️ Cofnięto ${res.date}: ${res.players} graczy, ${res.moves_deleted} ruchów, -${res.points_removed} pkt.${pushed}`);
       } catch (e) {
         showToast(e.message);
       }

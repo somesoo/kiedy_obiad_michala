@@ -1341,6 +1341,12 @@ const SL_KNOCKBACK_TILES_BACK_MAX = 6;
 // z nich (nie cały dzień), a Double Move DOKŁADA jeden ruch ponad ten limit — od ręki,
 // w momencie użycia (patrz POST /api/snakes/shop/use i slDailyRollsFor).
 const SL_DAILY_ROLLS = 3;
+// Ile slotów PONAD dzienny limit można w sumie dołożyć Double Move'ami w ciągu jednego
+// dnia. Bez tego sufitu Double Move był dziurą w ekonomii: każdy rzut daje punkty, punkty
+// są walutą sklepu, więc gracz z zapasem monet kupował kolejne Double Move'y i rzucał
+// w kółko (zdarzyło się 31 ruchów jednego dnia). Twardy limit dnia to
+// SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS = 5 rzutów.
+const SL_MAX_EXTRA_ROLLS = 2;
 // Między ruchami NIE MA odstępu — gracz sam decyduje, jak rozłożyć swoje trzy rzuty
 // w ciągu dnia (choćby wszystkie pod rząd). Jedyne ograniczenie to okno godzin biurowych.
 
@@ -3298,6 +3304,14 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     // Shield można trzymać tylko jeden naraz — drugi byłby wyrzuceniem punktów.
     if (type === 'shield' && slHasShield(playerId)) return { already: true };
 
+    // Double Move ma dzienny sufit (SL_MAX_EXTRA_ROLLS) — sprawdzamy go PRZED zużyciem
+    // sztuki, żeby odbity użytkownik nie stracił przedmiotu za nic.
+    const stBefore = type === 'double_move' ? slEnsureState(playerId) : null;
+    const extraToday = stBefore && stBefore.extra_rolls_date === today ? Number(stBefore.extra_rolls || 0) : 0;
+    if (type === 'double_move' && extraToday >= SL_MAX_EXTRA_ROLLS) {
+      return { capped: true, max_extra: SL_MAX_EXTRA_ROLLS, daily_max: SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS };
+    }
+
     slAddPowerup(playerId, type, -1);
 
     // DOUBLE MOVE: nie czeka na następną turę — od razu dokłada JEDEN ruch ponad
@@ -3305,8 +3319,6 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     // samej odpowiedzi). Dodatkowe sloty żyją tylko dziś: extra_rolls_date pilnuje, żeby
     // niewykorzystane przepadły o północy razem z resztą limitu.
     if (type === 'double_move') {
-      const stNow = slEnsureState(playerId);
-      const extraToday = stNow.extra_rolls_date === today ? Number(stNow.extra_rolls || 0) : 0;
       db.prepare('UPDATE sl_state SET extra_rolls = ?, extra_rolls_date = ? WHERE player_id = ?')
         .run(extraToday + 1, today, playerId);
       return { none: false, blocked: false, variant: null, extra_roll: true };
@@ -3344,6 +3356,11 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   }
   if (out.already) {
     return res.status(400).json({ error: 'Masz już aktywną tarczę — poczekaj, aż coś zablokuje.' });
+  }
+  if (out.capped) {
+    return res.status(400).json({
+      error: `Dziś wykorzystałeś już ${out.max_extra} dodatkowe ruchy z Double Move — dzienny limit to ${out.daily_max} rzutów. Sztuka została w ekwipunku, użyjesz jej jutro.`
+    });
   }
 
   // ── DZIENNIK AKTYWNOŚCI (obie strony, gdy dotyczy) ──
@@ -3843,6 +3860,92 @@ app.post('/api/snakes/admin/coop/toggle', (req, res) => {
     ...out,
     coop: slCoopPayload(null)
   });
+});
+
+// ── COFNIĘCIE CAŁEGO DNIA GRY ──
+// Kasuje wszystko, co wydarzyło się danego dnia, i stawia graczy tam, gdzie stali o 8:00.
+// Pozycję startową bierzemy z `from_abs` PIERWSZEGO ruchu gracza tego dnia — to dokładnie
+// pole, z którego zaczynał, zanim cokolwiek dziś rzucił. Punkty z tego dnia (a więc i
+// monety, bo rzut dolicza je do obu) odejmujemy, z podłogą na zerze.
+// Czego to NIE robi (świadomie):
+//   • nie zwraca monet wydanych w sklepie ani na ataki — kupione power-upy zostają
+//     w ekwipunku, wydane monety przepadają,
+//   • nie odkręca monet ukradzionych przy wypchnięciu/klątwie — kwota była przycinana do
+//     salda ofiary, więc realnie zabrana wartość nigdzie nie została zapisana,
+//   • nie kasuje oczekujących Freeze/Curse — atak padł, cel dowie się przy swoim ruchu.
+// Uwaga na wypchniętych: gracz, którego ktoś dziś zbił ZANIM sam zdążył rzucić, wróci na
+// pole sprzed swojego pierwszego rzutu, czyli już po wypchnięciu (a gracz, który dziś
+// wcale nie rzucał, zostaje tam, gdzie go zbito) — wypchnięcia nie mają w bazie zapisu
+// pozycji sprzed, więc tego jednego nie da się odtworzyć automatycznie. Takich graczy
+// zwracamy w `pushed_not_restored`, żeby dało się ich poprawić ręcznie z panelu.
+function slRollbackDay(date) {
+  return transaction(() => {
+    const movers = db.prepare(`
+      SELECT m.player_id, p.nickname, SUM(m.points) AS points, COUNT(*) AS moves
+      FROM sl_moves m JOIN players p ON p.id = m.player_id
+      WHERE m.move_date = ? GROUP BY m.player_id, p.nickname
+    `).all(date);
+
+    const firstOfDay = db.prepare(`
+      SELECT from_abs FROM sl_moves WHERE player_id = ? AND move_date = ?
+      ORDER BY move_seq ASC, id ASC LIMIT 1
+    `);
+    const restore = db.prepare(`
+      UPDATE sl_state
+      SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?), balance = MAX(0, balance - ?),
+          rolls_today = 0, last_move_date = NULL, last_move_at = NULL
+      WHERE player_id = ?
+    `);
+
+    const details = [];
+    for (const m of movers) {
+      const startAbs = Number(firstOfDay.get(m.player_id, date).from_abs);
+      const pts = Number(m.points);
+      restore.run(startAbs, Math.floor(startAbs / SL_BOARD_SIZE), pts, pts, m.player_id);
+      details.push({
+        player_id: m.player_id, nickname: m.nickname, moves: Number(m.moves),
+        points_removed: pts, back_to_tile: slTileOf(startAbs)
+      });
+    }
+
+    // Kto dziś oberwał wypchnięciem, a sam nie rzucał — jego pozycji nie mamy z czego
+    // odtworzyć. Zbieramy listę do zgłoszenia adminowi, ZANIM skasujemy dziennik.
+    const pushedNotRestored = db.prepare(`
+      SELECT DISTINCT a.player_id, p.nickname
+      FROM sl_activity a JOIN players p ON p.id = a.player_id
+      WHERE a.day = ? AND a.type = 'knockback' AND a.detail LIKE '%Wypchnięty%'
+        AND a.player_id NOT IN (SELECT player_id FROM sl_moves WHERE move_date = ?)
+    `).all(date, date).map(r => r.nickname);
+
+    // Gracze bez ruchów, ale z licznikiem/slotami z tego dnia (np. kupili Double Move
+    // i nie zdążyli go zużyć) — też wracają do czystego limitu.
+    db.prepare(`UPDATE sl_state SET rolls_today = 0, last_move_date = NULL, last_move_at = NULL WHERE last_move_date = ?`).run(date);
+    db.prepare(`UPDATE sl_state SET extra_rolls = 0, extra_rolls_date = NULL WHERE extra_rolls_date = ?`).run(date);
+
+    const moves = db.prepare('DELETE FROM sl_moves WHERE move_date = ?').run(date);
+    const activity = db.prepare('DELETE FROM sl_activity WHERE day = ?').run(date);
+
+    return {
+      date,
+      players: details.length,
+      moves_deleted: moves.changes,
+      activity_deleted: activity.changes,
+      points_removed: details.reduce((a, d) => a + d.points_removed, 0),
+      pushed_not_restored: pushedNotRestored,
+      details
+    };
+  });
+}
+
+// POST /api/snakes/admin/day/rollback { password, date? } — cofa cały dzień gry do stanu
+// z 8:00 (domyślnie dzisiejszy, wg czasu Warszawy). Patrz slRollbackDay po szczegóły tego,
+// co wraca, a co zostaje. Nieodwracalne — potwierdzenie leży po stronie panelu.
+app.post('/api/snakes/admin/day/rollback', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
+  const out = slRollbackDay(date);
+  console.log(`Snakes/Admin: cofnięto dzień ${date} — ${out.players} graczy, ${out.moves_deleted} ruchów, ${out.points_removed} pkt odjęte`);
+  res.json({ success: true, ...out });
 });
 
 // POST /api/snakes/admin/players/:id/stats { password, balance?, total_points? } — ręczna
