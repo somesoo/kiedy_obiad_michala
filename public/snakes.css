@@ -498,7 +498,6 @@
 }
 .coop-actions button { padding: 4px 10px; font-size: 11px; }
 .coop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-boss-attack { background: var(--danger); border-color: var(--danger); }
 .coop-row-sub {
   display: flex;
   flex-wrap: wrap;

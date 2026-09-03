@@ -911,11 +911,19 @@ function renderCoop(g) {
     ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(b.started_at || '')}" data-until="${esc(b.deadline_at)}" title="Czas na pokonanie bossa"><div class="boss-time-fill"></div></div>`
     : '';
 
-  const actionHtml = `<button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${g.me.balance >= b.attack_cost ? '' : 'disabled'}>🗡️ -${b.attack_cost}</button>`;
+  // Wpłata jest dowolnej wysokości (1 moneta = 1 obrażenie), więc zamiast przycisku
+  // z ryczałtem mamy pole kwoty. Przy przerysowaniu panelu (co 10 s) trzeba zachować to,
+  // co gracz właśnie wpisuje — inaczej kwota znika mu spod palców.
+  const amountEl = document.getElementById('coop-amount');
+  const keepAmount = amountEl ? amountEl.value : '';
+  const keepFocus = !!amountEl && document.activeElement === amountEl;
+  const actionHtml =
+    `<input type="number" id="coop-amount" min="1" step="1" max="${g.me.balance}" placeholder="monety" />
+     <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Wpłać</button>`;
 
   const prevTxt = c.previous_result
     ? `<span class="coop-prev">${c.previous_result.defeated
-        ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany +${c.previous_result.bonus}`
+        ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany`
         : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} monet`}</span>`
     : '';
 
@@ -932,11 +940,18 @@ function renderCoop(g) {
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>👹 Każdy rzut kostką rani bossa — a za monety można dobić go ręcznym atakiem. Nie zdążycie na czas — zaatakuje i zabierze do ${c.timeout_penalty} monet każdemu (walczącym pomniejszone o zadane obrażenia — Ty stracisz ${c.my_timeout_penalty}). Pokonacie? Nagroda + premia dla wszystkich, którzy walczyli, i od razu kolejny, trudniejszy boss.</span>
+      <span>👹 Każdy rzut kostką rani bossa za darmo, a wpłata to <strong>1 moneta = 1 obrażenie</strong> (wpłacasz ile chcesz). Pokonacie go na czas — każdy, kto wpłacił, dostaje <strong>połowę wpłaty w punktach</strong> i odzyskuje do ${b.contrib_refund} monet (nie więcej, niż włożył). Nie zdążycie — wpłaty przepadają, a boss zabierze do ${c.timeout_penalty} monet każdemu (walczącym mniej — Ty stracisz ${c.my_timeout_penalty}). Tak czy siak od razu staje kolejny.${c.my_coins ? ` Wpłaciłeś dziś w tej walce: ${c.my_coins}.` : ''}</span>
       ${prevTxt}
     </div>
     ${slCoopChipsHtml(c)}`;
 
+  if (keepAmount || keepFocus) {
+    const fresh = document.getElementById('coop-amount');
+    if (fresh) {
+      fresh.value = keepAmount;
+      if (keepFocus) fresh.focus();
+    }
+  }
   updateCoopDeadline();
 }
 
@@ -972,22 +987,34 @@ function updateCoopDeadline() {
   el.textContent = `⏳ ${daysTxt}${fmtHMS(rest)}`;
 }
 
-document.getElementById('coop-panel').addEventListener('click', e => {
-  if (e.target.closest('#btn-boss-attack')) attackBoss();
+// Enter w polu kwoty = wpłata, żeby nie trzeba było sięgać po przycisk.
+document.getElementById('coop-panel').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'coop-amount') contributeToBoss();
 });
 
-async function attackBoss() {
+document.getElementById('coop-panel').addEventListener('click', e => {
+  if (e.target.closest('#btn-coop-give')) contributeToBoss();
+});
+
+async function contributeToBoss() {
   if (state.busy) return;
+  const input = document.getElementById('coop-amount');
+  const amount = parseInt(input && input.value, 10);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    showToast('Podaj dodatnią liczbę monet.');
+    return;
+  }
   state.busy = true;
   try {
-    const res = await api('POST', '/api/snakes/coop/attack', {});
+    const res = await api('POST', '/api/snakes/coop/contribute', { amount });
     state.game = res.state;
+    if (input) input.value = '';
     renderAll();
     if (res.defeated) {
       showConfetti();
-      showToast(`🏆 Zadałeś ostateczny cios! ${res.hp_left <= 0 ? 'Boss pokonany' : ''} — nagrody wypłacone.`);
+      showToast('🏆 Twoja wpłata dobiła bossa! Nagrody rozliczone.');
     } else {
-      showToast(`🗡️ -${res.damage} HP bossowi (zostało ${res.hp_left}/${res.max_hp}).`);
+      showToast(`💰 Wpłacono ${amount} monet = ${amount} obrażeń (bossowi zostało ${res.hp_left}/${res.max_hp}).`);
     }
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {

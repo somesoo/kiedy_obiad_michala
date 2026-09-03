@@ -121,7 +121,7 @@
         <div class="adm-note" style="margin-top:12px">
           <strong>Włącznik bossa</strong> — wyłączenie chowa walkę wszystkim graczom (panel
           pod planszą i punkt regulaminu znikają, rzuty przestają zadawać obrażenia, ręczny
-          atak jest zablokowany) i domyka trwającą walkę <strong>bez nagród i bez kar</strong>.
+          wpłaty są zablokowane) i domyka trwającą walkę <strong>bez nagród i bez kar</strong>.
           Włączenie startuje świeżą edycję z nowym bossem i nowym terminem. Punktów graczy
           to nie rusza w żadną stronę.
         </div>
@@ -167,9 +167,10 @@
         </div>
 
         <div class="adm-note" style="margin-top:12px">
-          <strong>Podnieś suwak trudności</strong> — nie działa na bieżącego bossa (jego HP
-          i pula nagród są już przyznane), tylko zapisuje się jako baza dla WSZYSTKICH
-          kolejnych edycji (skaluje HP i pulę nagród następnego bossa).
+          <strong>Startowe HP bossa</strong> — nie rusza bieżącej walki (HP jest już przyznane),
+          tylko zapisuje się jako baza dla WSZYSTKICH kolejnych edycji. Po wygranej kolejny
+          boss dostaje ×1,2 tej wartości, po przegranej ×0,9 (nie mniej niż baza).
+          Punkt odniesienia: 15 graczy dowozi z samych rzutów ~470–790 obrażeń dziennie.
         </div>
         <div class="adm-actions">
           <input type="number" id="coop-threshold-input" min="1" step="1" placeholder="nowy próg" style="width:110px" />
@@ -288,7 +289,7 @@
           Kasuje wszystkie ruchy wskazanego dnia i stawia graczy tam, gdzie stali o 8:00 —
           punkty i monety zarobione tego dnia znikają, dzienny limit rzutów (i sloty
           z Double Move) wracają do zera, dziennik z tego dnia jest czyszczony.
-          <strong>Nie zwraca</strong> monet wydanych w sklepie ani na ataki (kupione
+          <strong>Nie zwraca</strong> monet wydanych w sklepie ani wpłaconych bossowi (kupione
           power-upy zostają w ekwipunku) i nie odkręca monet ukradzionych przy wypchnięciu.
           Gracza, którego ktoś tego dnia zbił, a on sam nie zdążył rzucić, trzeba poprawić
           ręcznie — panel wypisze, kogo to dotyczy. <strong>Nieodwracalne.</strong>
@@ -970,14 +971,14 @@
       if (!bossOn) {
         document.getElementById('coop-info').innerHTML =
           'Boss <strong>WYŁĄCZONY</strong> — gracze nie widzą walki, rzuty nie zadają obrażeń, ' +
-          'ręczny atak jest zablokowany.<br>Włączenie startuje świeżą edycję z nowym bossem i terminem.';
+          'wpłaty są zablokowane.<br>Włączenie startuje świeżą edycję z nowym bossem i terminem.';
         document.getElementById('boss-info').innerHTML = '';
         return;
       }
 
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong><br>` +
-        `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}<br>` +
+        `Nagroda: wpłata × ${c.boss ? c.boss.points_per_coin : '–'} w punktach + zwrot do ${c.boss ? c.boss.contrib_refund : '–'} monet (nie więcej niż wpłata)<br>` +
         `Start edycji: ${fmtDate(c.started_at)} · limit na pokonanie bossa: <strong>${c.time_limit_days} dni robocze</strong><br>` +
         `Suwak trudności (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
         (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? `pokonany, +${c.previous_result.bonus} pkt premii/os.` : 'nie zdążono, bez premii'}` : '');
@@ -990,7 +991,7 @@
             👹 <strong>${esc(b.name)}</strong> — HP ${b.hp}/${b.max_hp} (${b.percent}%)
             ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : ' · <strong>WALKA TRWA</strong>'}
             ${b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
-            Obrażenia od kości: oczka × ${b.dice_damage_mult} · ręczny atak: ${b.attack_cost} monet za ${b.attack_damage} obr. · premia za zabicie: +${b.defeat_bonus} pkt/os.
+            Obrażenia od kości: oczka × ${b.dice_damage_mult} · wpłata: 1 moneta = 1 obrażenie · po zabiciu: połowa wpłaty w pkt + zwrot do ${b.contrib_refund} monet
           </div>`;
         const deadlineInput = document.getElementById('coop-deadline-input');
         if (b.deadline_at && document.activeElement !== deadlineInput) {
@@ -1043,7 +1044,7 @@
       try {
         const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass, force });
         const rewardTxt = res.defeated
-          ? `wypłacono ${res.reward_pool}${res.bonus ? ` + ${res.bonus} premii/os.` : ''} pkt.`
+          ? `wpłacono ${res.coins_paid} monet, wróciło ${res.coins_refunded}, przyznano ${res.points_awarded} pkt (${res.contributors} wpłacających).`
           : `nagrody nie ma, kasa przepadła.`;
         showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} monet każdemu, walczącym pomniejszone o zadane obrażenia (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle} rusza od razu: ${res.next_cycle.time_limit_days} dni na pokonanie kolejnego bossa.`);
         await loadSettings();

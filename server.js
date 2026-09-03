@@ -1321,12 +1321,16 @@ function slCurseAdjustRoll(variant, roll) {
 }
 
 // ── WYDARZENIE KOOPERACYJNE (co-op) ──
-const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 300;
-// Pula nagród = próg × mnożnik. >1 oznacza, że wspólny wysiłek zwraca się z nawiązką.
-const SL_COOP_REWARD_MULTIPLIER = Number(process.env.SNAKES_COOP_REWARD_MULTIPLIER || 1.5);
-// 'proportional' = proporcjonalnie do wkładu (domyślnie — kto dołożył więcej, dostaje więcej),
-// 'flat' = po równo między wszystkich kontrybutorów.
-const SL_COOP_REWARD_SPLIT = (process.env.SNAKES_COOP_REWARD_SPLIT || 'proportional').toLowerCase();
+// "Próg" to dziś WPROST punkty życia bossa (mnożnik HP wynosi 1, patrz niżej) — jedna
+// liczba, którą admin przesuwa z panelu, zamiast dwóch mnożących się przez siebie.
+const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 3500;
+// Ile PUNKTÓW RANKINGOWYCH daje jedna wpłacona moneta, gdy boss padnie. Poniżej 1, bo
+// wpłata ma boleć: oddajesz walutę sklepu, dostajesz połowę wartości w rankingu.
+const SL_COOP_POINTS_PER_COIN = Number(process.env.SNAKES_COOP_POINTS_PER_COIN || 0.5);
+// Zwrot monet dla każdego, kto wpłacił — ale NIGDY więcej, niż sam włożył (patrz
+// slFinishBossEvent). Bez tego ograniczenia wpłata 1 monety oddawałaby 50 i mielibyśmy
+// nową pętlę: emisja monet musi być zawsze mniejsza od tego, co spłonęło.
+const SL_COOP_CONTRIB_REFUND = parseInt(process.env.SNAKES_COOP_CONTRIB_REFUND, 10) || 50;
 
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 // Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
@@ -1395,7 +1399,7 @@ function slOfficeCloseMs(ms = Date.now()) {
 // w panelu (patrz POST /api/snakes/admin/coop/config, pole deadline_at) — działa to
 // zawsze, nie tylko przy zakładaniu cyklu. "Próg" (threshold) zostaje jako WEWNĘTRZNY
 // suwak trudności: skaluje HP bossa i pulę nagród (patrz SL_BOSS_HP_MULTIPLIER,
-// SL_COOP_REWARD_MULTIPLIER), ale nie ma już żadnej zbiórki punktów do niego —
+// SL_BOSS_HP_MULTIPLIER = 1, więc próg JEST punktami życia), a nie zbiórką punktów —
 // zmienia się wyłącznie między cyklami:
 //   • wygrana: próg × GROWTH (trudniej), czas × SHRINK, ale nie mniej niż MIN_TIME_DAYS
 //   • przegrana (czas minął, boss przeżył): próg i czas łagodnieją o RELIEF_FACTOR,
@@ -1408,24 +1412,25 @@ const SL_COOP_RELIEF_FACTOR = Number(process.env.SNAKES_COOP_RELIEF_FACTOR || 0.
 
 // ── WALKA Z BOSSEM ──
 // Losowy biurowy boss z paskiem HP walczy ZAWSZE — każdy nowy cykl budzi go od razu
-// (patrz slCoopInsertCycle). KAŻDY rzut kostką (nie tylko atakującego) w trakcie eventu
-// zadaje mu darmowe obrażenia — więc zwykłe granie już "walczy". Dodatkowo każdy może
-// dobić bossa ręcznym atakiem za monety — realny sposób na wydawanie salda poza sklepem,
-// nie tylko nagroda na końcu. Każde trafienie (rzutem lub ręcznym atakiem) jest liczone
-// per gracz (patrz sl_coop_contributions — teraz trzyma OBRAŻENIA, nie wpłaty), do
-// podziału nagród. Pokonanie bossa PRZED terminem wypłaca atakującym pulę nagród + premię
-// za "zabicie" ponad nią; jeśli czas minie, a boss przeżyje, NIE MA żadnej nagrody, a boss
-// jeszcze "atakuje" i zabiera monety (patrz slFinishBossEvent) — realna stawka za
-// niedobicie na czas, nie tylko brak bonusu.
+// (patrz slCoopInsertCycle). Obrażenia płyną z DWÓCH źródeł, rozróżnianych w
+// sl_coop_contributions kolumną `source`:
+//   • 'dice'  — każdy rzut kostką rani bossa za darmo (suma oczek × SL_BOSS_DICE_DAMAGE_MULT);
+//               zwykłe granie już "walczy", ale rzutów jest najwyżej 5 na dobę,
+//   • 'coins' — wpłata z portfela: 1 MONETA = 1 OBRAŻENIE, dowolna kwota, bez limitu
+//               (limitem jest saldo, a saldo napełnia się wyłącznie grą).
+// Nagroda za pokonanie liczy się WYŁĄCZNIE od wpłaconych monet: połowa wpłaty wraca jako
+// punkty rankingowe + zwrot do SL_COOP_CONTRIB_REFUND monet (nie więcej niż wpłata).
+// Obrażenia z kości nie płacą nic — są darmowe, więc nie mają czego zwracać. Dzięki temu
+// monety mogą z gry tylko WYPŁYWAĆ, a rosną jedynie punkty, których nie da się wydać
+// w sklepie — pętla "wpłać, zabij, zarób więcej niż włożyłeś" jest arytmetycznie niemożliwa.
+// Jeśli czas minie, a boss przeżyje, wpłaty przepadają i boss jeszcze "atakuje", zabierając
+// monety (patrz slFinishBossEvent) — to jest ryzyko, które czyni wpłatę decyzją.
 const SL_BOSS_NAMES = [
   'Ksero-Golem', 'Duch Deadline\'u', 'Hydra Niekończących Się Maili',
   'Excel Behemot', 'Automat do Kawy Zła', 'Syndrom Poniedziałku', 'Rozdzielacz Wi-Fi Zagłady'
 ];
-const SL_BOSS_HP_MULTIPLIER = Number(process.env.SNAKES_BOSS_HP_MULTIPLIER || 2); // HP = próg × to
+const SL_BOSS_HP_MULTIPLIER = Number(process.env.SNAKES_BOSS_HP_MULTIPLIER || 1); // HP = próg × to (1 = próg JEST punktami życia)
 const SL_BOSS_DICE_DAMAGE_MULT = Number(process.env.SNAKES_BOSS_DICE_DAMAGE_MULT || 3); // dmg = suma oczek × to
-const SL_BOSS_ATTACK_COST = parseInt(process.env.SNAKES_BOSS_ATTACK_COST, 10) || 20;    // koszt ręcznego ataku (monety)
-const SL_BOSS_ATTACK_DAMAGE = parseInt(process.env.SNAKES_BOSS_ATTACK_DAMAGE, 10) || 45; // obrażenia ręcznego ataku
-const SL_BOSS_DEFEAT_BONUS = parseInt(process.env.SNAKES_BOSS_DEFEAT_BONUS, 10) || 60;   // bonus pkt/monet na kontrybutora za zabicie
 // Jeśli boss NIE zostanie pokonany na czas, "atakuje" i zabiera tyle monet KAŻDEMU
 // graczowi (nie tylko kontrybutorom) — realna stawka za zignorowanie walki, nie tylko
 // łagodniejszy próg na następną rundę. Nigdy nie schodzi poniżej salda gracza (0 min).
@@ -1637,6 +1642,11 @@ ensureColumn('sl_coop', 'collect_deadline_at', 'DATETIME');
 // `visibility` = 'hidden' chowa wpis mimo wszystko, 'shown' przypina go widocznym mimo
 // reguł. `public_detail` podmienia TREŚĆ pokazywaną graczom — oryginał w `detail` zostaje
 // nietknięty, bo czyta go logika wewnętrzna (patrz backfillKnockbackPoints i rollback dnia).
+// sl_coop_contributions: skąd wzięły się obrażenia. 'coins' = wpłata z portfela (tylko ta
+// liczy się do nagrody za zabicie), 'dice' = darmowe trafienie z rzutu. Brak wartości
+// w starych wierszach czytamy jak 'dice' — historyczne trafienia nie dostają zwrotu monet.
+ensureColumn('sl_coop_contributions', 'source', 'TEXT');
+
 ensureColumn('sl_activity', 'visibility', 'TEXT');
 ensureColumn('sl_activity', 'public_detail', 'TEXT');
 
@@ -2396,16 +2406,16 @@ function slSetBossEnabled(on) {
 
 // Wstawia nowy cykl co-op — rusza NATYCHMIAST (started_at = teraz, domyślnie w schemacie)
 // i OD RAZU budzi bossa (jedna faza — patrz komentarz "ESKALACJA TRUDNOŚCI CO-OP" wyżej):
-// żadnej zbiórki, żadnego czekania. `threshold` to wyłącznie suwak trudności — skaluje
-// HP bossa i pulę nagród (patrz startCoopBossEvent), `timeLimitDays` to domyślny czas na
+// żadnej zbiórki, żadnego czekania. `threshold` to WPROST punkty życia bossa (patrz
+// startCoopBossEvent i SL_BOSS_HP_MULTIPLIER = 1), `timeLimitDays` to domyślny czas na
 // pokonanie GO, który admin może potem w każdej chwili nadpisać na konkretną godzinę
-// (patrz POST /api/snakes/admin/coop/config).
+// (patrz POST /api/snakes/admin/coop/config). Kolumna reward_pool została po dawnej puli
+// nagród i nie jest już do niczego używana — nagroda liczy się z wpłat (slFinishBossEvent).
 function slCoopInsertCycle(cycle, threshold, timeLimitDays) {
-  const rewardPool = Math.round(threshold * SL_COOP_REWARD_MULTIPLIER);
   db.prepare(`
-    INSERT INTO sl_coop (cycle, threshold, time_limit_days, status, reward_pool, triggered_at)
-    VALUES (?, ?, ?, 'event_active', ?, CURRENT_TIMESTAMP)
-  `).run(cycle, threshold, timeLimitDays, rewardPool);
+    INSERT INTO sl_coop (cycle, threshold, time_limit_days, status, triggered_at)
+    VALUES (?, ?, ?, 'event_active', CURRENT_TIMESTAMP)
+  `).run(cycle, threshold, timeLimitDays);
   const coop = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
   startCoopBossEvent(coop);
   return db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
@@ -2419,13 +2429,16 @@ function slCurrentCoop() {
   return slCoopInsertCycle(1, slCoopDefaultThreshold(), SL_COOP_BASE_TIME_DAYS);
 }
 
-// Ranking atakujących w cyklu — `amount` to teraz SUMA ZADANYCH OBRAŻEŃ (od rzutów
-// kostką i ręcznych ataków), nie wpłata do puli (zbiórki już nie ma). Nazwa tabeli
-// (sl_coop_contributions) została ze starego mechanizmu, ale wiersze wstawiane są
-// dziś przy każdym trafieniu bossa (patrz POST /api/snakes/roll i /coop/attack).
+// Udział graczy w cyklu. `amount` to SUMA ZADANYCH OBRAŻEŃ (kości + wpłaty), a `coins`
+// to sama część kupiona za monety — i to WYŁĄCZNIE od niej liczy się nagroda za zabicie
+// (patrz slFinishBossEvent). Obrażenia z kości są darmowe, więc nie mają czego zwracać;
+// gdyby wchodziły do nagrody, granie samo w sobie drukowałoby monety.
+// Wiersze sprzed rozdzielenia źródeł mają source = NULL i traktujemy je jak 'dice'.
 function slCoopAttackers(cycle) {
   return db.prepare(`
-    SELECT c.player_id, p.nickname, SUM(c.amount) AS amount
+    SELECT c.player_id, p.nickname,
+           SUM(c.amount) AS amount,
+           SUM(CASE WHEN c.source = 'coins' THEN c.amount ELSE 0 END) AS coins
     FROM sl_coop_contributions c JOIN players p ON p.id = c.player_id
     WHERE c.cycle = ?
     GROUP BY c.player_id
@@ -2433,7 +2446,8 @@ function slCoopAttackers(cycle) {
   `).all(cycle).map(r => ({
     player_id: r.player_id,
     nickname: r.nickname,
-    amount: Number(r.amount)
+    amount: Number(r.amount),
+    coins: Number(r.coins)
   }));
 }
 
@@ -2444,7 +2458,9 @@ function slCoopPayload(meId) {
   if (!slBossEnabled()) return null;
   const coop = slCurrentCoop();
   const attackers = slCoopAttackers(coop.cycle);
-  const mine = meId ? (attackers.find(c => c.player_id === meId) || { amount: 0 }).amount : 0;
+  const me = meId ? attackers.find(c => c.player_id === meId) : null;
+  const mine = me ? me.amount : 0;
+  const mineCoins = me ? me.coins : 0;
   const threshold = Number(coop.threshold);
 
   // Poprzednia edycja (jeśli już się rozstrzygnęła) — do krótkiego podsumowania "co się
@@ -2457,8 +2473,6 @@ function slCoopPayload(meId) {
         cycle: Number(prev.cycle),
         boss_name: prev.boss_name,
         defeated: !!prev.boss_defeated_at,
-        reward_pool: Number(prev.reward_pool),
-        bonus: prev.boss_defeated_at ? SL_BOSS_DEFEAT_BONUS : 0,
         timeout_penalty: prev.boss_defeated_at ? 0 : SL_BOSS_TIMEOUT_PENALTY
       };
     }
@@ -2467,14 +2481,14 @@ function slCoopPayload(meId) {
   return {
     cycle: Number(coop.cycle),
     status: coop.status,
-    // `threshold` nie jest już nigdzie zbierany od graczy — to czysto wewnętrzny suwak
-    // trudności (skaluje HP bossa i pulę nagród), zostawiony w payloadzie na potrzeby
-    // panelu admina (patrz GET /api/snakes/admin/settings).
+    // `threshold` to dziś po prostu startowe HP bossa — zostaje w payloadzie dla panelu
+    // admina, gdzie służy za suwak trudności (patrz GET /api/snakes/admin/settings).
     threshold,
     default_threshold: slCoopDefaultThreshold(),
-    reward_pool: Number(coop.reward_pool) || Math.round(threshold * SL_COOP_REWARD_MULTIPLIER),
-    reward_split: SL_COOP_REWARD_SPLIT,
     my_damage: mine,
+    // Ile MONET wpłaciłem w tym cyklu — od tego (a nie od obrażeń z kości) liczy się
+    // nagroda, więc UI musi umieć pokazać jedno i drugie osobno.
+    my_coins: mineCoins,
     attackers,
     time_limit_days: Number(coop.time_limit_days),
     previous_result: previousResult,
@@ -2504,10 +2518,11 @@ function slCoopPayload(meId) {
             ? new Date(Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z') - Number(coop.time_limit_days) * 86400000).toISOString()
             : null),
       time_limit_days: Number(coop.time_limit_days),
-      attack_cost: SL_BOSS_ATTACK_COST,
-      attack_damage: SL_BOSS_ATTACK_DAMAGE,
       dice_damage_mult: SL_BOSS_DICE_DAMAGE_MULT,
-      defeat_bonus: SL_BOSS_DEFEAT_BONUS
+      // Kurs wpłaty: 1 moneta = 1 obrażenie, a po zabiciu połowa wpłaty wraca w punktach
+      // plus zwrot monet (nie więcej, niż się włożyło).
+      points_per_coin: SL_COOP_POINTS_PER_COIN,
+      contrib_refund: SL_COOP_CONTRIB_REFUND
     } : null
   };
 }
@@ -2531,21 +2546,24 @@ function startCoopBossEvent(coop) {
 }
 
 // Warunek zwycięstwa: HP bossa spadło do zera (od rzutów graczy lub ręcznych ataków —
-// patrz obsługa w POST /api/snakes/roll i /api/snakes/coop/attack).
+// patrz obsługa w POST /api/snakes/roll i /api/snakes/coop/contribute).
 function resolveCoopBossEvent(coop) {
   return { defeated: Number(coop.boss_hp) <= 0, cycle: Number(coop.cycle) };
 }
 
-// Podział nagród: 'proportional' (domyślnie) — wg zadanych obrażeń; 'flat' — po równo.
-// Zwraca listę { player_id, nickname, amount } (bez zapisu do bazy).
-function slCoopRewardSplit(attackers, rewardPool) {
-  if (!attackers.length) return [];
-  if (SL_COOP_REWARD_SPLIT === 'flat') {
-    const each = Math.floor(rewardPool / attackers.length);
-    return attackers.map(c => ({ ...c, reward: each }));
-  }
-  const total = attackers.reduce((a, c) => a + c.amount, 0) || 1;
-  return attackers.map(c => ({ ...c, reward: Math.round(rewardPool * (c.amount / total)) }));
+// Co dostaje gracz, gdy boss padnie — liczone WYŁĄCZNIE z jego wpłaty w monetach.
+// Punkty: połowa wpłaty (SL_COOP_POINTS_PER_COIN) — trafiają tylko do rankingu, nie da się
+// ich wydać w sklepie, więc nie mogą napędzić kolejnej wpłaty.
+// Monety: zwrot części kosztu, ale NIGDY więcej, niż gracz sam włożył. To ograniczenie
+// trzyma całą ekonomię: suma zwróconych monet jest zawsze ≤ suma wpłaconych, więc nie da
+// się wyjść z walki z bossem na plusie. Bez niego wpłata 1 monety oddawałaby 50.
+function slCoopContribReward(coins) {
+  const paid = Math.max(0, Number(coins) || 0);
+  if (paid <= 0) return { points: 0, refund: 0 };
+  return {
+    points: Math.round(paid * SL_COOP_POINTS_PER_COIN),
+    refund: Math.min(SL_COOP_CONTRIB_REFUND, paid)
+  };
 }
 
 // Próg/czas KOLEJNEJ edycji na podstawie wyniku tej: wygrana = trudniej i szybciej
@@ -2577,29 +2595,31 @@ function slCoopNextDifficulty(coop, defeated) {
 // Zamyka event bossowy, wypłaca nagrody/karę i OD RAZU otwiera kolejną edycję (trudniejszą
 // po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty; nowy boss
 // budzi się natychmiast, patrz slCoopInsertCycle). Wołane automatycznie, gdy HP bossa
-// spadnie do zera (zwykły rzut lub ręczny atak), albo gdy minie termin (scheduler niżej),
-// a boss wciąż żyje. Pokonanie bossa wypłaca KAŻDEMU, kto zadał mu choć jedno trafienie
-// (rzutem kostką lub ręcznym atakiem — patrz slCoopAttackers), pulę nagród
-// (próg × SL_COOP_REWARD_MULTIPLIER, podział wg SL_COOP_REWARD_SPLIT proporcjonalnie do
-// zadanych obrażeń) + SL_BOSS_DEFEAT_BONUS na KAŻDEGO atakującego ponad pulę — punkty I
-// monety naraz (reward dolicza się do obu, patrz UPDATE niżej).
-// Nie pokonanie na czas = PRZEGRANA: nagrody NIE MA, a boss "atakuje" i zabiera do
+// spadnie do zera (rzut albo wpłata), albo gdy minie termin (scheduler niżej),
+// a boss wciąż żyje. Pokonanie bossa płaci TYLKO tym, którzy wpłacili monety: każdy
+// dostaje połowę swojej wpłaty w punktach rankingowych i zwrot monet ograniczony do
+// wysokości własnej wpłaty (patrz slCoopContribReward). Kto walczył samymi rzutami, nie
+// dostaje nic ponad punkty, które rzuty i tak dały — bo nic nie zaryzykował.
+// Punkty i monety dopisujemy OSOBNO, bo to dwie różne wielkości (dawniej ta sama liczba
+// szła do obu kolumn i to był rdzeń pętli).
+// Nie pokonanie na czas = PRZEGRANA: nagrody NIE MA, wpłacone monety przepadają,
+// a boss "atakuje" i zabiera do
 // SL_BOSS_TIMEOUT_PENALTY monet KAŻDEMU graczowi (nie tylko tym, którzy walczyli) —
 // realna stawka za bierność. Ci, którzy walczyli, mają jednak karę pomniejszoną o to,
 // ile obrażeń zadali w TYM cyklu (zadał obrażenia warte 30 → traci 20; zadał więcej niż
 // pełna kara → nic nie traci) — jedyna ulga za udział w walce, gdy się nie uda.
 function slFinishBossEvent(coop, defeated) {
   const attackers = slCoopAttackers(coop.cycle);
-  const rewardPool = Number(coop.reward_pool) || Math.round(Number(coop.threshold) * SL_COOP_REWARD_MULTIPLIER);
-  const bonus = defeated ? SL_BOSS_DEFEAT_BONUS : 0;
-  const payouts = defeated
-    ? slCoopRewardSplit(attackers, rewardPool).map(p => ({ ...p, reward: p.reward + bonus }))
-    : attackers.map(c => ({ ...c, reward: 0 }));
+  const payouts = attackers.map(c => {
+    const r = defeated ? slCoopContribReward(c.coins) : { points: 0, refund: 0 };
+    return { ...c, points: r.points, refund: r.refund };
+  });
 
+  const payPoints = db.prepare('UPDATE sl_state SET total_points = total_points + ? WHERE player_id = ?');
+  const payCoins = db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?');
   for (const p of payouts) {
-    if (!p.reward) continue;
-    db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
-      .run(p.reward, p.reward, p.player_id);
+    if (p.points > 0) payPoints.run(p.points, p.player_id);
+    if (p.refund > 0) payCoins.run(p.refund, p.player_id);
   }
 
   let playersPenalized = 0;
@@ -2628,7 +2648,13 @@ function slFinishBossEvent(coop, defeated) {
   const nextCoop = slCoopInsertCycle(coop.cycle + 1, next.threshold, next.time_limit_days);
 
   return {
-    cycle: Number(coop.cycle), boss_name: coop.boss_name, reward_pool: rewardPool, bonus, payouts, defeated,
+    cycle: Number(coop.cycle), boss_name: coop.boss_name, payouts, defeated,
+    // Bilans cyklu — wprost do wglądu: ile monet wpłacono, ile wróciło, ile punktów powstało.
+    // coins_paid ≥ coins_refunded z definicji (patrz slCoopContribReward).
+    coins_paid: attackers.reduce((a, c) => a + c.coins, 0),
+    coins_refunded: payouts.reduce((a, p) => a + p.refund, 0),
+    points_awarded: payouts.reduce((a, p) => a + p.points, 0),
+    contributors: payouts.filter(p => p.coins > 0).length,
     timeout_penalty: defeated ? 0 : SL_BOSS_TIMEOUT_PENALTY,
     players_attacked: playersPenalized,
     next_cycle: { cycle: Number(nextCoop.cycle), threshold: next.threshold, time_limit_days: next.time_limit_days }
@@ -2800,7 +2826,7 @@ function slEmitBossTimeout(outcome) {
       title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
       url: SNAKES_URL,
       description: (outcome.defeated
-        ? `Atakujący dzielą pulę **${outcome.reward_pool} pkt** + premię za zabicie **${outcome.bonus} pkt/os.**`
+        ? `Wpłacający (${outcome.contributors}) dzielą **${outcome.points_awarded} pkt** i odzyskują **${outcome.coins_refunded}** z wpłaconych **${outcome.coins_paid}** monet.`
         : `Nie zdążyliście dobić bossa na czas. Nagrody nie ma. Boss zabrał do **${outcome.timeout_penalty} monet** każdemu graczowi (walczącym pomniejszone o zadane obrażenia; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
       ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie kolejnego bossa.`,
       color: outcome.defeated ? 0x53D06B : 0xE85D4A
@@ -2821,27 +2847,30 @@ function startCoopBossDeadlineScheduler() {
   console.log(`Snakes/Co-op: eskalacja trudności — próg ×${SL_COOP_THRESHOLD_GROWTH} i czas ×${SL_COOP_TIME_SHRINK} po wygranej (min. ${SL_COOP_MIN_TIME_DAYS} dni robocze), ulga ×${SL_COOP_RELIEF_FACTOR} po porażce.`);
 }
 // ── COFANIE NAGRÓD BOSSA ──
-// Nagrody za pokonanie bossa NIE mają własnego rejestru — slFinishBossEvent doliczał je
-// wprost do salda i punktów gracza. Da się je jednak odtworzyć CO DO GROSZA, bo liczyły
-// się z danych, które w bazie zostały: puli cyklu i wkładu każdego atakującego
-// (sl_coop_contributions po rozliczeniu cyklu już się nie zmienia). Puszczamy więc tę samą
-// matematykę co przy wypłacie (slCoopRewardSplit + premia za zabicie) i odejmujemy wynik.
+// Nagrody za pokonanie bossa NIE mają własnego rejestru — slFinishBossEvent dolicza je
+// wprost do salda i punktów gracza. Da się je jednak odtworzyć CO DO GROSZA, bo liczą się
+// z danych, które w bazie zostają: wpłat każdego gracza (sl_coop_contributions po
+// rozliczeniu cyklu już się nie zmienia). Puszczamy więc tę samą funkcję co przy wypłacie
+// (slCoopContribReward) i odejmujemy wynik — osobno punkty, osobno monety.
 // Bierzemy WYŁĄCZNIE cykle wygrane (boss_defeated_at) — przegrane nic nie wypłaciły.
-// Kary z przegranych walk NIE wracają: przy zabieraniu monet kwota była przycinana do
-// salda gracza, więc realnie zabrana wartość nigdzie nie została zapisana i nie da się jej
-// wiernie odtworzyć. Odejmowanie ma podłogę na zerze — kto zdążył wydać nagrodę, schodzi
-// do zera, ale nie na minus.
+// Wpłacone monety NIE wracają: to był koszt walki, a nie nagroda. Kary z przegranych walk
+// też nie — przy zabieraniu kwota była przycinana do salda gracza, więc realnie zabrana
+// wartość nigdzie nie została zapisana. Odejmowanie ma podłogę na zerze — kto zdążył wydać
+// nagrodę, schodzi do zera, ale nie na minus.
 function slRevertBossRewards() {
   const cycles = db.prepare(`
     SELECT * FROM sl_coop WHERE completed_at IS NOT NULL AND boss_defeated_at IS NOT NULL
   `).all();
 
-  const takeBack = new Map();
+  const takeBack = new Map(); // player_id → { points, coins }
   for (const c of cycles) {
-    const rewardPool = Number(c.reward_pool) || Math.round(Number(c.threshold) * SL_COOP_REWARD_MULTIPLIER);
-    for (const p of slCoopRewardSplit(slCoopAttackers(c.cycle), rewardPool)) {
-      const reward = p.reward + SL_BOSS_DEFEAT_BONUS;
-      if (reward > 0) takeBack.set(p.player_id, (takeBack.get(p.player_id) || 0) + reward);
+    for (const p of slCoopAttackers(c.cycle)) {
+      const r = slCoopContribReward(p.coins);
+      if (r.points <= 0 && r.refund <= 0) continue;
+      const acc = takeBack.get(p.player_id) || { points: 0, coins: 0 };
+      acc.points += r.points;
+      acc.coins += r.refund;
+      takeBack.set(p.player_id, acc);
     }
   }
 
@@ -2849,7 +2878,7 @@ function slRevertBossRewards() {
     UPDATE sl_state SET balance = MAX(0, balance - ?), total_points = MAX(0, total_points - ?)
     WHERE player_id = ?
   `);
-  for (const [playerId, amount] of takeBack) upd.run(amount, amount, playerId);
+  for (const [playerId, v] of takeBack) upd.run(v.coins, v.points, playerId);
 
   return {
     cycles: cycles.length,
@@ -2896,11 +2925,10 @@ function slRevertBossRewards() {
   if (!slBossEnabled()) return;
   const rows = db.prepare(`SELECT * FROM sl_coop WHERE status = 'collecting'`).all();
   for (const row of rows) {
-    const rewardPool = Math.round(Number(row.threshold) * SL_COOP_REWARD_MULTIPLIER);
     db.prepare(`
-      UPDATE sl_coop SET status = 'event_active', reward_pool = ?, triggered_at = CURRENT_TIMESTAMP
+      UPDATE sl_coop SET status = 'event_active', triggered_at = CURRENT_TIMESTAMP
       WHERE cycle = ?
-    `).run(rewardPool, row.cycle);
+    `).run(row.cycle);
     const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(row.cycle);
     const info = startCoopBossEvent(fresh);
     console.log(`Snakes/Co-op: edycja #${row.cycle} przełączona ze starej zbiórki na walkę — budzi się ${info.boss_name}`);
@@ -3236,7 +3264,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       const dmg = rolls.reduce((a, r) => a + r, 0) * SL_BOSS_DICE_DAMAGE_MULT;
       const newHp = Math.max(0, Number(coopNow.boss_hp) - dmg);
       db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coopNow.cycle);
-      db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
+      db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'dice')")
         .run(coopNow.cycle, playerId, dmg);
       slLogActivity(playerId, 'boss_hit', slBossHitEntry(dmg, 'kość'));
       bossHit = { damage: dmg, boss_name: coopNow.boss_name, hp_left: newHp, max_hp: Number(coopNow.boss_max_hp), defeated: false };
@@ -3323,7 +3351,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
           embeds: [{
             title: `Edycja #${result.boss_hit.victory.cycle}`,
             url: SNAKES_URL,
-            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Kontrybutorzy dzielą **${result.boss_hit.victory.reward_pool} pkt** + premię za zabicie **${result.boss_hit.victory.bonus} pkt/os.**`,
+            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** monet.`,
             color: 0x53D06B
           }]
         }));
@@ -3577,27 +3605,36 @@ app.get('/api/snakes/players', authPlayer, (req, res) => {
   res.json({ players: slPlayersPayload(req.player.id) });
 });
 
-// POST /api/snakes/coop/attack — ręczny atak na bossa za monety (SL_BOSS_ATTACK_COST).
-// Nie wymaga bycia kontrybutorem — to dodatkowy, opcjonalny sposób na wydawanie salda
-// w trakcie eventu, poza sklepem power-upów. Jeśli dobija bossa, od razu wypłaca nagrody
-// (patrz slFinishBossEvent) — identycznie jak wtedy, gdy dobicie przychodzi ze zwykłego rzutu.
-app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
+// POST /api/snakes/coop/contribute { amount } — wpłata monet na bossa: 1 MONETA = 1
+// OBRAŻENIE, dowolna kwota z własnego salda. Zastąpiła ryczałtowy "atak za 20 monet",
+// przy którym punkt obrażeń kosztował mniej, niż wypłacała za niego pula — i z tej
+// różnicy dało się zbudować pętlę (wpłać, zabij, wyjdź na plusie, powtórz).
+// Tu takiej różnicy nie ma: wpłata to koszt, a jedyne, co po zabiciu wraca w monetach,
+// to zwrot ograniczony do wysokości własnej wpłaty (patrz slCoopContribReward).
+// Bez limitu dziennego — limitem jest saldo, które napełnia się wyłącznie grą.
+// Jeśli wpłata dobija bossa, rozliczenie leci od razu (patrz slFinishBossEvent).
+app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
   const playerId = req.player.id;
   const nickname = req.player.nickname;
+  const amount = parseInt(req.body.amount, 10);
+
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Podaj dodatnią liczbę monet.' });
+  }
 
   const out = transaction(() => {
     const st = slEnsureState(playerId);
     if (!slBossEnabled()) return { notActive: true };
     const coop = slCurrentCoop();
     if (coop.status !== 'event_active' || Number(coop.boss_hp) <= 0) return { notActive: true };
-    if (st.balance < SL_BOSS_ATTACK_COST) return { poor: true, balance: st.balance };
+    if (Number(st.balance) < amount) return { poor: true, balance: Number(st.balance) };
 
-    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(SL_BOSS_ATTACK_COST, playerId);
-    const newHp = Math.max(0, Number(coop.boss_hp) - SL_BOSS_ATTACK_DAMAGE);
+    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(amount, playerId);
+    const newHp = Math.max(0, Number(coop.boss_hp) - amount);
     db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
-    db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
-      .run(coop.cycle, playerId, SL_BOSS_ATTACK_DAMAGE);
-    slLogActivity(playerId, 'boss_hit', slBossHitEntry(SL_BOSS_ATTACK_DAMAGE, 'monety'));
+    db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'coins')")
+      .run(coop.cycle, playerId, amount);
+    slLogActivity(playerId, 'boss_hit', slBossHitEntry(amount, 'monety'));
 
     let victory = null;
     if (newHp <= 0) {
@@ -3606,7 +3643,7 @@ app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
     }
     return {
       notActive: false, poor: false, boss_name: coop.boss_name,
-      damage: SL_BOSS_ATTACK_DAMAGE, hp_left: newHp, max_hp: Number(coop.boss_max_hp), victory
+      damage: amount, hp_left: newHp, max_hp: Number(coop.boss_max_hp), victory
     };
   });
 
@@ -3614,21 +3651,23 @@ app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
     return res.status(400).json({ error: 'Żaden boss aktualnie nie walczy.' });
   }
   if (out.poor) {
-    return res.status(400).json({ error: `Za mało monet — atak kosztuje ${SL_BOSS_ATTACK_COST}, masz ${out.balance}.` });
+    return res.status(400).json({ error: `Za mało monet — chcesz wpłacić ${amount}, masz ${out.balance}.` });
   }
 
   if (out.victory) {
+    const v = out.victory;
     slEmit('coop_completed', () => ({
       content: `🏆 **${out.boss_name} pokonany!**`,
       embeds: [{
-        title: `Edycja #${out.victory.cycle}`,
+        title: `Edycja #${v.cycle}`,
         url: SNAKES_URL,
-        description: `Ostateczny cios zadał **${nickname}**. Kontrybutorzy dzielą **${out.victory.reward_pool} pkt** + premię za zabicie **${out.victory.bonus} pkt/os.**`,
+        description: `Ostateczny cios zadał **${nickname}**. Wpłacający (${v.contributors}) dzielą ` +
+          `**${v.points_awarded} pkt** i odzyskują **${v.coins_refunded}** z wpłaconych **${v.coins_paid}** monet.`,
         color: 0x53D06B
       }]
     }));
   }
-  // Uwaga: pojedyncze ataki (jak pojedyncze rzuty) NIE lecą na Discorda — tylko finał
+  // Uwaga: pojedyncze wpłaty (jak pojedyncze rzuty) NIE lecą na Discorda — tylko finał
   // eventu (pokonanie / koniec czasu), żeby nie zasypywać kanału.
 
   res.json({ success: true, damage: out.damage, hp_left: out.hp_left, max_hp: out.max_hp, defeated: !!out.victory, state: slBuildState(playerId) });
@@ -3649,7 +3688,7 @@ app.get('/api/snakes/admin/settings', (req, res) => {
     powerup_costs: SL_POWERUP_COSTS,
     boss_enabled: slBossEnabled(),
     // null = boss wyłączony; panel czyta to jako „nie ma czym sterować" (patrz renderInfo).
-    coop: slBossEnabled() ? { ...slCoopPayload(null), reward_multiplier: SL_COOP_REWARD_MULTIPLIER } : null
+    coop: slBossEnabled() ? slCoopPayload(null) : null
   });
 });
 
@@ -3826,8 +3865,8 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
       title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
       url: SNAKES_URL,
       description: (out.defeated
-        ? `Pula nagród: **${out.reward_pool}** pkt${out.bonus ? ` + premia za zabicie **${out.bonus}** pkt/os.` : ''} (podział: ${SL_COOP_REWARD_SPLIT === 'flat' ? 'po równo' : 'proporcjonalnie do wkładu'}).\n\n` +
-          out.payouts.map(p => `• **${p.nickname}** — wkład ${p.amount} → nagroda **+${p.reward}** pkt`).join('\n')
+        ? `Wpłacono **${out.coins_paid}** monet, wróciło **${out.coins_refunded}**, przyznano **${out.points_awarded}** pkt.\n\n` +
+          out.payouts.filter(p => p.coins > 0).map(p => `• **${p.nickname}** — wpłata ${p.coins} → **+${p.points}** pkt, zwrot **${p.refund}** monet`).join('\n')
         : `Nagrody nie ma, wpłacona kasa przepada. Boss zaatakował — zabrał do **${out.timeout_penalty} monet** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).`
       ),
       color: 0xC8F135
@@ -3963,7 +4002,7 @@ app.post('/api/snakes/admin/coop/boss', (req, res) => {
     // Wkład gracza dopisujemy tylko przy realnej delcie obrażeń — samo ustawienie HP
     // to korekta stanu bossa, nie czyjeś trafienie, więc nie ma komu jej przypisać.
     if (damage != null && player) {
-      db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
+      db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'dice')")
         .run(coop.cycle, player.id, damage);
       slLogActivity(player.id, 'boss_hit', damage > 0
         ? slBossHitEntry(damage, 'admin')
