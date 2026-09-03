@@ -143,7 +143,7 @@ function stateSignature(g) {
     g.me.can_roll, g.me.has_shield,
     g.pending_effects.map(e => e.type),
     g.inventory,
-    g.coop ? [g.coop.status, g.coop.total, g.coop.boss ? g.coop.boss.hp : null] : null
+    g.coop ? [g.coop.status, g.coop.attackers.length, g.coop.boss ? g.coop.boss.hp : null] : null
   ]);
 }
 
@@ -863,93 +863,62 @@ function renderEffectsHint(g) {
   el.innerHTML = `⚠️ Czeka Cię: ${txt}`;
 }
 
-// ── WYDARZENIE KOOPERACYJNE ──
-// Wspólna pula widoczna dla wszystkich: pasek postępu, lista kontrybutorów
-// i pole do dorzucenia własnych punktów. Po przekroczeniu progu rusza event bossowy.
-// Wpłaty do puli są ZAWSZE możliwe (backup mechanizm — patrz serwer), więc formularz
-// renderuje się niezależnie od fazy. Nad nim pokazujemy notatkę statusu + odliczanie
-// do najbliższej istotnej chwili (rozliczenia albo startu nowego okna).
+// ── WALKA Z BOSSEM ──
+// Jedna, ciągła faza — boss walczy ZAWSZE, więc panel zawsze pokazuje to samo: kto to,
+// ile ma HP, ile czasu zostało na pokonanie go i kto już go trafił. Dwa paski w jednym
+// rzędzie: pasek HP (zadane obrażenia) i pod nim cienki pasek czasu (narasta do terminu,
+// który admin ustawia w panelu — patrz updateBossTimeBar).
 function slCoopChipsHtml(c) {
-  return c.contributors.length
-    ? `<div class="coop-chips">` + c.contributors.map(x =>
+  return c.attackers.length
+    ? `<div class="coop-chips">` + c.attackers.map(x =>
         `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}">${esc(x.nickname)}<span class="coop-amt mono">${x.amount}</span></span>`
       ).join('') + `</div>`
-    : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nic nie dorzucił — bądź pierwszy!</span></div>`;
+    : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nie trafił bossa — bądź pierwszy!</span></div>`;
 }
 
 // Jeden zwarty pasek pod planszą (nie karta z sekcjami) — plansza ma dostać jak
-// najwięcej miejsca w pionie. Wszystko (ikona, pasek postępu/HP, staty, timer, akcja)
-// w JEDNYM rzędzie; zasady + kara to jedna cienka linijka pod spodem. Zbiórka nie ma
-// terminu (zawsze można wpłacać), termin dotyczy WYŁĄCZNIE aktywnej walki.
+// najwięcej miejsca w pionie. Wszystko (ikona, pasek HP/czasu, staty, timer, akcja)
+// w JEDNYM rzędzie; zasady + kara to jedna cienka linijka pod spodem.
 function renderCoop(g) {
   const c = g.coop;
-  if (!c) return;
+  if (!c || !c.boss) return;
   const el = document.getElementById('coop-panel');
   if (!el) return;
 
-  // Panel przerysowuje się też przy odświeżaniu w tle (co 10 s), a przepisanie
-  // innerHTML skasowałoby kwotę, którą gracz właśnie wpisuje do zbiórki — i focus.
-  const amountEl = document.getElementById('coop-amount');
-  const keepAmount = amountEl ? amountEl.value : '';
-  const keepFocus = !!amountEl && document.activeElement === amountEl;
-
-  const active = c.status === 'event_active' && c.boss && c.boss.active;
-  const karaTxt = c.next_on_loss.threshold < c.threshold
-    ? `atak → próg spadnie do ${c.next_on_loss.threshold}`
-    : `atak → próg bez zmian (na minimum)`;
-
-  const barPct = active ? c.boss.percent : c.percent;
-  const statTxt = active ? `${c.boss.hp}/${c.boss.max_hp} HP` : `${c.total}/${c.threshold} pkt`;
-  const nameTxt = active ? esc(c.boss.name) : 'Boss nadchodzi';
-
-  // Zegar leci w OBU fazach, tylko mierzy co innego: w zbiórce czas do przebudzenia
-  // bossa, w walce czas do jego pokonania. Pasek pod spodem narasta tak samo w obu.
-  const timerUntil = active ? c.boss.deadline_at : c.collect_deadline_at;
-  const timerFrom = active ? (c.boss.started_at || '') : (c.collect_started_at || '');
-  const timerHtml = timerUntil
-    ? `<span class="boss-timer mono" id="coop-deadline" data-until="${esc(timerUntil)}" data-label="${active ? '' : 'do ataku'}">⏳ –</span>`
+  const b = c.boss;
+  const timerHtml = b.deadline_at
+    ? `<span class="boss-timer mono" id="coop-deadline" data-until="${esc(b.deadline_at)}">⏳ –</span>`
     : `<span class="coop-stat">${c.time_limit_days}d na pokonanie</span>`;
-  const timeBarHtml = timerUntil
-    ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(timerFrom)}" data-until="${esc(timerUntil)}" title="${active ? 'Czas na pokonanie bossa' : 'Czas do przebudzenia bossa'}"><div class="boss-time-fill"></div></div>`
+  const timeBarHtml = b.deadline_at
+    ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(b.started_at || '')}" data-until="${esc(b.deadline_at)}" title="Czas na pokonanie bossa"><div class="boss-time-fill"></div></div>`
     : '';
 
-  const actionHtml = active
-    ? `<button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${g.me.balance >= c.boss.attack_cost ? '' : 'disabled'}>🗡️ -${c.boss.attack_cost}</button>`
-    : `<input type="number" id="coop-amount" min="1" step="1" placeholder="pkt" />
-       <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Dorzuć</button>`;
+  const actionHtml = `<button class="btn-primary btn-boss-attack" id="btn-boss-attack" ${g.me.balance >= b.attack_cost ? '' : 'disabled'}>🗡️ -${b.attack_cost}</button>`;
 
   const prevTxt = c.previous_result
     ? `<span class="coop-prev">${c.previous_result.defeated
         ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany +${c.previous_result.bonus}`
-        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} monet (kontrybutorom mniej)`}</span>`
+        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} monet`}</span>`
     : '';
 
   el.innerHTML = `
     <div class="coop-row-main">
-      <span class="coop-emoji">${active ? '👹' : '👀'}</span>
-      <span class="coop-name">${nameTxt}</span>
+      <span class="coop-emoji">👹</span>
+      <span class="coop-name">${esc(b.name)}</span>
       <div class="coop-bar-flex">
-        <div class="coop-bar"><div class="coop-bar-fill${active ? ' boss-hp-fill' : ''}" style="width:${barPct}%"></div></div>
+        <div class="coop-bar"><div class="coop-bar-fill boss-hp-fill" style="width:${b.percent}%"></div></div>
         ${timeBarHtml}
       </div>
-      <span class="coop-stat mono">${statTxt}</span>
+      <span class="coop-stat mono">${b.hp}/${b.max_hp} HP</span>
       ${timerHtml}
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>🤝 Wpłacajcie do puli — gdy padnie próg, budzi się boss. Nie zdążycie w ${c.collect_days} dni robocze — wstanie sam i uderzy bez walki. Zaatakuje i zabierze do ${c.timeout_penalty} monet każdemu (kontrybutorom pomniejszone o wkład — Ty stracisz ${c.my_timeout_penalty}), jeśli go nie pokonacie na czas — pokonacie? nagroda i od razu kolejny, trudniejszy.</span>
-      <span class="coop-kara">${karaTxt}</span>
+      <span>👹 Każdy rzut kostką rani bossa — a za monety można dobić go ręcznym atakiem. Nie zdążycie na czas — zaatakuje i zabierze do ${c.timeout_penalty} monet każdemu (walczącym pomniejszone o zadane obrażenia — Ty stracisz ${c.my_timeout_penalty}). Pokonacie? Nagroda + premia dla wszystkich, którzy walczyli, i od razu kolejny, trudniejszy boss.</span>
       ${prevTxt}
     </div>
     ${slCoopChipsHtml(c)}`;
 
-  if (keepAmount || keepFocus) {
-    const freshAmount = document.getElementById('coop-amount');
-    if (freshAmount) {
-      freshAmount.value = keepAmount;
-      if (keepFocus) freshAmount.focus();
-    }
-  }
   updateCoopDeadline();
 }
 
@@ -982,16 +951,11 @@ function updateCoopDeadline() {
   const days = Math.floor(secs / 86400);
   const rest = secs % 86400;
   const daysTxt = days > 0 ? `${days}d ` : '';
-  const label = el.dataset.label ? `${el.dataset.label}: ` : '';
-  el.textContent = `⏳ ${label}${daysTxt}${fmtHMS(rest)}`;
+  el.textContent = `⏳ ${daysTxt}${fmtHMS(rest)}`;
 }
 
 document.getElementById('coop-panel').addEventListener('click', e => {
-  if (e.target.closest('#btn-coop-give')) contributeCoop();
   if (e.target.closest('#btn-boss-attack')) attackBoss();
-});
-document.getElementById('coop-panel').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.id === 'coop-amount') contributeCoop();
 });
 
 async function attackBoss() {
@@ -1006,33 +970,6 @@ async function attackBoss() {
       showToast(`🏆 Zadałeś ostateczny cios! ${res.hp_left <= 0 ? 'Boss pokonany' : ''} — nagrody wypłacone.`);
     } else {
       showToast(`🗡️ -${res.damage} HP bossowi (zostało ${res.hp_left}/${res.max_hp}).`);
-    }
-    loadActivity(document.getElementById('activity-date').value || null);
-  } catch (e) {
-    showToast(e.message);
-  } finally {
-    state.busy = false;
-  }
-}
-
-async function contributeCoop() {
-  if (state.busy) return;
-  const input = document.getElementById('coop-amount');
-  const amount = parseInt(input && input.value, 10);
-  if (!Number.isInteger(amount) || amount <= 0) {
-    showToast('Podaj dodatnią liczbę punktów.');
-    return;
-  }
-  state.busy = true;
-  try {
-    const res = await api('POST', '/api/snakes/coop/contribute', { amount });
-    state.game = res.state;
-    renderAll();
-    if (res.triggered) {
-      showConfetti();
-      showToast('👹 Próg osiągnięty — boss się budzi! Wydarzenie wystartowało.');
-    } else {
-      showToast(`🤝 Dorzucono ${amount} pkt do wspólnej puli.`);
     }
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
