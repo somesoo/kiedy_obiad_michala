@@ -3862,6 +3862,104 @@ app.post('/api/snakes/admin/coop/toggle', (req, res) => {
   });
 });
 
+// ── STEROWANIE HISTORIĄ ──
+// Dziennik aktywności i ruchy do przeglądania oraz kasowania z panelu. Filtry są
+// opcjonalne i składają się ze sobą (data + gracz + typ), więc jednym zapytaniem da się
+// zejść od „wszystko z dziś" do „tylko wypchnięcia tego jednego gracza".
+// Kasowanie dotyczy WYŁĄCZNIE dziennika — to log, nie stan gry, więc usunięcie wpisu
+// niczego nie cofa (od cofania są undo-move i rollback dnia).
+function slAdminActivityFilter(query) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(query.date || '') ? query.date : null;
+  const playerId = query.player_id ? parseInt(query.player_id, 10) : null;
+  const type = query.type ? String(query.type) : null;
+  const where = [];
+  const args = [];
+  if (date) { where.push('a.day = ?'); args.push(date); }
+  if (Number.isInteger(playerId)) { where.push('a.player_id = ?'); args.push(playerId); }
+  if (type) { where.push('a.type = ?'); args.push(type); }
+  return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args, date, playerId, type };
+}
+
+app.get('/api/snakes/admin/activity', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
+  const f = slAdminActivityFilter(req.query);
+
+  const entries = db.prepare(`
+    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.day, a.created_at
+    FROM sl_activity a JOIN players p ON p.id = a.player_id
+    ${f.sql} ORDER BY a.id DESC LIMIT ?
+  `).all(...f.args, limit);
+
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM sl_activity a ${f.sql}`).get(...f.args).c;
+
+  res.json({
+    success: true,
+    entries,
+    total: Number(total),
+    shown: entries.length,
+    // Do wypełnienia filtrów w panelu — dni i typy, które faktycznie w bazie są.
+    days: db.prepare('SELECT DISTINCT day FROM sl_activity ORDER BY day DESC LIMIT 60').all().map(r => r.day),
+    types: db.prepare('SELECT DISTINCT type FROM sl_activity ORDER BY type').all().map(r => r.type)
+  });
+});
+
+app.delete('/api/snakes/admin/activity/:id', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const id = parseInt(req.params.id, 10);
+  const del = db.prepare('DELETE FROM sl_activity WHERE id = ?').run(id);
+  if (!del.changes) return res.status(404).json({ error: 'Nie ma takiego wpisu.' });
+  res.json({ success: true, deleted: 1 });
+});
+
+// POST /api/snakes/admin/activity/purge { password, date?, player_id?, type? } — kasuje
+// WSZYSTKIE wpisy pasujące do filtra. Pusty filtr czyści cały dziennik, więc wymagamy
+// wtedy jawnego `confirm_all`, żeby nie dało się tego zrobić przypadkiem.
+app.post('/api/snakes/admin/activity/purge', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const f = slAdminActivityFilter(req.body);
+  if (!f.sql && req.body.confirm_all !== true) {
+    return res.status(400).json({ error: 'Pusty filtr wyczyściłby cały dziennik — dodaj filtr albo confirm_all: true.' });
+  }
+  const del = db.prepare(`DELETE FROM sl_activity WHERE id IN (SELECT a.id FROM sl_activity a ${f.sql})`).run(...f.args);
+  res.json({ success: true, deleted: del.changes, date: f.date, player_id: f.playerId, type: f.type });
+});
+
+// GET /api/snakes/admin/moves?date=&player_id= — ruchy (nie dziennik) do podglądu:
+// z czego, na co, ile punktów. Stąd widać np. gracza, który zrobił ich dziś podejrzanie dużo.
+app.get('/api/snakes/admin/moves', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null;
+  const playerId = req.query.player_id ? parseInt(req.query.player_id, 10) : null;
+  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
+
+  const where = [];
+  const args = [];
+  if (date) { where.push('m.move_date = ?'); args.push(date); }
+  if (Number.isInteger(playerId)) { where.push('m.player_id = ?'); args.push(playerId); }
+  const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const moves = db.prepare(`
+    SELECT m.id, m.player_id, p.nickname, m.move_date, m.move_seq, m.rolls,
+           m.from_abs, m.to_abs, m.points, m.note, m.created_at
+    FROM sl_moves m JOIN players p ON p.id = m.player_id
+    ${sql} ORDER BY m.id DESC LIMIT ?
+  `).all(...args, limit).map(m => ({ ...m, from_tile: slTileOf(m.from_abs), to_tile: slTileOf(m.to_abs) }));
+
+  // Ile ruchów kto zrobił w wybranym dniu — od razu widać przekroczenia limitu.
+  const perPlayer = db.prepare(`
+    SELECT p.nickname, COUNT(*) AS moves, SUM(m.points) AS points
+    FROM sl_moves m JOIN players p ON p.id = m.player_id
+    ${sql} GROUP BY m.player_id, p.nickname ORDER BY moves DESC
+  `).all(...args);
+
+  res.json({
+    success: true, moves, per_player: perPlayer,
+    daily_max: SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS,
+    days: db.prepare('SELECT DISTINCT move_date FROM sl_moves ORDER BY move_date DESC LIMIT 60').all().map(r => r.move_date)
+  });
+});
+
 // ── COFNIĘCIE CAŁEGO DNIA GRY ──
 // Kasuje wszystko, co wydarzyło się danego dnia, i stawia graczy tam, gdzie stali o 8:00.
 // Pozycję startową bierzemy z `from_abs` PIERWSZEGO ruchu gracza tego dnia — to dokładnie
@@ -3954,16 +4052,27 @@ app.post('/api/snakes/admin/day/rollback', (req, res) => {
 app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const playerId = parseInt(req.params.id, 10);
-  const balance = req.body.balance != null ? parseInt(req.body.balance, 10) : null;
-  const totalPoints = req.body.total_points != null ? parseInt(req.body.total_points, 10) : null;
 
-  if (balance != null && (!Number.isInteger(balance) || balance < 0)) {
-    return res.status(400).json({ error: 'Saldo musi być liczbą całkowitą ≥ 0.' });
-  }
-  if (totalPoints != null && (!Number.isInteger(totalPoints) || totalPoints < 0)) {
-    return res.status(400).json({ error: 'Punkty muszą być liczbą całkowitą ≥ 0.' });
-  }
-  if (balance == null && totalPoints == null) {
+  // Każde pole osobno opcjonalne — panel wysyła tylko to, co admin faktycznie zmienił.
+  const num = (v) => (v != null ? parseInt(v, 10) : null);
+  const balance = num(req.body.balance);
+  const totalPoints = num(req.body.total_points);
+  const tile = num(req.body.tile);
+  const laps = num(req.body.laps);
+  const rollsToday = num(req.body.rolls_today);
+  const extraRolls = num(req.body.extra_rolls);
+
+  const bad = (v, min, max, label) =>
+    v != null && (!Number.isInteger(v) || v < min || (max != null && v > max)) ? label : null;
+  const err = bad(balance, 0, null, 'Saldo musi być liczbą całkowitą ≥ 0.')
+    || bad(totalPoints, 0, null, 'Punkty muszą być liczbą całkowitą ≥ 0.')
+    || bad(tile, 0, SL_BOARD_SIZE - 1, `Pole musi być z zakresu 0–${SL_BOARD_SIZE - 1}.`)
+    || bad(laps, 0, null, 'Okrążenia muszą być liczbą całkowitą ≥ 0.')
+    || bad(rollsToday, 0, null, 'Zużyte rzuty muszą być liczbą całkowitą ≥ 0.')
+    || bad(extraRolls, 0, SL_MAX_EXTRA_ROLLS, `Dodatkowe sloty: 0–${SL_MAX_EXTRA_ROLLS}.`);
+  if (err) return res.status(400).json({ error: err });
+
+  if ([balance, totalPoints, tile, laps, rollsToday, extraRolls].every(v => v == null)) {
     return res.status(400).json({ error: 'Nie podano żadnej zmiany.' });
   }
 
@@ -3972,13 +4081,182 @@ app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
 
   const out = transaction(() => {
     const st = slEnsureState(playerId);
-    const nextBalance = balance != null ? balance : Number(st.balance);
-    const nextPoints = totalPoints != null ? totalPoints : Number(st.total_points);
-    db.prepare('UPDATE sl_state SET balance = ?, total_points = ? WHERE player_id = ?')
-      .run(nextBalance, nextPoints, playerId);
-    return { balance: nextBalance, total_points: nextPoints };
+    const today = todayWaw();
+
+    // Pozycja na planszy to para (okrążenie, pole) — trzymana jako jedna liczba abs_pos.
+    // Admin podaje ją tak, jak ją widzi w UI, więc składamy z powrotem tutaj.
+    const nextTile = tile != null ? tile : slTileOf(Number(st.abs_pos));
+    const nextLaps = laps != null ? laps : Number(st.laps);
+    const nextAbs = nextLaps * SL_BOARD_SIZE + nextTile;
+
+    // Licznik zużytych rzutów liczy się dla dnia z last_move_date — ustawiając go ręcznie
+    // trzeba przypiąć go do DZIŚ, inaczej zmiana nie miałaby żadnego skutku.
+    const nextRolls = rollsToday != null ? rollsToday : (st.last_move_date === today ? Number(st.rolls_today) : 0);
+    const nextMoveDate = rollsToday != null ? (nextRolls > 0 ? today : null) : st.last_move_date;
+
+    db.prepare(`
+      UPDATE sl_state SET
+        balance = ?, total_points = ?, abs_pos = ?, laps = ?,
+        rolls_today = ?, last_move_date = ?,
+        extra_rolls = ?, extra_rolls_date = ?
+      WHERE player_id = ?
+    `).run(
+      balance != null ? balance : Number(st.balance),
+      totalPoints != null ? totalPoints : Number(st.total_points),
+      nextAbs, nextLaps,
+      nextRolls, nextMoveDate,
+      extraRolls != null ? extraRolls : Number(st.extra_rolls || 0),
+      extraRolls != null ? (extraRolls > 0 ? today : null) : st.extra_rolls_date,
+      playerId
+    );
+    return slAdminPlayerDetail(playerId);
   });
 
+  res.json({ success: true, nickname: player.nickname, player: out });
+});
+
+// GET /api/snakes/admin/player/:id?password= — komplet tego, co o graczu wie tryb Snakes:
+// stan, ekwipunek, oczekujące na niego efekty, ostatnie ruchy i wpisy w dzienniku.
+// Jeden strzał zamiast pięciu — panel otwiera ten szczegół po kliknięciu w gracza.
+function slAdminPlayerDetail(playerId) {
+  const st = slEnsureState(playerId);
+  const today = todayWaw();
+  const p = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
+  return {
+    player_id: playerId,
+    nickname: p ? p.nickname : null,
+    tile: slTileOf(Number(st.abs_pos)),
+    abs_pos: Number(st.abs_pos),
+    laps: Number(st.laps),
+    balance: Number(st.balance),
+    total_points: Number(st.total_points),
+    rolls_used_today: rollsUsedToday,
+    daily_rolls: slDailyRollsFor(st, today),
+    extra_rolls: st.extra_rolls_date === today ? Number(st.extra_rolls || 0) : 0,
+    max_extra_rolls: SL_MAX_EXTRA_ROLLS,
+    last_move_date: st.last_move_date,
+    has_avatar: !!st.avatar_updated_at,
+    inventory: slInventory(playerId),
+    effects: db.prepare(`
+      SELECT e.id, e.type, e.variant, e.created_at, p2.nickname AS source_nickname
+      FROM sl_effects e LEFT JOIN players p2 ON p2.id = e.source_player_id
+      WHERE e.target_player_id = ? AND e.status = 'pending' ORDER BY e.id
+    `).all(playerId),
+    moves: db.prepare(`
+      SELECT id, move_date, move_seq, rolls, from_abs, to_abs, points, note, created_at
+      FROM sl_moves WHERE player_id = ? ORDER BY id DESC LIMIT 15
+    `).all(playerId).map(m => ({ ...m, from_tile: slTileOf(m.from_abs), to_tile: slTileOf(m.to_abs) })),
+    activity: db.prepare(`
+      SELECT id, type, detail, day, created_at FROM sl_activity
+      WHERE player_id = ? ORDER BY id DESC LIMIT 15
+    `).all(playerId)
+  };
+}
+
+app.get('/api/snakes/admin/player/:id', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const player = db.prepare('SELECT id FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+  res.json({ success: true, player: slAdminPlayerDetail(playerId) });
+});
+
+// POST /api/snakes/admin/players/:id/inventory { password, type, qty|delta } — ustawia
+// stan ekwipunku wprost (`qty`) albo zmienia go o `delta` (przyciski +/- w panelu).
+app.post('/api/snakes/admin/players/:id/inventory', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const type = String(req.body.type || '');
+  const qty = req.body.qty != null ? parseInt(req.body.qty, 10) : null;
+  const delta = req.body.delta != null ? parseInt(req.body.delta, 10) : null;
+
+  if (!SL_POWERUP_TYPES.includes(type)) {
+    return res.status(400).json({ error: `Nieznany power-up. Dostępne: ${SL_POWERUP_TYPES.join(', ')}.` });
+  }
+  if (qty == null && delta == null) return res.status(400).json({ error: 'Podaj qty albo delta.' });
+  if (qty != null && (!Number.isInteger(qty) || qty < 0)) {
+    return res.status(400).json({ error: 'Liczba sztuk musi być liczbą całkowitą ≥ 0.' });
+  }
+  if (delta != null && !Number.isInteger(delta)) {
+    return res.status(400).json({ error: 'Zmiana musi być liczbą całkowitą.' });
+  }
+
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  const out = transaction(() => {
+    slEnsureState(playerId);
+    const current = slInventory(playerId)[type];
+    const next = Math.max(0, qty != null ? qty : current + delta);
+    db.prepare(`
+      INSERT INTO sl_inventory (player_id, type, qty) VALUES (?, ?, ?)
+      ON CONFLICT(player_id, type) DO UPDATE SET qty = excluded.qty
+    `).run(playerId, type, next);
+    return slAdminPlayerDetail(playerId);
+  });
+
+  res.json({ success: true, nickname: player.nickname, type, player: out });
+});
+
+// POST /api/snakes/admin/players/:id/effects/clear { password, effect_id? } — kasuje
+// oczekujące na graczu efekty (Freeze/Curse/Shield). Bez `effect_id` zdejmuje wszystkie.
+// Efekt znika bez śladu w dzienniku — to narzędzie naprawcze, nie ruch w grze.
+app.post('/api/snakes/admin/players/:id/effects/clear', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const effectId = req.body.effect_id != null ? parseInt(req.body.effect_id, 10) : null;
+
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  const out = transaction(() => {
+    const del = effectId != null
+      ? db.prepare(`DELETE FROM sl_effects WHERE id = ? AND target_player_id = ? AND status = 'pending'`).run(effectId, playerId)
+      : db.prepare(`DELETE FROM sl_effects WHERE target_player_id = ? AND status = 'pending'`).run(playerId);
+    return { cleared: del.changes, player: slAdminPlayerDetail(playerId) };
+  });
+
+  res.json({ success: true, nickname: player.nickname, ...out });
+});
+
+// POST /api/snakes/admin/players/:id/undo-move { password } — cofa OSTATNI ruch gracza
+// naprawdę: wraca na pole sprzed niego (from_abs), odejmuje zdobyte w nim punkty i monety
+// oraz oddaje zużyty slot, żeby dało się rzucić jeszcze raz. To coś innego niż „Dodaj ruch",
+// które tylko oddaje slot i zostawia zdobycze — tu ruch znika, jakby go nie było.
+// Nie odkręca skutków ubocznych tamtego rzutu: kogo wtedy wypchnął, komu ukradł monety,
+// ile obrażeń zadał bossowi — tego wiersz ruchu nie pamięta.
+app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  const out = transaction(() => {
+    const move = db.prepare('SELECT * FROM sl_moves WHERE player_id = ? ORDER BY id DESC LIMIT 1').get(playerId);
+    if (!move) return { none: true };
+
+    const st = slEnsureState(playerId);
+    const fromAbs = Number(move.from_abs);
+    const pts = Number(move.points);
+    const sameDay = st.last_move_date === move.move_date;
+    const nextRolls = sameDay ? Math.max(0, Number(st.rolls_today) - 1) : Number(st.rolls_today);
+
+    db.prepare(`
+      UPDATE sl_state SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?),
+        balance = MAX(0, balance - ?), rolls_today = ?
+      WHERE player_id = ?
+    `).run(fromAbs, Math.floor(fromAbs / SL_BOARD_SIZE), pts, pts, nextRolls, playerId);
+
+    db.prepare('DELETE FROM sl_moves WHERE id = ?').run(move.id);
+    return {
+      none: false, move_date: move.move_date, move_seq: Number(move.move_seq),
+      points_removed: pts, back_to_tile: slTileOf(fromAbs), player: slAdminPlayerDetail(playerId)
+    };
+  });
+
+  if (out.none) return res.status(400).json({ error: 'Ten gracz nie ma żadnego zapisanego ruchu.' });
   res.json({ success: true, nickname: player.nickname, ...out });
 });
 

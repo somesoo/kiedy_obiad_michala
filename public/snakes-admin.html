@@ -33,6 +33,34 @@
     .pl-actions button { font-size: 11px; padding: 5px 9px; }
     .btn-danger { background: var(--danger); color: #fff; border: none; border-radius: 8px; cursor: pointer; }
     .pl-moved { color: var(--accent); }
+    .pl-over { color: var(--danger); font-weight: 600; }
+
+    /* Szczegół gracza — rozwijany pod wierszem, własna siatka pól */
+    .pl-detail { flex-basis: 100%; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--muted); display: none; }
+    .pl-row.is-open .pl-detail { display: block; }
+    .pl-grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .pl-grp-label { font-size: 11px; color: var(--text-muted); min-width: 92px; font-family: 'Space Grotesk', sans-serif; }
+    .pl-grp input[type=number] { width: 76px; background: var(--surface); border: 1px solid var(--muted); border-radius: 6px; color: var(--text-primary); padding: 4px 6px; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+    .pl-grp input[type=date] { background: var(--surface); border: 1px solid var(--muted); border-radius: 6px; color: var(--text-primary); padding: 4px 6px; font-size: 11px; }
+    .pl-grp button { font-size: 11px; padding: 4px 8px; }
+    .pl-hint { font-size: 10px; color: var(--text-muted); }
+    .inv-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 11px; }
+    .inv-chip button { border: none; background: none; color: var(--text-primary); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+    .inv-chip .inv-qty { font-family: 'JetBrains Mono', monospace; min-width: 12px; text-align: center; }
+    .eff-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--danger); border-radius: 999px; padding: 3px 8px; font-size: 11px; }
+    .eff-chip button { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 12px; padding: 0; }
+    .pl-mini { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; line-height: 1.6; max-height: 116px; overflow-y: auto; }
+
+    /* Historia */
+    .hist-tab.is-active { border-color: var(--accent); color: var(--accent); }
+    .hist-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 11px; border-bottom: 1px solid var(--muted); }
+    .hist-row:hover { background: var(--surface-alt); }
+    .hist-time { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); white-space: nowrap; }
+    .hist-who { font-weight: 600; min-width: 92px; }
+    .hist-type { font-size: 10px; color: var(--text-muted); min-width: 78px; }
+    .hist-detail { flex: 1; min-width: 140px; }
+    .hist-del { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 12px; }
+    #hist-list { max-height: 420px; overflow-y: auto; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -150,15 +178,34 @@
       <div class="adm-card">
         <h3>🎮 GRACZE</h3>
         <div class="adm-note">
-          „Dodaj ruch” oddaje graczowi JEDEN dodatkowy ruch na wskazaną datę (z dziennego
-          limitu — patrz „ruchy dziś” przy graczu) — kasuje ostatni zapisany tamtejszy
-          ruch i pozwala rzucić jeszcze raz OD RAZU (o ile trwają godziny gry, 8:00–16:00).
-          Nie cofa punktów z poprzednich rzutów, to dodatkowa szansa, nie cofnięcie. Kliknij ponownie, żeby oddać kolejny slot.
-          „Usuń” kasuje gracza WYŁĄCZNIE
-          z trybu Snakes (stan, ekwipunek, historia, zadane bossowi obrażenia) — konto i wyniki
-          w Wordle zostają nietknięte; gracz wystartuje w Snakes od zera przy powrocie.
+          Kliknij <strong>Szczegóły</strong> przy graczu, żeby otworzyć pełne sterowanie:
+          pozycja na planszy, punkty i saldo, zużyte rzuty, ekwipunek, oczekujące na niego
+          efekty oraz cofanie ostatniego ruchu.
         </div>
         <div id="players-list"></div>
+      </div>
+
+      <div class="adm-card">
+        <h3>📜 HISTORIA</h3>
+        <div class="adm-note">
+          <strong>Dziennik</strong> to log widoczny dla graczy — kasowanie wpisu niczego
+          w grze nie cofa, czyści tylko zapis. <strong>Ruchy</strong> pokazują, kto ile razy
+          rzucał danego dnia (na czerwono przekroczenia dziennego limitu). Do realnego
+          cofania służą „Cofnij ostatni ruch” przy graczu i „Cofnij cały dzień” niżej.
+        </div>
+        <div class="adm-actions">
+          <button class="btn-ghost hist-tab is-active" id="tab-activity">Dziennik</button>
+          <button class="btn-ghost hist-tab" id="tab-moves">Ruchy</button>
+        </div>
+        <div class="adm-actions">
+          <select id="hist-date" style="width:150px"><option value="">— wszystkie dni —</option></select>
+          <select id="hist-player" style="width:160px"><option value="">— wszyscy gracze —</option></select>
+          <select id="hist-type" style="width:150px"><option value="">— wszystkie typy —</option></select>
+          <button class="btn-ghost" id="btn-hist-refresh">Odśwież</button>
+          <button class="btn-danger" id="btn-hist-purge">🗑 Kasuj wg filtra</button>
+        </div>
+        <div class="adm-stat" id="hist-summary" style="margin-top:10px">–</div>
+        <div id="hist-list"></div>
       </div>
 
       <div class="adm-card">
@@ -254,6 +301,7 @@
       renderEvents();
       renderInfo();
       await loadPlayers();
+      await loadHistory();
     }
 
     let playersToday = null;
@@ -269,27 +317,115 @@
 
     function renderPlayers(players) {
       renderDamagePlayerSelect(players);
+      histPlayers = players;
+      fillSelect('hist-player', players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`), '— wszyscy gracze —');
       const list = document.getElementById('players-list');
       if (!players.length) {
         list.innerHTML = '<div class="adm-note">Nikt jeszcze nie zagrał w Snakes.</div>';
         return;
       }
+      // Rozwinięte szczegóły przeżywają przerysowanie listy — inaczej każda akcja
+      // zwijałaby panel, nad którym admin właśnie pracuje.
+      const open = new Set([...list.querySelectorAll('.pl-row.is-open')].map(r => r.dataset.id));
       list.innerHTML = players.map(p => `
-        <div class="pl-row" data-id="${p.player_id}">
+        <div class="pl-row${open.has(String(p.player_id)) ? ' is-open' : ''}" data-id="${p.player_id}">
           <span class="pl-name">${esc(p.nickname)}</span>
           <span class="pl-stats">
-            pole ${p.tile} · okr. ${p.laps}
-            · ruchy dziś: <span class="${p.moved_today ? 'pl-moved' : ''}">${p.rolls_used_today}/${p.daily_rolls}</span>
+            pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt · ${p.balance} monet
+            · ruchy dziś: <span class="${p.rolls_used_today > p.daily_rolls ? 'pl-over' : (p.moved_today ? 'pl-moved' : '')}">${p.rolls_used_today}/${p.daily_rolls}</span>
           </span>
           <span class="pl-actions">
-            <input type="number" class="pl-points" min="0" step="1" value="${p.total_points}" title="punkty (leaderboard)" />
-            <input type="number" class="pl-balance" min="0" step="1" value="${p.balance}" title="saldo (monety)" />
-            <button class="btn-ghost pl-stats-save" title="Zapisz punkty i saldo">💾 Zapisz</button>
-            <input type="date" class="pl-date" value="${playersToday}" />
-            <button class="btn-ghost pl-grant">➕ Dodaj ruch</button>
+            <button class="btn-ghost pl-toggle">${open.has(String(p.player_id)) ? '▲ Zwiń' : '▼ Szczegóły'}</button>
             <button class="btn-danger pl-delete">🗑 Usuń</button>
           </span>
+          <div class="pl-detail"></div>
         </div>`).join('');
+      // Odśwież zawartość tych szczegółów, które zostały otwarte.
+      for (const id of open) loadPlayerDetail(id);
+    }
+
+    const POWERUP_ICONS = { freeze: '❄️', curse: '💀', double_move: '⏩', shield: '🛡️' };
+
+    async function loadPlayerDetail(id) {
+      const row = document.querySelector(`.pl-row[data-id="${id}"]`);
+      if (!row) return;
+      try {
+        const res = await api('GET', `/api/snakes/admin/player/${id}?password=${encodeURIComponent(pass)}`);
+        renderPlayerDetail(row, res.player);
+      } catch (e) {
+        row.querySelector('.pl-detail').innerHTML = `<div class="pl-hint">Nie udało się wczytać: ${esc(e.message)}</div>`;
+      }
+    }
+
+    function renderPlayerDetail(row, p) {
+      const inv = Object.entries(p.inventory).map(([type, qty]) => `
+        <span class="inv-chip" title="${esc(type)}">
+          ${POWERUP_ICONS[type] || ''}
+          <button class="inv-minus" data-type="${esc(type)}">−</button>
+          <span class="inv-qty">${qty}</span>
+          <button class="inv-plus" data-type="${esc(type)}">+</button>
+        </span>`).join(' ');
+
+      const effects = p.effects.length
+        ? p.effects.map(e => `
+            <span class="eff-chip">
+              ${POWERUP_ICONS[e.type] || ''} ${esc(e.type)}${e.variant ? ` #${e.variant}` : ''}
+              ${e.source_nickname ? `od ${esc(e.source_nickname)}` : ''}
+              <button class="eff-del" data-eff="${e.id}" title="Zdejmij">✕</button>
+            </span>`).join(' ') + ` <button class="btn-ghost eff-clear-all">Zdejmij wszystkie</button>`
+        : '<span class="pl-hint">brak oczekujących efektów</span>';
+
+      const moves = p.moves.length
+        ? p.moves.map(m => `${m.move_date} #${m.move_seq}: pole ${m.from_tile} → ${m.to_tile} (+${m.points} pkt)${m.note ? ` [${esc(m.note)}]` : ''}`).join('<br>')
+        : 'brak ruchów';
+
+      const activity = p.activity.length
+        ? p.activity.map(a => `${a.day} · ${esc(a.type)}: ${esc(a.detail)}`).join('<br>')
+        : 'brak wpisów';
+
+      row.querySelector('.pl-detail').innerHTML = `
+        <div class="pl-grp">
+          <span class="pl-grp-label">Pozycja</span>
+          <input type="number" class="pd-tile" min="0" value="${p.tile}" title="pole na planszy" />
+          <input type="number" class="pd-laps" min="0" value="${p.laps}" title="okrążenia" />
+          <button class="btn-ghost pd-save-pos">💾 Zapisz</button>
+          <span class="pl-hint">pole · okrążenia (abs ${p.abs_pos})</span>
+        </div>
+        <div class="pl-grp">
+          <span class="pl-grp-label">Punkty i saldo</span>
+          <input type="number" class="pd-points" min="0" value="${p.total_points}" title="punkty (leaderboard)" />
+          <input type="number" class="pd-balance" min="0" value="${p.balance}" title="saldo (monety)" />
+          <button class="btn-ghost pd-save-stats">💾 Zapisz</button>
+          <span class="pl-hint">pkt · monety</span>
+        </div>
+        <div class="pl-grp">
+          <span class="pl-grp-label">Rzuty dziś</span>
+          <input type="number" class="pd-rolls" min="0" value="${p.rolls_used_today}" title="zużyte rzuty" />
+          <input type="number" class="pd-extra" min="0" max="${p.max_extra_rolls}" value="${p.extra_rolls}" title="dodatkowe sloty z Double Move" />
+          <button class="btn-ghost pd-save-rolls">💾 Zapisz</button>
+          <span class="pl-hint">zużyte · dodatkowe (limit ${p.daily_rolls})</span>
+        </div>
+        <div class="pl-grp">
+          <span class="pl-grp-label">Ekwipunek</span>${inv}
+        </div>
+        <div class="pl-grp">
+          <span class="pl-grp-label">Efekty</span>${effects}
+        </div>
+        <div class="pl-grp">
+          <span class="pl-grp-label">Ruchy</span>
+          <input type="date" class="pd-date" value="${playersToday}" />
+          <button class="btn-ghost pd-grant">➕ Dodaj ruch</button>
+          <button class="btn-ghost pd-undo">↩️ Cofnij ostatni ruch</button>
+          <span class="pl-hint">„Dodaj” oddaje slot, „Cofnij” wraca też pozycją i punktami</span>
+        </div>
+        <div class="pl-grp" style="align-items:flex-start">
+          <span class="pl-grp-label">Ostatnie ruchy</span>
+          <div class="pl-mini" style="flex:1;min-width:200px">${moves}</div>
+        </div>
+        <div class="pl-grp" style="align-items:flex-start">
+          <span class="pl-grp-label">Ostatnie wpisy</span>
+          <div class="pl-mini" style="flex:1;min-width:200px">${activity}</div>
+        </div>`;
     }
 
     // Lista graczy do przypisania ręcznych obrażeń bossowi — zachowuje bieżący wybór,
@@ -307,39 +443,212 @@
       if (!row) return;
       const id = row.dataset.id;
       const nickname = row.querySelector('.pl-name').textContent;
+      const val = (sel) => parseInt(row.querySelector(sel).value, 10);
+      // Każda akcja odsyła świeży szczegół gracza — odrysowujemy go bez pełnego
+      // przeładowania listy, żeby otwarty panel nie mrugał.
+      const applyDetail = (res, msg) => { renderPlayerDetail(row, res.player); showToast(msg); };
 
-      if (e.target.closest('.pl-stats-save')) {
-        const balance = parseInt(row.querySelector('.pl-balance').value, 10);
-        const totalPoints = parseInt(row.querySelector('.pl-points').value, 10);
-        if (!Number.isInteger(balance) || balance < 0 || !Number.isInteger(totalPoints) || totalPoints < 0) {
-          showToast('Punkty i saldo muszą być liczbami całkowitymi ≥ 0.');
+      try {
+        if (e.target.closest('.pl-toggle')) {
+          const opening = !row.classList.contains('is-open');
+          row.classList.toggle('is-open', opening);
+          row.querySelector('.pl-toggle').textContent = opening ? '▲ Zwiń' : '▼ Szczegóły';
+          if (opening) await loadPlayerDetail(id);
           return;
         }
-        try {
-          const res = await api('POST', `/api/snakes/admin/players/${id}/stats`, { password: pass, balance, total_points: totalPoints });
-          showToast(`💾 ${res.nickname}: ${res.total_points} pkt, saldo ${res.balance}`);
-          await loadPlayers();
-        } catch (err) {
-          showToast(err.message);
+
+        if (e.target.closest('.pd-save-pos')) {
+          const res = await api('POST', `/api/snakes/admin/players/${id}/stats`,
+            { password: pass, tile: val('.pd-tile'), laps: val('.pd-laps') });
+          applyDetail(res, `📍 ${res.nickname}: pole ${res.player.tile}, okr. ${res.player.laps}`);
+          return;
         }
-      } else if (e.target.closest('.pl-grant')) {
-        const date = row.querySelector('.pl-date').value || playersToday;
-        try {
+
+        if (e.target.closest('.pd-save-stats')) {
+          const res = await api('POST', `/api/snakes/admin/players/${id}/stats`,
+            { password: pass, total_points: val('.pd-points'), balance: val('.pd-balance') });
+          applyDetail(res, `💾 ${res.nickname}: ${res.player.total_points} pkt, saldo ${res.player.balance}`);
+          return;
+        }
+
+        if (e.target.closest('.pd-save-rolls')) {
+          const res = await api('POST', `/api/snakes/admin/players/${id}/stats`,
+            { password: pass, rolls_today: val('.pd-rolls'), extra_rolls: val('.pd-extra') });
+          applyDetail(res, `🎲 ${res.nickname}: ${res.player.rolls_used_today}/${res.player.daily_rolls} rzutów dziś`);
+          return;
+        }
+
+        const invBtn = e.target.closest('.inv-plus, .inv-minus');
+        if (invBtn) {
+          const res = await api('POST', `/api/snakes/admin/players/${id}/inventory`,
+            { password: pass, type: invBtn.dataset.type, delta: invBtn.classList.contains('inv-plus') ? 1 : -1 });
+          applyDetail(res, `🎒 ${res.nickname}: ${res.type} → ${res.player.inventory[res.type]}`);
+          return;
+        }
+
+        const effDel = e.target.closest('.eff-del');
+        if (effDel || e.target.closest('.eff-clear-all')) {
+          const body = { password: pass };
+          if (effDel) body.effect_id = parseInt(effDel.dataset.eff, 10);
+          const res = await api('POST', `/api/snakes/admin/players/${id}/effects/clear`, body);
+          applyDetail(res, `🧹 ${res.nickname}: zdjęto ${res.cleared} ${res.cleared === 1 ? 'efekt' : 'efekty'}`);
+          return;
+        }
+
+        if (e.target.closest('.pd-grant')) {
+          const date = row.querySelector('.pd-date').value || playersToday;
           const res = await api('POST', `/api/snakes/admin/players/${id}/grant-move`, { password: pass, date });
           showToast(`➕ ${nickname}: dodatkowy ruch na ${date} (${res.rolls_used_today}/${res.daily_rolls} zużytych)`);
           await loadPlayers();
-        } catch (err) {
-          showToast(err.message);
+          return;
         }
-      } else if (e.target.closest('.pl-delete')) {
-        if (!confirm(`Usunąć ${nickname} z trybu Snakes? Wordle i konto zostają nietknięte.`)) return;
-        try {
+
+        if (e.target.closest('.pd-undo')) {
+          if (!confirm(`Cofnąć ostatni ruch gracza ${nickname}? Wróci na pole sprzed niego, a zdobyte w nim punkty i monety przepadną.`)) return;
+          const res = await api('POST', `/api/snakes/admin/players/${id}/undo-move`, { password: pass });
+          applyDetail(res, `↩️ ${res.nickname}: cofnięto ruch #${res.move_seq} z ${res.move_date} — powrót na pole ${res.back_to_tile}, -${res.points_removed} pkt`);
+          await loadPlayers();
+          return;
+        }
+
+        if (e.target.closest('.pl-delete')) {
+          if (!confirm(`Usunąć ${nickname} z trybu Snakes? Wordle i konto zostają nietknięte.`)) return;
           const res = await api('DELETE', `/api/snakes/admin/players/${id}?password=${encodeURIComponent(pass)}`);
           showToast(`🗑 Usunięto ${res.deleted} z trybu Snakes`);
           await loadPlayers();
-        } catch (err) {
-          showToast(err.message);
         }
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+
+    // ── HISTORIA ──
+    // Dwa widoki na tych samych filtrach: dziennik (log dla graczy) i ruchy (co kto
+    // realnie rzucił). Filtry trzymamy w jednym miejscu, żeby przełączenie widoku nie
+    // gubiło tego, co admin już zawęził.
+    let histView = 'activity';
+    let histPlayers = [];
+
+    function histFilters() {
+      return {
+        date: document.getElementById('hist-date').value || null,
+        player_id: document.getElementById('hist-player').value || null,
+        type: document.getElementById('hist-type').value || null
+      };
+    }
+
+    function histQuery() {
+      const f = histFilters();
+      const q = new URLSearchParams({ password: pass });
+      if (f.date) q.set('date', f.date);
+      if (f.player_id) q.set('player_id', f.player_id);
+      if (histView === 'activity' && f.type) q.set('type', f.type);
+      return q.toString();
+    }
+
+    function fillSelect(id, values, label, keepValue) {
+      const sel = document.getElementById(id);
+      const keep = keepValue !== undefined ? keepValue : sel.value;
+      sel.innerHTML = `<option value="">${label}</option>` + values.join('');
+      if (keep && sel.querySelector(`option[value="${keep}"]`)) sel.value = keep;
+    }
+
+    async function loadHistory() {
+      const list = document.getElementById('hist-list');
+      const summary = document.getElementById('hist-summary');
+      try {
+        if (histView === 'activity') {
+          const res = await api('GET', `/api/snakes/admin/activity?${histQuery()}`);
+          fillSelect('hist-date', res.days.map(d => `<option value="${d}">${d}</option>`), '— wszystkie dni —');
+          fillSelect('hist-type', res.types.map(t => `<option value="${t}">${esc(t)}</option>`), '— wszystkie typy —');
+          summary.innerHTML = `Dziennik: pokazano <strong>${res.shown}</strong> z <strong>${res.total}</strong> wpisów pasujących do filtra.`;
+          list.innerHTML = res.entries.length
+            ? res.entries.map(a => `
+                <div class="hist-row" data-id="${a.id}">
+                  <span class="hist-time">${esc(a.day)} ${esc(String(a.created_at).slice(11, 16))}</span>
+                  <span class="hist-who">${esc(a.nickname)}</span>
+                  <span class="hist-type">${esc(a.type)}</span>
+                  <span class="hist-detail">${esc(a.detail)}</span>
+                  <button class="hist-del" title="Skasuj wpis">✕</button>
+                </div>`).join('')
+            : '<div class="adm-note">Brak wpisów dla tego filtra.</div>';
+        } else {
+          const res = await api('GET', `/api/snakes/admin/moves?${histQuery()}`);
+          fillSelect('hist-date', res.days.map(d => `<option value="${d}">${d}</option>`), '— wszystkie dni —');
+          // Limit jest DZIENNY, więc porównywać do niego można tylko wtedy, gdy widok jest
+          // zawężony do jednego dnia — bez tego filtra sumujemy ruchy z całej historii
+          // i każdy regularnie grający wyglądałby na oszusta.
+          const perDay = !!histFilters().date;
+          const over = perDay ? res.per_player.filter(p => p.moves > res.daily_max) : [];
+          summary.innerHTML =
+            `Ruchy: <strong>${res.moves.length}</strong> w widoku · limit dnia: <strong>${res.daily_max}</strong>` +
+            (perDay ? '' : ' <span class="pl-hint">(wybierz dzień, żeby porównać z limitem)</span>') + '<br>' +
+            (res.per_player.length
+              ? res.per_player.map(p => `<span class="${perDay && p.moves > res.daily_max ? 'pl-over' : ''}">${esc(p.nickname)}: ${p.moves} ruchów, ${p.points} pkt</span>`).join(' · ')
+              : 'brak ruchów') +
+            (over.length ? `<br><span class="adm-warn">⚠️ Przekroczenie limitu: ${over.map(p => esc(p.nickname)).join(', ')} — rozważ „Cofnij cały dzień”.</span>` : '');
+          list.innerHTML = res.moves.length
+            ? res.moves.map(m => `
+                <div class="hist-row">
+                  <span class="hist-time">${esc(m.move_date)} ${esc(String(m.created_at).slice(11, 16))}</span>
+                  <span class="hist-who">${esc(m.nickname)}</span>
+                  <span class="hist-type">#${m.move_seq}</span>
+                  <span class="hist-detail">🎲 ${esc(m.rolls)} · pole ${m.from_tile} → ${m.to_tile} · +${m.points} pkt${m.note ? ` [${esc(m.note)}]` : ''}</span>
+                </div>`).join('')
+            : '<div class="adm-note">Brak ruchów dla tego filtra.</div>';
+        }
+      } catch (e) {
+        summary.textContent = e.message;
+        list.innerHTML = '';
+      }
+    }
+
+    function setHistView(view) {
+      histView = view;
+      document.getElementById('tab-activity').classList.toggle('is-active', view === 'activity');
+      document.getElementById('tab-moves').classList.toggle('is-active', view === 'moves');
+      // Typ wpisu dotyczy wyłącznie dziennika — przy ruchach nie ma czym filtrować.
+      document.getElementById('hist-type').style.display = view === 'activity' ? '' : 'none';
+      document.getElementById('btn-hist-purge').style.display = view === 'activity' ? '' : 'none';
+      loadHistory();
+    }
+
+    document.getElementById('tab-activity').addEventListener('click', () => setHistView('activity'));
+    document.getElementById('tab-moves').addEventListener('click', () => setHistView('moves'));
+    document.getElementById('btn-hist-refresh').addEventListener('click', loadHistory);
+    for (const id of ['hist-date', 'hist-player', 'hist-type']) {
+      document.getElementById(id).addEventListener('change', loadHistory);
+    }
+
+    document.getElementById('hist-list').addEventListener('click', async e => {
+      const del = e.target.closest('.hist-del');
+      if (!del) return;
+      const id = del.closest('.hist-row').dataset.id;
+      try {
+        await api('DELETE', `/api/snakes/admin/activity/${id}?password=${encodeURIComponent(pass)}`);
+        await loadHistory();
+        showToast('🗑 Wpis skasowany');
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+
+    document.getElementById('btn-hist-purge').addEventListener('click', async () => {
+      const f = histFilters();
+      const opis = [
+        f.date ? `dzień ${f.date}` : null,
+        f.player_id ? `gracz ${document.getElementById('hist-player').selectedOptions[0].textContent}` : null,
+        f.type ? `typ ${f.type}` : null
+      ].filter(Boolean).join(', ') || 'CAŁY dziennik (bez filtra!)';
+      if (!confirm(`Skasować wpisy z dziennika: ${opis}? Log zniknie, ale niczego to w grze nie cofa.`)) return;
+      try {
+        const res = await api('POST', '/api/snakes/admin/activity/purge', {
+          password: pass, ...f, confirm_all: !f.date && !f.player_id && !f.type
+        });
+        await loadHistory();
+        showToast(`🗑 Skasowano ${res.deleted} wpisów`);
+      } catch (err) {
+        showToast(err.message);
       }
     });
 
