@@ -77,6 +77,17 @@
         <div id="boss-info"></div>
 
         <div class="adm-note" style="margin-top:12px">
+          <strong>Włącznik bossa</strong> — wyłączenie chowa walkę wszystkim graczom (panel
+          pod planszą i punkt regulaminu znikają, rzuty przestają zadawać obrażenia, ręczny
+          atak jest zablokowany) i domyka trwającą walkę <strong>bez nagród i bez kar</strong>.
+          Włączenie startuje świeżą edycję z nowym bossem i nowym terminem. Punktów graczy
+          to nie rusza w żadną stronę.
+        </div>
+        <div class="adm-actions">
+          <button class="btn-ghost" id="btn-boss-toggle">–</button>
+        </div>
+
+        <div class="adm-note" style="margin-top:12px">
           <strong>Ręczna kontrola bossa</strong> — HP i maksymalne HP ustawiasz wprost
           (pasek liczy się od maksimum), nazwę zmieniasz w locie. Puste pole = bez zmian.
         </div>
@@ -344,8 +355,25 @@
       }
     }
 
+    // Sterowanie bossem ma sens tylko, gdy boss w ogóle jest włączony — przy wyłączonym
+    // wszystko poza samym włącznikiem gasimy, żeby nie dało się strzelić w martwy event.
+    const BOSS_CONTROLS = ['btn-boss-save', 'btn-boss-damage', 'btn-coop-deadline', 'btn-coop-threshold', 'btn-coop-complete'];
+
     function renderInfo() {
       const c = cfg.coop;
+      const bossOn = !!c;
+
+      document.getElementById('btn-boss-toggle').textContent = bossOn ? '⏸️ Wyłącz bossa' : '▶️ Włącz bossa';
+      for (const id of BOSS_CONTROLS) document.getElementById(id).disabled = !bossOn;
+
+      if (!bossOn) {
+        document.getElementById('coop-info').innerHTML =
+          'Boss <strong>WYŁĄCZONY</strong> — gracze nie widzą walki, rzuty nie zadają obrażeń, ' +
+          'ręczny atak jest zablokowany.<br>Włączenie startuje świeżą edycję z nowym bossem i terminem.';
+        document.getElementById('boss-info').innerHTML = '';
+        return;
+      }
+
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong><br>` +
         `Nagrody: ${c.reward_pool} pkt · podział: ${esc(c.reward_split)} · mnożnik: ${c.reward_multiplier}<br>` +
@@ -434,6 +462,20 @@
         cfg.coop = res.coop;
         renderInfo();
         showToast(`✅ Suwak trudności dla przyszłych edycji ustawiony na ${threshold} (bieżącego bossa to nie rusza).`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-boss-toggle').addEventListener('click', async () => {
+      const turnOn = !cfg.coop;
+      if (!turnOn && !confirm('Wyłączyć bossa? Trwająca walka zostanie domknięta bez nagród i bez kar, a gracze przestaną go widzieć.')) return;
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/toggle', { password: pass, enabled: turnOn });
+        await loadSettings();
+        showToast(res.boss_enabled
+          ? `▶️ Boss włączony — edycja #${res.cycle}, budzi się ${res.boss_name}.`
+          : `⏸️ Boss wyłączony${res.closed_cycles ? ' (trwająca walka domknięta bez rozliczenia)' : ''}.`);
       } catch (e) {
         showToast(e.message);
       }

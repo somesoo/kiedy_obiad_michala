@@ -2162,6 +2162,43 @@ function slCoopDefaultThreshold() {
   return Number.isInteger(override) && override > 0 ? override : SL_COOP_THRESHOLD;
 }
 
+// ── WYŁĄCZNIK BOSSA ──
+// Cała walka z bossem chodzi na jednym przełączniku trzymanym w sl_meta, więc da się ją
+// zgasić i zapalić z panelu admina bez deployu. Wyłączony boss znika kompletnie: payload
+// dla UI jest pusty (panel i punkt regulaminu się chowają), rzuty nie zadają obrażeń,
+// ręczny atak odpada, scheduler nie rozlicza terminów, a nowe cykle się nie zakładają.
+// Domyślnie WŁĄCZONY — na produkcji gasi go jednorazowa migracja (patrz
+// shutDownBossAndRevertRewards), więc świeża instalacja dostaje bossa normalnie.
+function slBossEnabled() {
+  return slMetaGet('boss_enabled') !== '0';
+}
+
+// Zapala/gasi bossa. Przy gaszeniu domykamy trwającą walkę BEZ rozliczenia (nikt nie
+// dostaje nagrody ani kary — walka po prostu przestaje istnieć), przy zapalaniu startuje
+// świeży cykl z nowym bossem i nowym terminem. Bez tego po ponownym włączeniu odżyłby
+// stary cykl z terminem dawno po czasie i pierwszy tik schedulera ukarałby wszystkich
+// za przegraną, której nikt nie miał szans rozegrać.
+function slSetBossEnabled(on) {
+  return transaction(() => {
+    slMetaSet('boss_enabled', on ? '1' : '0');
+    if (!on) {
+      const closed = db.prepare(`
+        UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+        WHERE status = 'event_active'
+      `).run();
+      return { enabled: false, closed_cycles: closed.changes };
+    }
+    const last = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
+    if (last && last.status === 'event_active') return { enabled: true, cycle: Number(last.cycle), boss_name: last.boss_name };
+    const next = slCoopInsertCycle(
+      last ? Number(last.cycle) + 1 : 1,
+      slCoopDefaultThreshold(),
+      SL_COOP_BASE_TIME_DAYS
+    );
+    return { enabled: true, cycle: Number(next.cycle), boss_name: next.boss_name };
+  });
+}
+
 // Wstawia nowy cykl co-op — rusza NATYCHMIAST (started_at = teraz, domyślnie w schemacie)
 // i OD RAZU budzi bossa (jedna faza — patrz komentarz "ESKALACJA TRUDNOŚCI CO-OP" wyżej):
 // żadnej zbiórki, żadnego czekania. `threshold` to wyłącznie suwak trudności — skaluje
@@ -2205,7 +2242,11 @@ function slCoopAttackers(cycle) {
   }));
 }
 
+// Zwraca null, gdy boss jest wyłączony — UI po stronie gracza i panel admina czytają to
+// jako „nie ma czego pokazywać". Sprawdzenie jest PRZED slCurrentCoop(), bo tamto samo
+// zakłada nowy cykl, gdy tabela jest pusta — wyłączony boss nie ma prawa się tak wskrzesić.
 function slCoopPayload(meId) {
+  if (!slBossEnabled()) return null;
   const coop = slCurrentCoop();
   const attackers = slCoopAttackers(coop.cycle);
   const mine = meId ? (attackers.find(c => c.player_id === meId) || { amount: 0 }).amount : 0;
@@ -2511,7 +2552,8 @@ function slBuildDailySummary() {
     embeds: [{
       title: 'Ranking',
       url: SNAKES_URL,
-      description: `${lines.join('\n')}\n\n🎲 Ruch dziś wykonało: **${movedToday}** ${movedToday === 1 ? 'osoba' : 'osób'}\n👹 ${coop.boss ? `**${coop.boss.name}** — HP ${coop.boss.hp}/${coop.boss.max_hp} (${coop.boss.percent}%)` : 'boss nie walczy'}`,
+      description: `${lines.join('\n')}\n\n🎲 Ruch dziś wykonało: **${movedToday}** ${movedToday === 1 ? 'osoba' : 'osób'}` +
+        (coop && coop.boss ? `\n👹 **${coop.boss.name}** — HP ${coop.boss.hp}/${coop.boss.max_hp} (${coop.boss.percent}%)` : ''),
       color: 0xC8F135,
       footer: { text: 'Jeden ruch dziennie — nie zapomnij rzucić kostką!' }
     }]
@@ -2573,6 +2615,7 @@ function slEmitBossTimeout(outcome) {
 
 function startCoopBossDeadlineScheduler() {
   const tick = () => {
+    if (!slBossEnabled()) return;
     const coop = slCurrentCoop();
     if (coop.status !== 'event_active') return;
     const outcome = slResolveBossTimeout(coop.cycle);
@@ -2582,11 +2625,80 @@ function startCoopBossDeadlineScheduler() {
   setInterval(tick, 60_000);
   console.log(`Snakes/Co-op: eskalacja trudności — próg ×${SL_COOP_THRESHOLD_GROWTH} i czas ×${SL_COOP_TIME_SHRINK} po wygranej (min. ${SL_COOP_MIN_TIME_DAYS} dni robocze), ulga ×${SL_COOP_RELIEF_FACTOR} po porażce.`);
 }
+// ── COFANIE NAGRÓD BOSSA ──
+// Nagrody za pokonanie bossa NIE mają własnego rejestru — slFinishBossEvent doliczał je
+// wprost do salda i punktów gracza. Da się je jednak odtworzyć CO DO GROSZA, bo liczyły
+// się z danych, które w bazie zostały: puli cyklu i wkładu każdego atakującego
+// (sl_coop_contributions po rozliczeniu cyklu już się nie zmienia). Puszczamy więc tę samą
+// matematykę co przy wypłacie (slCoopRewardSplit + premia za zabicie) i odejmujemy wynik.
+// Bierzemy WYŁĄCZNIE cykle wygrane (boss_defeated_at) — przegrane nic nie wypłaciły.
+// Kary z przegranych walk NIE wracają: przy zabieraniu monet kwota była przycinana do
+// salda gracza, więc realnie zabrana wartość nigdzie nie została zapisana i nie da się jej
+// wiernie odtworzyć. Odejmowanie ma podłogę na zerze — kto zdążył wydać nagrodę, schodzi
+// do zera, ale nie na minus.
+function slRevertBossRewards() {
+  const cycles = db.prepare(`
+    SELECT * FROM sl_coop WHERE completed_at IS NOT NULL AND boss_defeated_at IS NOT NULL
+  `).all();
+
+  const takeBack = new Map();
+  for (const c of cycles) {
+    const rewardPool = Number(c.reward_pool) || Math.round(Number(c.threshold) * SL_COOP_REWARD_MULTIPLIER);
+    for (const p of slCoopRewardSplit(slCoopAttackers(c.cycle), rewardPool)) {
+      const reward = p.reward + SL_BOSS_DEFEAT_BONUS;
+      if (reward > 0) takeBack.set(p.player_id, (takeBack.get(p.player_id) || 0) + reward);
+    }
+  }
+
+  const upd = db.prepare(`
+    UPDATE sl_state SET balance = MAX(0, balance - ?), total_points = MAX(0, total_points - ?)
+    WHERE player_id = ?
+  `);
+  for (const [playerId, amount] of takeBack) upd.run(amount, amount, playerId);
+
+  return {
+    cycles: cycles.length,
+    players: takeBack.size,
+    total: [...takeBack.values()].reduce((a, b) => a + b, 0)
+  };
+}
+
+// ── MIGRACJA (jednorazowa): WYŁĄCZENIE BOSSA + COFNIĘCIE TEGO, CO ROZDAŁ ──
+// Wersja „awaryjny hamulec": po deployu produkcja sama gasi bossa i oddaje punkty oraz
+// monety, które wypłacił za pokonane walki. Flaga w sl_meta pilnuje, żeby stało się to
+// DOKŁADNIE RAZ — inaczej każdy restart zabierałby graczom kolejną porcję punktów, a
+// admin nie mógłby już nigdy włączyć bossa z panelu (kolejny restart znów by go zgasił).
+// Wpisy o walce znikają z dziennika, bo dotyczą czegoś, czego po cofnięciu już nie ma;
+// sl_coop i sl_coop_contributions ZOSTAJĄ jako ślad po tym, co i komu odjęto.
+(function shutDownBossAndRevertRewards() {
+  const FLAG = 'boss_shutdown_revert_done';
+  if (slMetaGet(FLAG)) return;
+
+  transaction(() => {
+    slMetaSet(FLAG, new Date().toISOString());
+    const undone = slRevertBossRewards();
+    const closed = db.prepare(`
+      UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+      WHERE status = 'event_active'
+    `).run();
+    const wiped = db.prepare(`DELETE FROM sl_activity WHERE type = 'boss_hit'`).run();
+    slMetaSet('boss_enabled', '0');
+    console.log(
+      `Snakes/Boss: WYŁĄCZONY. Cofnięto ${undone.total} pkt i monet od ${undone.players} ` +
+      `${undone.players === 1 ? 'gracza' : 'graczy'} (${undone.cycles} rozliczonych walk), ` +
+      `domknięto ${closed.changes} trwającą walkę, usunięto ${wiped.changes} wpisów z dziennika. ` +
+      `Włączyć z powrotem można z panelu admina.`
+    );
+  });
+})();
+
 // ── MIGRACJA (jednorazowa): edycje, które utknęły w starym statusie 'collecting' (sprzed
 // przejścia na jedną fazę — boss walczy zawsze, patrz komentarz "ESKALACJA TRUDNOŚCI
 // CO-OP" wyżej), budzimy natychmiast — dostają swojego bossa i normalny termin na
-// pokonanie, tak jakby właśnie wystartowała ich edycja.
+// pokonanie, tak jakby właśnie wystartowała ich edycja. Przy wyłączonym bossie nie ma
+// czego budzić — cykl czeka na ewentualne włączenie z panelu.
 (function activateLegacyCollectingCycles() {
+  if (!slBossEnabled()) return;
   const rows = db.prepare(`SELECT * FROM sl_coop WHERE status = 'collecting'`).all();
   for (const row of rows) {
     const rewardPool = Math.round(Number(row.threshold) * SL_COOP_REWARD_MULTIPLIER);
@@ -2612,6 +2724,7 @@ function startCoopBossDeadlineScheduler() {
 // Flaga w sl_meta pilnuje, żeby odliczyć je DOKŁADNIE RAZ na cykl; HP nie schodzi poniżej
 // 1, bo dobicie ma pójść normalną drogą (rzut/atak gracza → nagrody, patrz slFinishBossEvent).
 (function convertLegacyContributionsToDamage() {
+  if (!slBossEnabled()) return;
   const FLAG = 'coop_legacy_contrib_damage_cycle';
   const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
   if (!coop || coop.status !== 'event_active' || !coop.boss_started_at) return;
@@ -2947,8 +3060,8 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     // ── SZTURM NA BOSSA: jeśli trwa event bossowy, KAŻDY rzut zadaje mu obrażenia —
     // normalna gra już "walczy", bez dodatkowej akcji. Liczone od SUROWYCH rzutów.
     let bossHit = null;
-    const coopNow = slCurrentCoop();
-    if (coopNow.status === 'event_active' && Number(coopNow.boss_hp) > 0) {
+    const coopNow = slBossEnabled() ? slCurrentCoop() : null;
+    if (coopNow && coopNow.status === 'event_active' && Number(coopNow.boss_hp) > 0) {
       const dmg = rolls.reduce((a, r) => a + r, 0) * SL_BOSS_DICE_DAMAGE_MULT;
       const newHp = Math.max(0, Number(coopNow.boss_hp) - dmg);
       db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coopNow.cycle);
@@ -3292,6 +3405,7 @@ app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
 
   const out = transaction(() => {
     const st = slEnsureState(playerId);
+    if (!slBossEnabled()) return { notActive: true };
     const coop = slCurrentCoop();
     if (coop.status !== 'event_active' || Number(coop.boss_hp) <= 0) return { notActive: true };
     if (st.balance < SL_BOSS_ATTACK_COST) return { poor: true, balance: st.balance };
@@ -3351,7 +3465,9 @@ app.get('/api/snakes/admin/settings', (req, res) => {
     summary_hour: SL_SUMMARY_HOUR,
     board: { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS },
     powerup_costs: SL_POWERUP_COSTS,
-    coop: { ...slCoopPayload(null), reward_multiplier: SL_COOP_REWARD_MULTIPLIER }
+    boss_enabled: slBossEnabled(),
+    // null = boss wyłączony; panel czyta to jako „nie ma czym sterować" (patrz renderInfo).
+    coop: slBossEnabled() ? { ...slCoopPayload(null), reward_multiplier: SL_COOP_REWARD_MULTIPLIER } : null
   });
 });
 
@@ -3504,6 +3620,7 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
   const force = !!req.body.force;
 
   const out = transaction(() => {
+    if (!slBossEnabled()) return { notActive: true, status: 'wyłączony' };
     const coop = slCurrentCoop();
     if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
 
@@ -3561,6 +3678,7 @@ app.post('/api/snakes/admin/coop/config', (req, res) => {
   }
 
   const out = transaction(() => {
+    if (!slBossEnabled()) return { notActive: true, status: 'wyłączony' };
     const coop = slCurrentCoop();
 
     // Walidacja PRZED jakimkolwiek zapisem — żeby błąd na jednym polu nie zostawił
@@ -3639,6 +3757,7 @@ app.post('/api/snakes/admin/coop/boss', (req, res) => {
   }
 
   const out = transaction(() => {
+    if (!slBossEnabled()) return { notActive: true, status: 'wyłączony' };
     const coop = slCurrentCoop();
     if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
 
@@ -3691,6 +3810,39 @@ app.post('/api/snakes/admin/coop/boss', (req, res) => {
   if (out.resolved) slEmitBossTimeout(out.resolved);
 
   res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/coop/toggle { password, enabled } — gasi albo zapala całą walkę
+// z bossem (patrz slBossEnabled/slSetBossEnabled). Wyłączenie domyka trwającą walkę BEZ
+// nagród i bez kar; włączenie startuje świeżą edycję z nowym bossem i nowym terminem, więc
+// nikt nie obrywa za termin, który minął, gdy bossa nie było. Nie rusza punktów graczy —
+// od cofania wypłaconych nagród jest osobna, jednorazowa migracja przy starcie serwera.
+app.post('/api/snakes/admin/coop/toggle', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  if (typeof req.body.enabled !== 'boolean') {
+    return res.status(400).json({ error: 'Podaj enabled: true albo false.' });
+  }
+
+  const out = slSetBossEnabled(req.body.enabled);
+
+  if (out.enabled) {
+    slEmit('coop_milestone', () => ({
+      content: '👹 **Boss wraca do gry!**',
+      embeds: [{
+        title: `Edycja #${out.cycle} — ${out.boss_name}`,
+        url: SNAKES_URL,
+        description: 'Każdy rzut kostką go rani, a za monety można dobić go ręcznym atakiem.',
+        color: 0xF5C842
+      }]
+    }));
+  }
+
+  res.json({
+    success: true,
+    boss_enabled: out.enabled,
+    ...out,
+    coop: slCoopPayload(null)
+  });
 });
 
 // POST /api/snakes/admin/players/:id/stats { password, balance?, total_points? } — ręczna

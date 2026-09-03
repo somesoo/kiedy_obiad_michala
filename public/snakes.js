@@ -881,9 +881,20 @@ function slCoopChipsHtml(c) {
 // w JEDNYM rzędzie; zasady + kara to jedna cienka linijka pod spodem.
 function renderCoop(g) {
   const c = g.coop;
-  if (!c || !c.boss) return;
   const el = document.getElementById('coop-panel');
   if (!el) return;
+
+  // Boss wyłączony (serwer nie przysyła wtedy coop) — chowamy i panel, i punkt regulaminu
+  // o walce, żeby zasady nie opisywały czegoś, czego w grze nie ma.
+  const rulesItem = document.getElementById('rules-boss');
+  if (!c || !c.boss) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    if (rulesItem) rulesItem.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  if (rulesItem) rulesItem.style.display = '';
 
   const b = c.boss;
   const timerHtml = b.deadline_at
