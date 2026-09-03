@@ -325,7 +325,7 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 });
 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', coop_contribute: '🤝', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️' };
 
 async function loadActivity(date) {
   try {
@@ -338,13 +338,20 @@ async function loadActivity(date) {
 }
 
 function renderActivity(data) {
+  // Lista dni przebudowuje się, gdy ZESTAW dni się zmienił — nie tylko raz na życie
+  // strony. Admin może ukryć cały dzień (patrz moderacja widoku na serwerze) i wtedy
+  // stara lista trzymałaby datę, po wybraniu której nie ma już czego pokazać.
   const sel = document.getElementById('activity-date');
-  if (sel && sel.dataset.populated !== '1') {
-    const opts = ['<option value="">Ostatnie</option>'].concat(
-      data.dates.map(d => `<option value="${d}">${d}</option>`)
-    );
-    sel.innerHTML = opts.join('');
-    sel.dataset.populated = '1';
+  if (sel) {
+    const signature = data.dates.join(',');
+    if (sel.dataset.days !== signature) {
+      const keep = sel.value;
+      sel.innerHTML = ['<option value="">Ostatnie</option>']
+        .concat(data.dates.map(d => `<option value="${d}">${d}</option>`))
+        .join('');
+      sel.dataset.days = signature;
+      if (keep && data.dates.includes(keep)) sel.value = keep;
+    }
   }
 
   const list = document.getElementById('activity-list');

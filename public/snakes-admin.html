@@ -61,6 +61,20 @@
     .hist-detail { flex: 1; min-width: 140px; }
     .hist-del { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 12px; }
     #hist-list { max-height: 420px; overflow-y: auto; margin-top: 8px; }
+
+    /* Moderacja widoku — wiersz ukryty przed graczami czytelnie gaśnie, ale zostaje */
+    .hist-row.is-hidden { opacity: .45; }
+    .hist-row.is-hidden .hist-detail { text-decoration: line-through; }
+    .hist-act { border: none; background: none; cursor: pointer; font-size: 12px; padding: 0 2px; }
+    .hist-badge { font-size: 9px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--muted); color: var(--text-muted); white-space: nowrap; }
+    .hist-badge.is-redacted { border-color: var(--gold); color: var(--gold); }
+    .rule-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; background: var(--surface-alt); border: 1px solid var(--muted); margin-bottom: 6px; font-size: 11px; flex-wrap: wrap; }
+    .rule-row.is-off { opacity: .5; }
+    .rule-match { flex: 1; min-width: 180px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+    .rule-note { color: var(--text-muted); font-size: 10px; }
+    .rule-hits { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+    .prev-row { display: flex; gap: 8px; padding: 4px 8px; font-size: 11px; align-items: baseline; }
+    .prev-time { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -186,26 +200,81 @@
       </div>
 
       <div class="adm-card">
-        <h3>📜 HISTORIA</h3>
+        <h3>📜 HISTORIA I WIDOCZNOŚĆ</h3>
         <div class="adm-note">
-          <strong>Dziennik</strong> to log widoczny dla graczy — kasowanie wpisu niczego
-          w grze nie cofa, czyści tylko zapis. <strong>Ruchy</strong> pokazują, kto ile razy
-          rzucał danego dnia (na czerwono przekroczenia dziennego limitu). Do realnego
-          cofania służą „Cofnij ostatni ruch” przy graczu i „Cofnij cały dzień” niżej.
+          <strong>Dziennik</strong> to log widoczny dla graczy — tu decydujesz, co z niego
+          widać. Ukrycie i podmiana treści <strong>niczego nie kasują</strong>: wpis zostaje
+          w bazie, a każdą decyzję cofasz jednym kliknięciem. O tym, czy wpis widać,
+          rozstrzygają trzy warstwy — <strong>pojedynczy wpis</strong> bije
+          <strong>regułę</strong>, reguła bije <strong>domyślną widoczność typu</strong>.
+          <strong>Ruchy</strong> pokazują, kto ile razy rzucał danego dnia. Do realnego
+          cofania skutków w grze służą „Cofnij ostatni ruch” przy graczu i „Cofnij cały dzień” niżej.
         </div>
         <div class="adm-actions">
           <button class="btn-ghost hist-tab is-active" id="tab-activity">Dziennik</button>
           <button class="btn-ghost hist-tab" id="tab-moves">Ruchy</button>
+          <button class="btn-ghost hist-tab" id="tab-visibility">Widoczność</button>
+          <button class="btn-ghost hist-tab" id="tab-preview">👁 Podgląd gracza</button>
         </div>
-        <div class="adm-actions">
+
+        <!-- Filtry — wspólne dla Dziennika, Ruchów i Podglądu -->
+        <div class="adm-actions" id="hist-filters">
           <select id="hist-date" style="width:150px"><option value="">— wszystkie dni —</option></select>
           <select id="hist-player" style="width:160px"><option value="">— wszyscy gracze —</option></select>
           <select id="hist-type" style="width:150px"><option value="">— wszystkie typy —</option></select>
           <button class="btn-ghost" id="btn-hist-refresh">Odśwież</button>
-          <button class="btn-danger" id="btn-hist-purge">🗑 Kasuj wg filtra</button>
         </div>
+
+        <!-- Akcje hurtowe: nieniszczące, działają na wszystko, co pasuje do filtra -->
+        <div class="adm-actions" id="hist-bulk">
+          <button class="btn-ghost" id="btn-bulk-hide">🙈 Ukryj wszystko z filtra</button>
+          <button class="btn-ghost" id="btn-bulk-show">👁 Pokaż wszystko z filtra</button>
+          <button class="btn-ghost" id="btn-bulk-clear">↩️ Wyczyść nadpisania</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:auto">
+            <input type="checkbox" id="hist-show-delete" /> pokaż kasowanie
+          </label>
+          <button class="btn-danger" id="btn-hist-purge" style="display:none">🗑 Kasuj wg filtra</button>
+        </div>
+
         <div class="adm-stat" id="hist-summary" style="margin-top:10px">–</div>
         <div id="hist-list"></div>
+
+        <!-- Zakładka WIDOCZNOŚĆ: domyślne typy + reguły -->
+        <div id="hist-visibility" style="display:none">
+          <div class="adm-note" style="margin-top:14px">
+            <strong>Domyślna widoczność typów</strong> — najszersza warstwa. Odznaczenie
+            chowa całą kategorię wpisów wszystkim graczom; reguła albo nadpisanie
+            pojedynczego wpisu nadal mogą coś z niej przywrócić.
+          </div>
+          <div id="vis-types"></div>
+          <div class="adm-actions">
+            <button class="btn-primary" id="btn-vis-types-save">Zapisz widoczność typów</button>
+          </div>
+
+          <div class="adm-note" style="margin-top:16px">
+            <strong>Reguły</strong> — puste pole znaczy „dowolne”, więc reguła bez żadnego
+            dopasowania łapie cały dziennik. „Ukryj” chowa wpis, „Podmień treść” zostawia go
+            widocznym, ale z Twoim tekstem (oryginał zostaje w bazie i widzisz go tutaj).
+            Licznik pokazuje, ilu wpisów reguła dotyczy w tej chwili.
+          </div>
+          <div id="vis-rules"></div>
+          <div class="adm-actions" style="align-items:flex-end">
+            <select id="rule-action" style="width:130px">
+              <option value="hide">Ukryj</option>
+              <option value="redact">Podmień treść</option>
+            </select>
+            <select id="rule-type" style="width:150px"><option value="">— dowolny typ —</option></select>
+            <select id="rule-player" style="width:150px"><option value="">— dowolny gracz —</option></select>
+            <input type="date" id="rule-day-from" title="od dnia" style="width:140px" />
+            <input type="date" id="rule-day-to" title="do dnia" style="width:140px" />
+          </div>
+          <div class="adm-actions">
+            <input type="text" id="rule-text" placeholder="fragment treści (opcjonalnie)" style="width:210px" />
+            <input type="text" id="rule-replacement" placeholder="tekst zastępczy (dla podmiany)" style="width:230px" />
+            <input type="text" id="rule-note" placeholder="notatka — po co ta reguła" style="width:200px" />
+            <button class="btn-primary" id="btn-rule-add">➕ Dodaj regułę</button>
+          </div>
+        </div>
       </div>
 
       <div class="adm-card">
@@ -528,6 +597,9 @@
     // gubiło tego, co admin już zawęził.
     let histView = 'activity';
     let histPlayers = [];
+    // Te same ikony co w dzienniku gracza (public/snakes.js) — podgląd ma wyglądać
+    // dokładnie tak, jak to, co widzi biuro.
+    const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️' };
 
     function histFilters() {
       return {
@@ -557,20 +629,57 @@
       const list = document.getElementById('hist-list');
       const summary = document.getElementById('hist-summary');
       try {
+        if (histView === 'visibility') {
+          await loadVisibility();
+          return;
+        }
+
+        if (histView === 'preview') {
+          const q = new URLSearchParams({ password: pass });
+          const f = histFilters();
+          if (f.date) q.set('date', f.date);
+          const res = await api('GET', `/api/snakes/admin/activity/preview?${q}`);
+          summary.innerHTML =
+            `Tak widzą dziennik gracze: <strong>${res.entries.length}</strong> wpisów` +
+            (res.hidden_count ? ` · <span class="adm-warn">ukryto ${res.hidden_count} z ${res.total_all}</span>` : ' · nic nie jest ukryte') +
+            `<br><span class="pl-hint">To ten sam odczyt, z którego korzysta strona gracza — nie może się rozjechać.</span>`;
+          list.innerHTML = res.entries.length
+            ? res.entries.map(e => `
+                <div class="prev-row">
+                  <span class="prev-time">${esc(e.date)} ${esc(String(e.created_at).slice(11, 16))}</span>
+                  <span>${esc(ACTIVITY_ICONS[e.type] || '•')}</span>
+                  <span><strong>${esc(e.nickname)}</strong> ${esc(e.detail)}</span>
+                </div>`).join('')
+            : '<div class="adm-note">Gracze nie widzą tu nic — wszystko ukryte.</div>';
+          return;
+        }
+
         if (histView === 'activity') {
           const res = await api('GET', `/api/snakes/admin/activity?${histQuery()}`);
           fillSelect('hist-date', res.days.map(d => `<option value="${d}">${d}</option>`), '— wszystkie dni —');
           fillSelect('hist-type', res.types.map(t => `<option value="${t}">${esc(t)}</option>`), '— wszystkie typy —');
-          summary.innerHTML = `Dziennik: pokazano <strong>${res.shown}</strong> z <strong>${res.total}</strong> wpisów pasujących do filtra.`;
+          const showDelete = document.getElementById('hist-show-delete').checked;
+          summary.innerHTML =
+            `Dziennik: pokazano <strong>${res.shown}</strong> z <strong>${res.total}</strong> wpisów pasujących do filtra` +
+            (res.hidden_shown ? ` · <span class="adm-warn">${res.hidden_shown} ukrytych przed graczami</span>` : '') + '.';
           list.innerHTML = res.entries.length
-            ? res.entries.map(a => `
-                <div class="hist-row" data-id="${a.id}">
+            ? res.entries.map(a => {
+                // Plakietka mówi, KTÓRA warstwa zdecydowała — inaczej admin nie wie,
+                // czemu kliknięcie oka „nie działa" (bo wpis chowa reguła albo typ).
+                const badge = a.visible ? '' : `<span class="hist-badge">ukryty: ${esc(a.hidden_by)}</span>`;
+                const redacted = a.redacted_by ? `<span class="hist-badge is-redacted">treść: ${esc(a.redacted_by)}</span>` : '';
+                return `
+                <div class="hist-row${a.visible ? '' : ' is-hidden'}" data-id="${a.id}">
                   <span class="hist-time">${esc(a.day)} ${esc(String(a.created_at).slice(11, 16))}</span>
                   <span class="hist-who">${esc(a.nickname)}</span>
                   <span class="hist-type">${esc(a.type)}</span>
-                  <span class="hist-detail">${esc(a.detail)}</span>
-                  <button class="hist-del" title="Skasuj wpis">✕</button>
-                </div>`).join('')
+                  <span class="hist-detail" title="${esc(a.detail)}">${esc(a.effective_detail)}</span>
+                  ${redacted}${badge}
+                  <button class="hist-act hist-eye" title="${a.visible ? 'Ukryj przed graczami' : 'Pokaż graczom'}">${a.visible ? '👁' : '🙈'}</button>
+                  <button class="hist-act hist-redact" title="Podmień treść dla graczy">✏️</button>
+                  ${showDelete ? '<button class="hist-del" title="Skasuj wpis z bazy — nieodwracalne">✕</button>' : ''}
+                </div>`;
+              }).join('')
             : '<div class="adm-note">Brak wpisów dla tego filtra.</div>';
         } else {
           const res = await api('GET', `/api/snakes/admin/moves?${histQuery()}`);
@@ -603,31 +712,194 @@
       }
     }
 
+    // ── ZAKŁADKA WIDOCZNOŚĆ: domyślne typy + reguły ──
+    async function loadVisibility() {
+      const [types, rules] = await Promise.all([
+        api('GET', `/api/snakes/admin/activity/types?password=${encodeURIComponent(pass)}`),
+        api('GET', `/api/snakes/admin/activity/rules?password=${encodeURIComponent(pass)}`)
+      ]);
+
+      document.getElementById('vis-types').innerHTML = Object.entries(types.labels).map(([key, label]) => `
+        <label class="ev-row">
+          <span class="ev-name">${esc(label)}<span class="ev-key">${esc(key)}</span></span>
+          <input type="checkbox" data-type="${esc(key)}" ${types.types[key] ? 'checked' : ''} />
+        </label>`).join('');
+
+      fillSelect('rule-type', Object.entries(rules.types).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`), '— dowolny typ —');
+      fillSelect('rule-player', rules.players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`), '— dowolny gracz —');
+
+      const opis = (r) => [
+        r.match_type ? `typ ${r.match_type}` : null,
+        r.player_nickname ? `gracz ${r.player_nickname}` : null,
+        r.match_day_from || r.match_day_to ? `dni ${r.match_day_from || '…'} → ${r.match_day_to || '…'}` : null,
+        r.match_text ? `tekst „${r.match_text}"` : null
+      ].filter(Boolean).join(' · ') || 'wszystko';
+
+      document.getElementById('vis-rules').innerHTML = rules.rules.length
+        ? rules.rules.map(r => `
+            <div class="rule-row${r.enabled ? '' : ' is-off'}" data-rule="${r.id}">
+              <span class="hist-badge">#${r.id}</span>
+              <span>${r.action === 'hide' ? '🙈 ukryj' : '✏️ podmień'}</span>
+              <span class="rule-match">${esc(opis(r))}${r.action === 'redact' ? ` → „${esc(r.replacement || '')}"` : ''}</span>
+              ${r.note ? `<span class="rule-note">${esc(r.note)}</span>` : ''}
+              <span class="rule-hits">${r.matches} wpis.</span>
+              <button class="btn-ghost rule-toggle">${r.enabled ? 'Wyłącz' : 'Włącz'}</button>
+              <button class="hist-act rule-del" title="Usuń regułę — wpisy wracają">✕</button>
+            </div>`).join('')
+        : '<div class="adm-note">Brak reguł — o widoczności decydują tylko typy i pojedyncze wpisy.</div>';
+
+      document.getElementById('hist-summary').innerHTML =
+        `Reguł: <strong>${rules.rules.length}</strong> (aktywnych ${rules.rules.filter(r => r.enabled).length}). ` +
+        `Wyłączenie reguły natychmiast przywraca wpisy — nic nie jest zapisywane w danych.`;
+      document.getElementById('hist-list').innerHTML = '';
+    }
+
     function setHistView(view) {
       histView = view;
-      document.getElementById('tab-activity').classList.toggle('is-active', view === 'activity');
-      document.getElementById('tab-moves').classList.toggle('is-active', view === 'moves');
-      // Typ wpisu dotyczy wyłącznie dziennika — przy ruchach nie ma czym filtrować.
+      for (const [id, v] of [['tab-activity', 'activity'], ['tab-moves', 'moves'], ['tab-visibility', 'visibility'], ['tab-preview', 'preview']]) {
+        document.getElementById(id).classList.toggle('is-active', view === v);
+      }
+      // Filtry i akcje hurtowe mają sens tylko tam, gdzie faktycznie coś filtrują.
+      document.getElementById('hist-filters').style.display = view === 'visibility' ? 'none' : '';
+      document.getElementById('hist-bulk').style.display = view === 'activity' ? '' : 'none';
+      document.getElementById('hist-visibility').style.display = view === 'visibility' ? '' : 'none';
       document.getElementById('hist-type').style.display = view === 'activity' ? '' : 'none';
-      document.getElementById('btn-hist-purge').style.display = view === 'activity' ? '' : 'none';
+      document.getElementById('hist-player').style.display = view === 'preview' ? 'none' : '';
       loadHistory();
     }
 
     document.getElementById('tab-activity').addEventListener('click', () => setHistView('activity'));
     document.getElementById('tab-moves').addEventListener('click', () => setHistView('moves'));
+    document.getElementById('tab-visibility').addEventListener('click', () => setHistView('visibility'));
+    document.getElementById('tab-preview').addEventListener('click', () => setHistView('preview'));
     document.getElementById('btn-hist-refresh').addEventListener('click', loadHistory);
+    document.getElementById('hist-show-delete').addEventListener('change', e => {
+      document.getElementById('btn-hist-purge').style.display = e.target.checked ? '' : 'none';
+      loadHistory();
+    });
     for (const id of ['hist-date', 'hist-player', 'hist-type']) {
       document.getElementById(id).addEventListener('change', loadHistory);
     }
 
     document.getElementById('hist-list').addEventListener('click', async e => {
-      const del = e.target.closest('.hist-del');
-      if (!del) return;
-      const id = del.closest('.hist-row').dataset.id;
+      const row = e.target.closest('.hist-row');
+      if (!row) return;
+      const id = row.dataset.id;
       try {
-        await api('DELETE', `/api/snakes/admin/activity/${id}?password=${encodeURIComponent(pass)}`);
-        await loadHistory();
-        showToast('🗑 Wpis skasowany');
+        // Oko przełącza NADPISANIE wpisu. Gdy wpis jest ukryty przez regułę albo typ,
+        // 'shown' przypina go widocznym mimo nich — dlatego nie wystarczy kasować nadpisania.
+        if (e.target.closest('.hist-eye')) {
+          const nowVisible = !row.classList.contains('is-hidden');
+          const res = await api('POST', `/api/snakes/admin/activity/${id}/visibility`,
+            { password: pass, visibility: nowVisible ? 'hidden' : 'shown' });
+          await loadHistory();
+          showToast(res.entry.visible ? '👁 Wpis widoczny dla graczy' : '🙈 Wpis ukryty przed graczami');
+          return;
+        }
+
+        if (e.target.closest('.hist-redact')) {
+          const current = row.querySelector('.hist-detail');
+          const replacement = prompt(
+            'Treść, którą zobaczą gracze (puste = przywróć oryginał):\n\nOryginał: ' + current.title,
+            current.textContent.trim()
+          );
+          if (replacement === null) return;
+          const res = await api('POST', `/api/snakes/admin/activity/${id}/visibility`,
+            { password: pass, public_detail: replacement.trim() === '' ? null : replacement });
+          await loadHistory();
+          showToast(res.entry.public_detail ? '✏️ Treść podmieniona' : '↩️ Przywrócono oryginalną treść');
+          return;
+        }
+
+        if (e.target.closest('.hist-del')) {
+          if (!confirm('Skasować wpis Z BAZY? Tego nie da się cofnąć — jeśli chodzi Ci tylko o schowanie go graczom, użyj oka.')) return;
+          await api('DELETE', `/api/snakes/admin/activity/${id}?password=${encodeURIComponent(pass)}`);
+          await loadHistory();
+          showToast('🗑 Wpis skasowany z bazy');
+        }
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+
+    // Akcje hurtowe — nieniszczące, dotyczą wszystkiego, co pasuje do filtra.
+    for (const [btnId, action, label] of [
+      ['btn-bulk-hide', 'hide', '🙈 Ukryto'],
+      ['btn-bulk-show', 'show', '👁 Pokazano'],
+      ['btn-bulk-clear', 'clear', '↩️ Wyczyszczono nadpisania w']
+    ]) {
+      document.getElementById(btnId).addEventListener('click', async () => {
+        const f = histFilters();
+        const zakres = [
+          f.date ? `dzień ${f.date}` : null,
+          f.player_id ? document.getElementById('hist-player').selectedOptions[0].textContent : null,
+          f.type ? `typ ${f.type}` : null
+        ].filter(Boolean).join(', ') || 'CAŁY dziennik';
+        if (!confirm(`${label.replace(/^\S+\s/, '')} ${zakres}? Nic nie zostanie skasowane — decyzję cofniesz w każdej chwili.`)) return;
+        try {
+          const res = await api('POST', '/api/snakes/admin/activity/visibility/bulk', { password: pass, action, ...f });
+          await loadHistory();
+          showToast(`${label} ${res.changed} wpisów`);
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+    }
+
+    document.getElementById('btn-vis-types-save').addEventListener('click', async () => {
+      const types = {};
+      document.querySelectorAll('#vis-types input[type=checkbox]').forEach(cb => { types[cb.dataset.type] = cb.checked; });
+      try {
+        await api('POST', '/api/snakes/admin/activity/types', { password: pass, types });
+        await loadVisibility();
+        showToast('✅ Widoczność typów zapisana');
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-rule-add').addEventListener('click', async () => {
+      const v = (id) => document.getElementById(id).value.trim();
+      try {
+        await api('POST', '/api/snakes/admin/activity/rules', {
+          password: pass,
+          action: v('rule-action'),
+          match_type: v('rule-type') || null,
+          match_player_id: v('rule-player') || null,
+          match_day_from: v('rule-day-from') || null,
+          match_day_to: v('rule-day-to') || null,
+          match_text: v('rule-text') || null,
+          replacement: v('rule-replacement') || null,
+          note: v('rule-note') || null
+        });
+        for (const id of ['rule-text', 'rule-replacement', 'rule-note', 'rule-day-from', 'rule-day-to']) {
+          document.getElementById(id).value = '';
+        }
+        await loadVisibility();
+        showToast('➕ Reguła dodana');
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('vis-rules').addEventListener('click', async e => {
+      const row = e.target.closest('.rule-row');
+      if (!row) return;
+      const id = row.dataset.rule;
+      try {
+        if (e.target.closest('.rule-toggle')) {
+          const turningOn = row.classList.contains('is-off');
+          await api('POST', '/api/snakes/admin/activity/rules', { password: pass, id: Number(id), enabled: turningOn });
+          await loadVisibility();
+          showToast(turningOn ? '▶️ Reguła włączona' : '⏸️ Reguła wyłączona — wpisy wróciły');
+          return;
+        }
+        if (e.target.closest('.rule-del')) {
+          if (!confirm('Usunąć regułę? Wpisy, które chowała, wrócą natychmiast.')) return;
+          await api('DELETE', `/api/snakes/admin/activity/rules/${id}?password=${encodeURIComponent(pass)}`);
+          await loadVisibility();
+          showToast('✕ Reguła usunięta');
+        }
       } catch (err) {
         showToast(err.message);
       }
