@@ -1649,10 +1649,28 @@ db.exec(`
   WHERE last_move_date IS NOT NULL AND rolls_today = 0
 `);
 
-// Zapisuje wpis do dziennika aktywności. Wołane z ruchu, sklepu, wpłat do puli i knockbacku.
+// Zapisuje wpis do dziennika aktywności. Wołane z ruchu, sklepu, walki z bossem i knockbacku.
+// UWAGA: `detail` trafia do UI PO nicku i ikonie typu (patrz renderActivity w snakes.js),
+// więc nie powtarzamy w nim ani jednego, ani drugiego — wpis ma być krótki jak nagłówek.
 function slLogActivity(playerId, type, detail) {
   db.prepare('INSERT INTO sl_activity (player_id, type, detail, day) VALUES (?, ?, ?, ?)')
     .run(playerId, type, detail, todayWaw());
+}
+
+// Odmiana „obrażenie/obrażenia/obrażeń" — dziennik czyta się jak zdanie, więc liczba
+// mnoga musi się zgadzać (1 obrażenie, 24 obrażenia, 45 obrażeń, ale 12 obrażeń).
+function slDamageWord(n) {
+  const abs = Math.abs(n);
+  if (abs === 1) return 'obrażenie';
+  const last = abs % 10;
+  const lastTwo = abs % 100;
+  return last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14) ? 'obrażenia' : 'obrażeń';
+}
+
+// Jednolita treść wpisu o trafieniu bossa: „atak na bossa — 24 obrażenia (kość)".
+// `source` mówi, skąd poszło uderzenie (kość / monety / admin / wpłata).
+function slBossHitEntry(damage, source) {
+  return `atak na bossa — ${damage} ${slDamageWord(damage)} (${source})`;
 }
 
 // Etykiety power-upów do czytelnych wpisów w dzienniku i na Discordzie.
@@ -2614,8 +2632,7 @@ function startCoopBossDeadlineScheduler() {
     const newHp = Math.max(1, Number(coop.boss_hp) - total);
     db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
     for (const r of legacy) {
-      slLogActivity(r.player_id, 'boss_hit',
-        `💰 Wpłata z czasów przygotowań przeliczona na ${Number(r.amount)} obrażeń dla ${coop.boss_name}`);
+      slLogActivity(r.player_id, 'boss_hit', slBossHitEntry(Number(r.amount), 'wpłata'));
     }
     console.log(`Snakes/Co-op: wpłaty z przygotowań (${total}) zadane jako obrażenia — ${coop.boss_name} ma ${newHp}/${coop.boss_max_hp} HP`);
   });
@@ -2937,8 +2954,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coopNow.cycle);
       db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
         .run(coopNow.cycle, playerId, dmg);
-      slLogActivity(playerId, 'boss_hit',
-        `⚔️ Trafił ${coopNow.boss_name} na ${dmg} obrażeń (${rolls.join('+')} × ${SL_BOSS_DICE_DAMAGE_MULT}) — HP ${newHp}/${coopNow.boss_max_hp}`);
+      slLogActivity(playerId, 'boss_hit', slBossHitEntry(dmg, 'kość'));
       bossHit = { damage: dmg, boss_name: coopNow.boss_name, hp_left: newHp, max_hp: Number(coopNow.boss_max_hp), defeated: false };
       if (newHp <= 0) {
         const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coopNow.cycle);
@@ -3285,8 +3301,7 @@ app.post('/api/snakes/coop/attack', authPlayer, (req, res) => {
     db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
     db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
       .run(coop.cycle, playerId, SL_BOSS_ATTACK_DAMAGE);
-    slLogActivity(playerId, 'boss_hit',
-      `🗡️ Zaatakował ${coop.boss_name} za ${SL_BOSS_ATTACK_COST} monet — ${SL_BOSS_ATTACK_DAMAGE} obrażeń (HP ${newHp}/${coop.boss_max_hp})`);
+    slLogActivity(playerId, 'boss_hit', slBossHitEntry(SL_BOSS_ATTACK_DAMAGE, 'monety'));
 
     let victory = null;
     if (newHp <= 0) {
@@ -3649,8 +3664,9 @@ app.post('/api/snakes/admin/coop/boss', (req, res) => {
     if (damage != null && player) {
       db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
         .run(coop.cycle, player.id, damage);
-      slLogActivity(player.id, 'boss_hit',
-        `🛠️ Admin zapisał ${damage > 0 ? `${damage} obrażeń` : `zwrot ${-damage} obrażeń`} dla ${nextName} (HP ${nextHp}/${nextMaxHp})`);
+      slLogActivity(player.id, 'boss_hit', damage > 0
+        ? slBossHitEntry(damage, 'admin')
+        : `zwrot ${-damage} ${slDamageWord(damage)} (admin)`);
     }
 
     let resolved = null;
