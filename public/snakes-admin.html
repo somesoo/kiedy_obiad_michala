@@ -20,7 +20,7 @@
     .ev-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
     .adm-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
     .adm-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-    .adm-actions input[type=number] { background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 8px; color: var(--text-primary); padding: 6px 8px; }
+    .adm-actions input, .adm-actions select { background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 8px; color: var(--text-primary); padding: 6px 8px; font-family: inherit; font-size: 12px; }
     .adm-note { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
     .adm-warn { color: var(--gold); }
     .adm-stat { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
@@ -29,6 +29,7 @@
     .pl-stats { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; flex: 1; min-width: 160px; }
     .pl-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .pl-actions input[type=date] { background: var(--surface); border: 1px solid var(--muted); border-radius: 6px; color: var(--text-primary); padding: 4px 6px; font-size: 11px; }
+    .pl-actions input[type=number] { width: 76px; background: var(--surface); border: 1px solid var(--muted); border-radius: 6px; color: var(--text-primary); padding: 4px 6px; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
     .pl-actions button { font-size: 11px; padding: 5px 9px; }
     .btn-danger { background: var(--danger); color: #fff; border: none; border-radius: 8px; cursor: pointer; }
     .pl-moved { color: var(--accent); }
@@ -74,6 +75,32 @@
         <h3>🤝 WYDARZENIE KOOPERACYJNE / 👹 BOSS</h3>
         <div class="adm-stat" id="coop-info">–</div>
         <div id="boss-info"></div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Ręczna kontrola bossa</strong> — HP i maksymalne HP ustawiasz wprost
+          (pasek liczy się od maksimum), nazwę zmieniasz w locie. Puste pole = bez zmian.
+        </div>
+        <div class="adm-actions">
+          <input type="number" id="boss-hp-input" min="0" step="1" placeholder="HP" style="width:90px" />
+          <input type="number" id="boss-maxhp-input" min="1" step="1" placeholder="max HP" style="width:90px" />
+          <input type="text" id="boss-name-input" placeholder="nazwa bossa" style="width:180px" />
+          <button class="btn-ghost" id="btn-boss-save">Zapisz bossa</button>
+        </div>
+
+        <div class="adm-note" style="margin-top:12px">
+          <strong>Zadaj obrażenia</strong> — delta: dodatnia zbija HP, ujemna leczy. Jeśli
+          wskażesz gracza, obrażenia policzą mu się jako wkład do podziału nagród (tak samo
+          jak zwykłe trafienie); bez gracza to korekta „od admina", która nikomu się nie liczy.
+          Zbicie HP do zera rozlicza walkę jako <strong>wygraną</strong> — nagrody lecą normalnie,
+          a kolejny boss budzi się od razu.
+        </div>
+        <div class="adm-actions">
+          <input type="number" id="boss-damage-input" step="1" placeholder="± obrażenia" style="width:120px" />
+          <select id="boss-damage-player" style="width:180px">
+            <option value="">— bez przypisania —</option>
+          </select>
+          <button class="btn-ghost" id="btn-boss-damage">Zadaj obrażenia</button>
+        </div>
 
         <div class="adm-note" style="margin-top:12px">
           <strong>Ustaw godzinę końcową walki</strong> — dokładny termin (data + godzina),
@@ -210,6 +237,7 @@
     }
 
     function renderPlayers(players) {
+      renderDamagePlayerSelect(players);
       const list = document.getElementById('players-list');
       if (!players.length) {
         list.innerHTML = '<div class="adm-note">Nikt jeszcze nie zagrał w Snakes.</div>';
@@ -219,15 +247,28 @@
         <div class="pl-row" data-id="${p.player_id}">
           <span class="pl-name">${esc(p.nickname)}</span>
           <span class="pl-stats">
-            pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt · saldo ${p.balance}
+            pole ${p.tile} · okr. ${p.laps}
             · ruchy dziś: <span class="${p.moved_today ? 'pl-moved' : ''}">${p.rolls_used_today}/${p.daily_rolls}</span>
           </span>
           <span class="pl-actions">
+            <input type="number" class="pl-points" min="0" step="1" value="${p.total_points}" title="punkty (leaderboard)" />
+            <input type="number" class="pl-balance" min="0" step="1" value="${p.balance}" title="saldo (monety)" />
+            <button class="btn-ghost pl-stats-save" title="Zapisz punkty i saldo">💾 Zapisz</button>
             <input type="date" class="pl-date" value="${playersToday}" />
             <button class="btn-ghost pl-grant">➕ Dodaj ruch</button>
             <button class="btn-danger pl-delete">🗑 Usuń</button>
           </span>
         </div>`).join('');
+    }
+
+    // Lista graczy do przypisania ręcznych obrażeń bossowi — zachowuje bieżący wybór,
+    // żeby odświeżenie panelu po akcji nie resetowało go na „bez przypisania".
+    function renderDamagePlayerSelect(players) {
+      const sel = document.getElementById('boss-damage-player');
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">— bez przypisania —</option>' +
+        players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`).join('');
+      if (keep && sel.querySelector(`option[value="${keep}"]`)) sel.value = keep;
     }
 
     document.getElementById('players-list').addEventListener('click', async e => {
@@ -236,7 +277,21 @@
       const id = row.dataset.id;
       const nickname = row.querySelector('.pl-name').textContent;
 
-      if (e.target.closest('.pl-grant')) {
+      if (e.target.closest('.pl-stats-save')) {
+        const balance = parseInt(row.querySelector('.pl-balance').value, 10);
+        const totalPoints = parseInt(row.querySelector('.pl-points').value, 10);
+        if (!Number.isInteger(balance) || balance < 0 || !Number.isInteger(totalPoints) || totalPoints < 0) {
+          showToast('Punkty i saldo muszą być liczbami całkowitymi ≥ 0.');
+          return;
+        }
+        try {
+          const res = await api('POST', `/api/snakes/admin/players/${id}/stats`, { password: pass, balance, total_points: totalPoints });
+          showToast(`💾 ${res.nickname}: ${res.total_points} pkt, saldo ${res.balance}`);
+          await loadPlayers();
+        } catch (err) {
+          showToast(err.message);
+        }
+      } else if (e.target.closest('.pl-grant')) {
         const date = row.querySelector('.pl-date').value || playersToday;
         try {
           const res = await api('POST', `/api/snakes/admin/players/${id}/grant-move`, { password: pass, date });
@@ -274,6 +329,13 @@
         : `<span class="adm-warn">⚠️ Brak webhooka — ustaw <code>SNAKES_DISCORD_WEBHOOK_URL</code> (albo <code>DISCORD_WEBHOOK_URL</code>) w .env. Przełączniki zapiszą się, ale nic nie poleci.</span>`;
     }
 
+    // Podstawia wartość do pola formularza, chyba że admin właśnie w nim pisze —
+    // panel przeładowuje się po każdej akcji, a nadpisanie aktywnego pola gubi wpisywaną treść.
+    function setIfIdle(id, value) {
+      const el = document.getElementById(id);
+      if (el && document.activeElement !== el) el.value = value;
+    }
+
     function fmtDate(iso) {
       try {
         return new Date(iso).toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'short' });
@@ -307,6 +369,11 @@
           const pad = n => String(n).padStart(2, '0');
           deadlineInput.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
         }
+        // Pola ręcznej kontroli podstawiamy aktualnym stanem bossa — ale nie wyrywamy
+        // adminowi tego, w którym właśnie pisze.
+        setIfIdle('boss-hp-input', b.hp);
+        setIfIdle('boss-maxhp-input', b.max_hp);
+        setIfIdle('boss-name-input', b.name);
       } else {
         bossEl.innerHTML = `<div class="adm-note" style="margin-top:10px">Boss nie walczy — brak aktywnej edycji.</div>`;
       }
@@ -367,6 +434,54 @@
         cfg.coop = res.coop;
         renderInfo();
         showToast(`✅ Suwak trudności dla przyszłych edycji ustawiony na ${threshold} (bieżącego bossa to nie rusza).`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-boss-save').addEventListener('click', async () => {
+      const hpRaw = document.getElementById('boss-hp-input').value;
+      const maxHpRaw = document.getElementById('boss-maxhp-input').value;
+      const nameRaw = document.getElementById('boss-name-input').value.trim();
+      const body = { password: pass };
+      if (hpRaw !== '') body.hp = parseInt(hpRaw, 10);
+      if (maxHpRaw !== '') body.max_hp = parseInt(maxHpRaw, 10);
+      if (nameRaw !== '') body.name = nameRaw;
+      if (body.hp == null && body.max_hp == null && body.name == null) {
+        showToast('Wypełnij przynajmniej jedno pole.');
+        return;
+      }
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/boss', body);
+        cfg.coop = res.coop;
+        renderInfo();
+        showToast(res.resolved
+          ? `🏆 HP zeszło do zera — ${res.boss_name} pokonany, nagrody wypłacone, rusza edycja #${res.resolved.next_cycle.cycle}.`
+          : `✅ ${res.boss_name}: HP ${res.hp}/${res.max_hp}`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-boss-damage').addEventListener('click', async () => {
+      const damage = parseInt(document.getElementById('boss-damage-input').value, 10);
+      if (!Number.isInteger(damage) || damage === 0) {
+        showToast('Podaj niezerową liczbę obrażeń (ujemna leczy).');
+        return;
+      }
+      const playerId = document.getElementById('boss-damage-player').value;
+      const body = { password: pass, damage };
+      if (playerId) body.player_id = parseInt(playerId, 10);
+      try {
+        const res = await api('POST', '/api/snakes/admin/coop/boss', body);
+        cfg.coop = res.coop;
+        document.getElementById('boss-damage-input').value = '';
+        renderInfo();
+        await loadPlayers();
+        const credit = res.credited_to ? ` (zapisane na ${res.credited_to})` : '';
+        showToast(res.resolved
+          ? `🏆 ${res.boss_name} pokonany${credit} — nagrody wypłacone, rusza edycja #${res.resolved.next_cycle.cycle}.`
+          : `🗡️ ${damage > 0 ? `-${damage}` : `+${-damage}`} HP${credit} — ${res.boss_name}: ${res.hp}/${res.max_hp}`);
       } catch (e) {
         showToast(e.message);
       }

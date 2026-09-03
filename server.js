@@ -2582,6 +2582,45 @@ function startCoopBossDeadlineScheduler() {
   }
 })();
 
+// ── MIGRACJA (jednorazowa): WPŁATY Z CZASÓW ZBIÓRKI → OBRAŻENIA ──
+// Kasa wrzucona do puli, zanim boss wstał, nie może po prostu wyparować: przeliczamy ją
+// 1:1 na obrażenia i od razu je bossowi zadajemy. Wiersze sl_coop_contributions sprzed
+// `boss_started_at` to WŁAŚNIE tamte wpłaty (trafienia z walki są zapisywane dopiero po
+// wybudzeniu bossa, więc mają późniejsze created_at) — dlatego rozpoznajemy je po czasie,
+// a nie po statusie cyklu. Dzięki temu migracja działa tak samo, gdy boss wstał już przy
+// poprzednim restarcie, jak i gdy budzi się dopiero teraz.
+// Same wiersze zostają nietknięte — liczą się dalej jako wkład do podziału nagród
+// (patrz slCoopAttackers), zmienia się tylko to, że boss faktycznie to oberwał.
+// Flaga w sl_meta pilnuje, żeby odliczyć je DOKŁADNIE RAZ na cykl; HP nie schodzi poniżej
+// 1, bo dobicie ma pójść normalną drogą (rzut/atak gracza → nagrody, patrz slFinishBossEvent).
+(function convertLegacyContributionsToDamage() {
+  const FLAG = 'coop_legacy_contrib_damage_cycle';
+  const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
+  if (!coop || coop.status !== 'event_active' || !coop.boss_started_at) return;
+  if (String(slMetaGet(FLAG) || '') === String(coop.cycle)) return;
+
+  transaction(() => {
+    const legacy = db.prepare(`
+      SELECT player_id, SUM(amount) AS amount
+      FROM sl_coop_contributions
+      WHERE cycle = ? AND created_at < ?
+      GROUP BY player_id
+    `).all(coop.cycle, coop.boss_started_at);
+
+    slMetaSet(FLAG, coop.cycle); // ustawiamy ZAWSZE — nawet gdy nie było wpłat, żeby nie liczyć dwa razy
+    const total = legacy.reduce((a, r) => a + Number(r.amount), 0);
+    if (total <= 0) return;
+
+    const newHp = Math.max(1, Number(coop.boss_hp) - total);
+    db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
+    for (const r of legacy) {
+      slLogActivity(r.player_id, 'boss_hit',
+        `💰 Wpłata z czasów przygotowań przeliczona na ${Number(r.amount)} obrażeń dla ${coop.boss_name}`);
+    }
+    console.log(`Snakes/Co-op: wpłaty z przygotowań (${total}) zadane jako obrażenia — ${coop.boss_name} ma ${newHp}/${coop.boss_max_hp} HP`);
+  });
+})();
+
 startCoopBossDeadlineScheduler();
 
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
@@ -3544,6 +3583,132 @@ app.post('/api/snakes/admin/coop/config', (req, res) => {
   if (out.resolved) slEmitBossTimeout(out.resolved);
 
   res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/coop/boss { password, hp?, max_hp?, name?, damage?, player_id? } —
+// ręczne sterowanie AKTYWNYM bossem, gdy trzeba coś podkręcić albo naprawić bez czekania
+// na mechanikę. Wszystkie pola są opcjonalne i można je łączyć w jednym strzale:
+//   • `max_hp` — nowe maksimum HP (pasek liczy się od niego; bieżące HP przycinamy do niego),
+//   • `hp`     — bieżące HP ustawione WPROST (przycinane do 0..max_hp),
+//   • `damage` — DELTA: dodatnia zabiera HP, ujemna leczy (nakłada się na `hp`, jeśli oba są),
+//   • `player_id` — komu policzyć te obrażenia (dopisuje wkład do podziału nagród, tak samo
+//     jak zwykłe trafienie); bez tego pola obrażenia są "od admina" i nikomu się nie liczą,
+//   • `name`   — nowa nazwa bossa.
+// Jeśli po zmianach HP dobije do zera, event rozlicza się OD RAZU jako wygrana (nagrody
+// lecą normalną drogą — patrz slFinishBossEvent — i budzi się kolejny boss).
+app.post('/api/snakes/admin/coop/boss', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const hp = req.body.hp != null ? parseInt(req.body.hp, 10) : null;
+  const maxHp = req.body.max_hp != null ? parseInt(req.body.max_hp, 10) : null;
+  const damage = req.body.damage != null ? parseInt(req.body.damage, 10) : null;
+  const playerId = req.body.player_id != null ? parseInt(req.body.player_id, 10) : null;
+  const name = req.body.name != null ? String(req.body.name).trim() : null;
+
+  if (hp != null && (!Number.isInteger(hp) || hp < 0)) {
+    return res.status(400).json({ error: 'HP musi być liczbą całkowitą ≥ 0.' });
+  }
+  if (maxHp != null && (!Number.isInteger(maxHp) || maxHp <= 0)) {
+    return res.status(400).json({ error: 'Maksymalne HP musi być dodatnią liczbą całkowitą.' });
+  }
+  if (damage != null && (!Number.isInteger(damage) || damage === 0)) {
+    return res.status(400).json({ error: 'Obrażenia muszą być niezerową liczbą całkowitą (ujemne leczą).' });
+  }
+  if (name != null && (!name || name.length > 60)) {
+    return res.status(400).json({ error: 'Nazwa bossa musi mieć od 1 do 60 znaków.' });
+  }
+  if (playerId != null && !Number.isInteger(playerId)) {
+    return res.status(400).json({ error: 'Nieprawidłowy gracz.' });
+  }
+  if (hp == null && maxHp == null && damage == null && name == null) {
+    return res.status(400).json({ error: 'Nie podano żadnej zmiany.' });
+  }
+
+  const out = transaction(() => {
+    const coop = slCurrentCoop();
+    if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
+
+    let player = null;
+    if (playerId != null) {
+      player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+      if (!player) return { noPlayer: true };
+    }
+
+    const nextMaxHp = maxHp != null ? maxHp : Number(coop.boss_max_hp);
+    const nextName = name != null ? name : coop.boss_name;
+    // Kolejność ma znaczenie: najpierw ewentualne ustawienie HP wprost, dopiero na tym
+    // delta obrażeń — dzięki temu „ustaw 500 HP i od razu zbij o 100" działa w jednym strzale.
+    let nextHp = hp != null ? hp : Number(coop.boss_hp);
+    if (damage != null) nextHp -= damage;
+    nextHp = Math.max(0, Math.min(nextMaxHp, nextHp));
+
+    db.prepare('UPDATE sl_coop SET boss_hp = ?, boss_max_hp = ?, boss_name = ? WHERE cycle = ?')
+      .run(nextHp, nextMaxHp, nextName, coop.cycle);
+
+    // Wkład gracza dopisujemy tylko przy realnej delcie obrażeń — samo ustawienie HP
+    // to korekta stanu bossa, nie czyjeś trafienie, więc nie ma komu jej przypisać.
+    if (damage != null && player) {
+      db.prepare('INSERT INTO sl_coop_contributions (cycle, player_id, amount) VALUES (?, ?, ?)')
+        .run(coop.cycle, player.id, damage);
+      slLogActivity(player.id, 'boss_hit',
+        `🛠️ Admin zapisał ${damage > 0 ? `${damage} obrażeń` : `zwrot ${-damage} obrażeń`} dla ${nextName} (HP ${nextHp}/${nextMaxHp})`);
+    }
+
+    let resolved = null;
+    if (nextHp <= 0) {
+      const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
+      resolved = slFinishBossEvent(fresh, true);
+    }
+
+    return {
+      notActive: false, cycle: Number(coop.cycle), hp: nextHp, max_hp: nextMaxHp, boss_name: nextName,
+      credited_to: player ? player.nickname : null, resolved, coop: slCoopPayload(null)
+    };
+  });
+
+  if (out.notActive) {
+    return res.status(400).json({ error: `Boss nie walczy teraz (status: ${out.status}).` });
+  }
+  if (out.noPlayer) {
+    return res.status(404).json({ error: 'Gracz nie istnieje.' });
+  }
+
+  if (out.resolved) slEmitBossTimeout(out.resolved);
+
+  res.json({ success: true, ...out });
+});
+
+// POST /api/snakes/admin/players/:id/stats { password, balance?, total_points? } — ręczna
+// korekta salda (monet) i/lub sumy punktów gracza. Wartości ustawiane WPROST (nie delta),
+// bo panel pokazuje obok aktualne liczby. Nie rusza pozycji na planszy ani ekwipunku.
+app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const playerId = parseInt(req.params.id, 10);
+  const balance = req.body.balance != null ? parseInt(req.body.balance, 10) : null;
+  const totalPoints = req.body.total_points != null ? parseInt(req.body.total_points, 10) : null;
+
+  if (balance != null && (!Number.isInteger(balance) || balance < 0)) {
+    return res.status(400).json({ error: 'Saldo musi być liczbą całkowitą ≥ 0.' });
+  }
+  if (totalPoints != null && (!Number.isInteger(totalPoints) || totalPoints < 0)) {
+    return res.status(400).json({ error: 'Punkty muszą być liczbą całkowitą ≥ 0.' });
+  }
+  if (balance == null && totalPoints == null) {
+    return res.status(400).json({ error: 'Nie podano żadnej zmiany.' });
+  }
+
+  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
+
+  const out = transaction(() => {
+    const st = slEnsureState(playerId);
+    const nextBalance = balance != null ? balance : Number(st.balance);
+    const nextPoints = totalPoints != null ? totalPoints : Number(st.total_points);
+    db.prepare('UPDATE sl_state SET balance = ?, total_points = ? WHERE player_id = ?')
+      .run(nextBalance, nextPoints, playerId);
+    return { balance: nextBalance, total_points: nextPoints };
+  });
+
+  res.json({ success: true, nickname: player.nickname, ...out });
 });
 
 // Strona gry
