@@ -1225,7 +1225,7 @@ function startDiscordScheduler() {
 
     lastNotifiedDate = today; // ustawiamy przed wysyłką — błąd sieci nie ma powtarzać się co minutę
     try {
-      await sendDiscordNotification();
+//      await sendDiscordNotification();
       console.log(`Discord: powiadomienie wysłane (${today})`);
     } catch (err) {
       console.error('Discord: nie udało się wysłać powiadomienia —', err.message);
