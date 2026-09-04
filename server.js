@@ -2442,7 +2442,7 @@ function slCoopAttackers(cycle) {
     FROM sl_coop_contributions c JOIN players p ON p.id = c.player_id
     WHERE c.cycle = ?
     GROUP BY c.player_id
-    ORDER BY amount DESC
+    ORDER BY coins DESC, amount DESC
   `).all(cycle).map(r => ({
     player_id: r.player_id,
     nickname: r.nickname,

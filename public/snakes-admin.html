@@ -961,6 +961,26 @@
     // wszystko poza samym włącznikiem gasimy, żeby nie dało się strzelić w martwy event.
     const BOSS_CONTROLS = ['btn-boss-save', 'btn-boss-damage', 'btn-coop-deadline', 'btn-coop-threshold', 'btn-coop-complete'];
 
+    // Rozpiska uczestników walki. W panelu gracza widać WYŁĄCZNIE wpłacone monety (bo od
+    // nich liczy się nagroda), ale admin dostaje obie liczby: wpłatę i całkowite obrażenia.
+    // Bez tego drugiego nie da się zdiagnozować, skąd bossowi ubyło HP — a przy okazji to
+    // obrażenia (nie wpłata) decydują o zniżce od kary za przegraną.
+    function renderBossParticipants(attackers) {
+      if (!attackers || !attackers.length) {
+        return '<div class="adm-note" style="margin-top:8px">Nikt jeszcze nie tknął tego bossa.</div>';
+      }
+      const rows = attackers.map(a => {
+        const coins = a.coins > 0
+          ? `<strong>${a.coins}</strong> monet`
+          : '<span style="opacity:.5">bez wpłaty</span>';
+        return `${esc(a.nickname)} — ${coins} · ${a.amount} obr. łącznie`;
+      }).join('<br>');
+      return `<div class="adm-note" style="margin-top:8px">
+        <strong>Uczestnicy walki</strong> (sortowane wpłatą — gracze widzą tylko kolumnę monet):<br>
+        <span class="pl-mini" style="display:block;margin-top:4px">${rows}</span>
+      </div>`;
+    }
+
     function renderInfo() {
       const c = cfg.coop;
       const bossOn = !!c;
@@ -981,7 +1001,7 @@
         `Nagroda: wpłata × ${c.boss ? c.boss.points_per_coin : '–'} w punktach + zwrot do ${c.boss ? c.boss.contrib_refund : '–'} monet (nie więcej niż wpłata)<br>` +
         `Start edycji: ${fmtDate(c.started_at)} · limit na pokonanie bossa: <strong>${c.time_limit_days} dni robocze</strong><br>` +
         `Suwak trudności (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
-        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? `pokonany, +${c.previous_result.bonus} pkt premii/os.` : 'nie zdążono, bez premii'}` : '');
+        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? 'pokonany' : `nie zdążono — boss zabrał do ${c.previous_result.timeout_penalty} monet`}` : '');
 
       const bossEl = document.getElementById('boss-info');
       if (c.boss) {
@@ -992,7 +1012,8 @@
             ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : ' · <strong>WALKA TRWA</strong>'}
             ${b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
             Obrażenia od kości: oczka × ${b.dice_damage_mult} · wpłata: 1 moneta = 1 obrażenie · po zabiciu: połowa wpłaty w pkt + zwrot do ${b.contrib_refund} monet
-          </div>`;
+          </div>
+          ${renderBossParticipants(c.attackers)}`;
         const deadlineInput = document.getElementById('coop-deadline-input');
         if (b.deadline_at && document.activeElement !== deadlineInput) {
           const d = new Date(b.deadline_at);

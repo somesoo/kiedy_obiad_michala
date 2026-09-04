@@ -876,11 +876,15 @@ function renderEffectsHint(g) {
 // rzędzie: pasek HP (zadane obrażenia) i pod nim cienki pasek czasu (narasta do terminu,
 // który admin ustawia w panelu — patrz updateBossTimeBar).
 function slCoopChipsHtml(c) {
-  return c.attackers.length
-    ? `<div class="coop-chips">` + c.attackers.map(x =>
-        `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}">${esc(x.nickname)}<span class="coop-amt mono">${x.amount}</span></span>`
+  // Lista pokazuje WPŁACONE MONETY, a nie sumę obrażeń — bo to od wpłaty liczy się
+  // nagroda. Obrażenia z kości są darmowe, więc ktoś, kto tylko rzucał, stałby wysoko
+  // w rankingu wkładu, nic nie ryzykując. Kogo nie ma na liście, ten nie wpłacił.
+  const givers = c.attackers.filter(x => x.coins > 0);
+  return givers.length
+    ? `<div class="coop-chips">` + givers.map(x =>
+        `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}" title="wpłacone monety">${esc(x.nickname)}<span class="coop-amt mono">${x.coins}</span></span>`
       ).join('') + `</div>`
-    : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nie trafił bossa — bądź pierwszy!</span></div>`;
+    : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nie wpłacił — bądź pierwszy!</span></div>`;
 }
 
 // Jeden zwarty pasek pod planszą (nie karta z sekcjami) — plansza ma dostać jak
