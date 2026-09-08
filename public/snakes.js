@@ -11,8 +11,8 @@ let state = {
 
 const POWERUP_META = {
   freeze:      { icon: '❄️', name: 'Freeze',      desc: 'Zatrzymuje wybranego gracza w jego następnej turze. Cel nic nie widzi — reszta stołu wie tylko, że użyłeś Freeze, nie na kim.', targeted: true },
-  curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 8 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież monet, droższe zakupy i inne). Cel dowie się, jaka, dopiero gdy odpali.', targeted: true },
-  double_move: { icon: '⏩', name: 'Double Move',  desc: 'Dokłada Ci jeden ruch ponad dzienny limit — do wykonania od razu po użyciu.', targeted: false },
+  curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 8 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież coins, droższe zakupy i inne). Cel dowie się, jaka, dopiero gdy odpali.', targeted: true },
+  double_move: { icon: '⏩', name: 'Extra Move',  desc: 'Dokłada Ci jeden ruch ponad dzienny limit — do wykonania od razu po użyciu.', targeted: false },
   shield:      { icon: '🛡️', name: 'Shield',       desc: 'Obrona: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika.', targeted: false },
 };
 
@@ -407,7 +407,7 @@ function renderAll() {
 
 // ── STATY ──
 function renderStats(g) {
-  document.getElementById('user-balance-display').textContent = `💰 ${g.me.balance} pkt`;
+  document.getElementById('user-balance-display').textContent = `💰 ${g.me.balance} coins`;
   const thumb = document.getElementById('my-avatar-thumb');
   if (thumb && g.me.avatar_url) thumb.src = g.me.avatar_url;
   document.getElementById('stat-points').textContent = g.me.total_points;
@@ -742,7 +742,7 @@ function renderShop(g) {
       <div class="shop-item">
         <div class="shop-top">
           <span class="shop-name">${meta.icon} ${meta.name}</span>
-          <span class="shop-cost mono">${item.cost} pkt</span>
+          <span class="shop-cost mono">${item.cost} coins</span>
         </div>
         <div class="shop-desc text-muted small">${meta.desc}</div>
         <div class="shop-actions">
@@ -768,7 +768,7 @@ async function buyPowerup(type) {
     state.game = res.state;
     renderAll();
     showToast(res.price_curse
-      ? `${res.price_curse.label}! Kupiono ${POWERUP_META[type].name} za ${res.cost} pkt zamiast ${res.base_cost} (+${res.price_curse.extra}) — klątwa zdjęta.`
+      ? `${res.price_curse.label}! Kupiono ${POWERUP_META[type].name} za ${res.cost} coins zamiast ${res.base_cost} (+${res.price_curse.extra}) — klątwa zdjęta.`
       : `🛒 Kupiono: ${POWERUP_META[type].name}`);
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
@@ -800,7 +800,7 @@ async function doUse(type, targetId) {
     if (res.blocked) {
       showToast(`🛡️ Cel miał tarczę — atak zablokowany! Power-up przepadł.`);
     } else if (res.extra_roll) {
-      // Double Move działa od ręki — stan już przyszedł z dodatkowym slotem, więc
+      // Extra Move działa od ręki — stan już przyszedł z dodatkowym slotem, więc
       // przycisk „Rzuć" jest w tym momencie odblokowany.
       showToast(`⏩ Dodatkowy ruch gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`);
     } else if (type === 'curse') {
@@ -876,13 +876,13 @@ function renderEffectsHint(g) {
 // rzędzie: pasek HP (zadane obrażenia) i pod nim cienki pasek czasu (narasta do terminu,
 // który admin ustawia w panelu — patrz updateBossTimeBar).
 function slCoopChipsHtml(c) {
-  // Lista pokazuje WPŁACONE MONETY, a nie sumę obrażeń — bo to od wpłaty liczy się
+  // Lista pokazuje WPŁACONE COINS, a nie sumę obrażeń — bo to od wpłaty liczy się
   // nagroda. Obrażenia z kości są darmowe, więc ktoś, kto tylko rzucał, stałby wysoko
   // w rankingu wkładu, nic nie ryzykując. Kogo nie ma na liście, ten nie wpłacił.
   const givers = c.attackers.filter(x => x.coins > 0);
   return givers.length
     ? `<div class="coop-chips">` + givers.map(x =>
-        `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}" title="wpłacone monety">${esc(x.nickname)}<span class="coop-amt mono">${x.coins}</span></span>`
+        `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}" title="wpłacone coins">${esc(x.nickname)}<span class="coop-amt mono">${x.coins}</span></span>`
       ).join('') + `</div>`
     : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nie wpłacił — bądź pierwszy!</span></div>`;
 }
@@ -915,20 +915,20 @@ function renderCoop(g) {
     ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(b.started_at || '')}" data-until="${esc(b.deadline_at)}" title="Czas na pokonanie bossa"><div class="boss-time-fill"></div></div>`
     : '';
 
-  // Wpłata jest dowolnej wysokości (1 moneta = 1 obrażenie), więc zamiast przycisku
+  // Wpłata jest dowolnej wysokości (1 coin = 1 obrażenie), więc zamiast przycisku
   // z ryczałtem mamy pole kwoty. Przy przerysowaniu panelu (co 10 s) trzeba zachować to,
   // co gracz właśnie wpisuje — inaczej kwota znika mu spod palców.
   const amountEl = document.getElementById('coop-amount');
   const keepAmount = amountEl ? amountEl.value : '';
   const keepFocus = !!amountEl && document.activeElement === amountEl;
   const actionHtml =
-    `<input type="number" id="coop-amount" min="1" step="1" max="${g.me.balance}" placeholder="monety" />
+    `<input type="number" id="coop-amount" min="1" step="1" max="${g.me.balance}" placeholder="coins" />
      <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Wpłać</button>`;
 
   const prevTxt = c.previous_result
     ? `<span class="coop-prev">${c.previous_result.defeated
         ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany`
-        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} monet`}</span>`
+        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} coins`}</span>`
     : '';
 
   el.innerHTML = `
@@ -944,7 +944,7 @@ function renderCoop(g) {
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>👹 Każdy rzut kostką rani bossa za darmo, a wpłata to <strong>1 moneta = 1 obrażenie</strong> (wpłacasz ile chcesz). Pokonacie go na czas — każdy, kto wpłacił, dostaje <strong>połowę wpłaty w punktach</strong> i odzyskuje do ${b.contrib_refund} monet (nie więcej, niż włożył). Nie zdążycie — wpłaty przepadają, a boss zabierze do ${c.timeout_penalty} monet każdemu (walczącym mniej — Ty stracisz ${c.my_timeout_penalty}). Tak czy siak od razu staje kolejny.${c.my_coins ? ` Wpłaciłeś dziś w tej walce: ${c.my_coins}.` : ''}</span>
+      <span>👹 Każdy rzut kostką rani bossa za darmo, a wpłata to <strong>1 coin = 1 obrażenie</strong> (wpłacasz ile chcesz). Pokonacie go na czas — każdy, kto wpłacił, dostaje <strong>połowę wpłaty w punktach</strong> i odzyskuje do ${b.contrib_refund} coins (nie więcej, niż włożył). Nie zdążycie — wpłaty przepadają, a boss zabierze do ${c.timeout_penalty} coins każdemu (walczącym mniej — Ty stracisz ${c.my_timeout_penalty}). Tak czy siak od razu staje kolejny.${c.my_coins ? ` Wpłaciłeś dziś w tej walce: ${c.my_coins}.` : ''}</span>
       ${prevTxt}
     </div>
     ${slCoopChipsHtml(c)}`;
@@ -1005,7 +1005,7 @@ async function contributeToBoss() {
   const input = document.getElementById('coop-amount');
   const amount = parseInt(input && input.value, 10);
   if (!Number.isInteger(amount) || amount <= 0) {
-    showToast('Podaj dodatnią liczbę monet.');
+    showToast('Podaj dodatnią liczbę coins.');
     return;
   }
   state.busy = true;
@@ -1018,7 +1018,7 @@ async function contributeToBoss() {
       showConfetti();
       showToast('🏆 Twoja wpłata dobiła bossa! Nagrody rozliczone.');
     } else {
-      showToast(`💰 Wpłacono ${amount} monet = ${amount} obrażeń (bossowi zostało ${res.hp_left}/${res.max_hp}).`);
+      showToast(`💰 Wpłacono ${amount} coins = ${amount} obrażeń (bossowi zostało ${res.hp_left}/${res.max_hp}).`);
     }
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {

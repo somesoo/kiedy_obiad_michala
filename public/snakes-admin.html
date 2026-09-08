@@ -194,7 +194,7 @@
         <h3>🎮 GRACZE</h3>
         <div class="adm-note">
           Kliknij <strong>Szczegóły</strong> przy graczu, żeby otworzyć pełne sterowanie:
-          pozycja na planszy, punkty i saldo, zużyte rzuty, ekwipunek, oczekujące na niego
+          pozycja na planszy, punkty i coins, zużyte rzuty, ekwipunek, oczekujące na niego
           efekty oraz cofanie ostatniego ruchu.
         </div>
         <div id="players-list"></div>
@@ -287,10 +287,10 @@
         <h3 style="color: var(--danger)">↩️ COFNIJ CAŁY DZIEŃ</h3>
         <div class="adm-note">
           Kasuje wszystkie ruchy wskazanego dnia i stawia graczy tam, gdzie stali o 8:00 —
-          punkty i monety zarobione tego dnia znikają, dzienny limit rzutów (i sloty
-          z Double Move) wracają do zera, dziennik z tego dnia jest czyszczony.
-          <strong>Nie zwraca</strong> monet wydanych w sklepie ani wpłaconych bossowi (kupione
-          power-upy zostają w ekwipunku) i nie odkręca monet ukradzionych przy wypchnięciu.
+          punkty i coins zarobione tego dnia znikają, dzienny limit rzutów (i sloty
+          z Extra Move) wracają do zera, dziennik z tego dnia jest czyszczony.
+          <strong>Nie zwraca</strong> coins wydanych w sklepie ani wpłaconych bossowi (kupione
+          power-upy zostają w ekwipunku) i nie odkręca coins ukradzionych przy wypchnięciu.
           Gracza, którego ktoś tego dnia zbił, a on sam nie zdążył rzucić, trzeba poprawić
           ręcznie — panel wypisze, kogo to dotyczy. <strong>Nieodwracalne.</strong>
         </div>
@@ -303,7 +303,7 @@
       <div class="adm-card" style="border-color: var(--danger)">
         <h3 style="color: var(--danger)">⚠️ RESET GRY</h3>
         <div class="adm-note">
-          Zeruje CAŁĄ grę Snakes: każdy gracz wraca na pole 0 z saldem, punktami,
+          Zeruje CAŁĄ grę Snakes: każdy gracz wraca na pole 0 z coins, punktami,
           ekwipunkiem power-upów i oczekującymi efektami wyzerowanymi. Historia ruchów
           i dziennik aktywności są kasowane, a pula co-op/boss wraca do świeżej edycji #1.
           Gracze, ich pionki i zdjęcia profilowe <strong>zostają</strong> — resetuje się tylko
@@ -401,7 +401,7 @@
         <div class="pl-row${open.has(String(p.player_id)) ? ' is-open' : ''}" data-id="${p.player_id}">
           <span class="pl-name">${esc(p.nickname)}</span>
           <span class="pl-stats">
-            pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt · ${p.balance} monet
+            pole ${p.tile} · okr. ${p.laps} · ${p.total_points} pkt · ${p.balance} coins
             · ruchy dziś: <span class="${p.rolls_used_today > p.daily_rolls ? 'pl-over' : (p.moved_today ? 'pl-moved' : '')}">${p.rolls_used_today}/${p.daily_rolls}</span>
           </span>
           <span class="pl-actions">
@@ -462,16 +462,16 @@
           <span class="pl-hint">pole · okrążenia (abs ${p.abs_pos})</span>
         </div>
         <div class="pl-grp">
-          <span class="pl-grp-label">Punkty i saldo</span>
+          <span class="pl-grp-label">Punkty i coins</span>
           <input type="number" class="pd-points" min="0" value="${p.total_points}" title="punkty (leaderboard)" />
-          <input type="number" class="pd-balance" min="0" value="${p.balance}" title="saldo (monety)" />
+          <input type="number" class="pd-balance" min="0" value="${p.balance}" title="coins (portfel do wydania)" />
           <button class="btn-ghost pd-save-stats">💾 Zapisz</button>
-          <span class="pl-hint">pkt · monety</span>
+          <span class="pl-hint">pkt · coins</span>
         </div>
         <div class="pl-grp">
           <span class="pl-grp-label">Rzuty dziś</span>
           <input type="number" class="pd-rolls" min="0" value="${p.rolls_used_today}" title="zużyte rzuty" />
-          <input type="number" class="pd-extra" min="0" max="${p.max_extra_rolls}" value="${p.extra_rolls}" title="dodatkowe sloty z Double Move" />
+          <input type="number" class="pd-extra" min="0" max="${p.max_extra_rolls}" value="${p.extra_rolls}" title="dodatkowe sloty z Extra Move" />
           <button class="btn-ghost pd-save-rolls">💾 Zapisz</button>
           <span class="pl-hint">zużyte · dodatkowe (limit ${p.daily_rolls})</span>
         </div>
@@ -537,7 +537,7 @@
         if (e.target.closest('.pd-save-stats')) {
           const res = await api('POST', `/api/snakes/admin/players/${id}/stats`,
             { password: pass, total_points: val('.pd-points'), balance: val('.pd-balance') });
-          applyDetail(res, `💾 ${res.nickname}: ${res.player.total_points} pkt, saldo ${res.player.balance}`);
+          applyDetail(res, `💾 ${res.nickname}: ${res.player.total_points} pkt, ${res.player.balance} coins`);
           return;
         }
 
@@ -574,7 +574,7 @@
         }
 
         if (e.target.closest('.pd-undo')) {
-          if (!confirm(`Cofnąć ostatni ruch gracza ${nickname}? Wróci na pole sprzed niego, a zdobyte w nim punkty i monety przepadną.`)) return;
+          if (!confirm(`Cofnąć ostatni ruch gracza ${nickname}? Wróci na pole sprzed niego, a zdobyte w nim punkty i coins przepadną.`)) return;
           const res = await api('POST', `/api/snakes/admin/players/${id}/undo-move`, { password: pass });
           applyDetail(res, `↩️ ${res.nickname}: cofnięto ruch #${res.move_seq} z ${res.move_date} — powrót na pole ${res.back_to_tile}, -${res.points_removed} pkt`);
           await loadPlayers();
@@ -961,7 +961,7 @@
     // wszystko poza samym włącznikiem gasimy, żeby nie dało się strzelić w martwy event.
     const BOSS_CONTROLS = ['btn-boss-save', 'btn-boss-damage', 'btn-coop-deadline', 'btn-coop-threshold', 'btn-coop-complete'];
 
-    // Rozpiska uczestników walki. W panelu gracza widać WYŁĄCZNIE wpłacone monety (bo od
+    // Rozpiska uczestników walki. W panelu gracza widać WYŁĄCZNIE wpłacone coins (bo od
     // nich liczy się nagroda), ale admin dostaje obie liczby: wpłatę i całkowite obrażenia.
     // Bez tego drugiego nie da się zdiagnozować, skąd bossowi ubyło HP — a przy okazji to
     // obrażenia (nie wpłata) decydują o zniżce od kary za przegraną.
@@ -971,12 +971,12 @@
       }
       const rows = attackers.map(a => {
         const coins = a.coins > 0
-          ? `<strong>${a.coins}</strong> monet`
+          ? `<strong>${a.coins}</strong> coins`
           : '<span style="opacity:.5">bez wpłaty</span>';
         return `${esc(a.nickname)} — ${coins} · ${a.amount} obr. łącznie`;
       }).join('<br>');
       return `<div class="adm-note" style="margin-top:8px">
-        <strong>Uczestnicy walki</strong> (sortowane wpłatą — gracze widzą tylko kolumnę monet):<br>
+        <strong>Uczestnicy walki</strong> (sortowane wpłatą — gracze widzą tylko kolumnę coins):<br>
         <span class="pl-mini" style="display:block;margin-top:4px">${rows}</span>
       </div>`;
     }
@@ -998,10 +998,10 @@
 
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong><br>` +
-        `Nagroda: wpłata × ${c.boss ? c.boss.points_per_coin : '–'} w punktach + zwrot do ${c.boss ? c.boss.contrib_refund : '–'} monet (nie więcej niż wpłata)<br>` +
+        `Nagroda: wpłata × ${c.boss ? c.boss.points_per_coin : '–'} w punktach + zwrot do ${c.boss ? c.boss.contrib_refund : '–'} coins (nie więcej niż wpłata)<br>` +
         `Start edycji: ${fmtDate(c.started_at)} · limit na pokonanie bossa: <strong>${c.time_limit_days} dni robocze</strong><br>` +
         `Suwak trudności (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
-        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? 'pokonany' : `nie zdążono — boss zabrał do ${c.previous_result.timeout_penalty} monet`}` : '');
+        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? 'pokonany' : `nie zdążono — boss zabrał do ${c.previous_result.timeout_penalty} coins`}` : '');
 
       const bossEl = document.getElementById('boss-info');
       if (c.boss) {
@@ -1011,7 +1011,7 @@
             👹 <strong>${esc(b.name)}</strong> — HP ${b.hp}/${b.max_hp} (${b.percent}%)
             ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : ' · <strong>WALKA TRWA</strong>'}
             ${b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
-            Obrażenia od kości: oczka × ${b.dice_damage_mult} · wpłata: 1 moneta = 1 obrażenie · po zabiciu: połowa wpłaty w pkt + zwrot do ${b.contrib_refund} monet
+            Obrażenia od kości: oczka × ${b.dice_damage_mult} · wpłata: 1 coin = 1 obrażenie · po zabiciu: połowa wpłaty w pkt + zwrot do ${b.contrib_refund} coins
           </div>
           ${renderBossParticipants(c.attackers)}`;
         const deadlineInput = document.getElementById('coop-deadline-input');
@@ -1034,7 +1034,8 @@
 
       document.getElementById('cfg-info').innerHTML =
         `Plansza: ${cfg.board.cols}×${cfg.board.rows} = ${cfg.board.size} pól<br>` +
-        `Koszty power-upów: ` + Object.entries(cfg.powerup_costs).map(([k, v]) => `${esc(k)} ${v}`).join(' · ');
+        `Koszty power-upów: ` + Object.entries(cfg.powerup_costs)
+          .map(([k, v]) => `${esc((cfg.powerup_labels && cfg.powerup_labels[k]) || k)} ${v} coins`).join(' · ');
     }
 
     document.getElementById('btn-save').addEventListener('click', async () => {
@@ -1065,9 +1066,9 @@
       try {
         const res = await api('POST', '/api/snakes/admin/coop/complete', { password: pass, force });
         const rewardTxt = res.defeated
-          ? `wpłacono ${res.coins_paid} monet, wróciło ${res.coins_refunded}, przyznano ${res.points_awarded} pkt (${res.contributors} wpłacających).`
+          ? `wpłacono ${res.coins_paid} coins, wróciło ${res.coins_refunded}, przyznano ${res.points_awarded} pkt (${res.contributors} wpłacających).`
           : `nagrody nie ma, kasa przepadła.`;
-        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} monet każdemu, walczącym pomniejszone o zadane obrażenia (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle} rusza od razu: ${res.next_cycle.time_limit_days} dni na pokonanie kolejnego bossa.`);
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} coins każdemu, walczącym pomniejszone o zadane obrażenia (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle} rusza od razu: ${res.next_cycle.time_limit_days} dni na pokonanie kolejnego bossa.`);
         await loadSettings();
       } catch (e) {
         showToast(e.message);
@@ -1173,7 +1174,7 @@
 
     document.getElementById('btn-day-rollback').addEventListener('click', async () => {
       const date = document.getElementById('rollback-date').value || playersToday;
-      if (!confirm(`Cofnąć CAŁY dzień ${date}? Wszystkie ruchy z tego dnia znikną, gracze wrócą na pozycje z 8:00, a zarobione tego dnia punkty i monety przepadną. Tej operacji NIE da się cofnąć.`)) return;
+      if (!confirm(`Cofnąć CAŁY dzień ${date}? Wszystkie ruchy z tego dnia znikną, gracze wrócą na pozycje z 8:00, a zarobione tego dnia punkty i coins przepadną. Tej operacji NIE da się cofnąć.`)) return;
       try {
         const res = await api('POST', '/api/snakes/admin/day/rollback', { password: pass, date });
         await loadSettings();
@@ -1187,7 +1188,7 @@
     });
 
     document.getElementById('btn-game-reset').addEventListener('click', async () => {
-      if (!confirm('Zresetować CAŁĄ grę Snakes? Każdy gracz wraca na pole 0 z zerowym saldem, punktami i ekwipunkiem. Historia i pula co-op/boss też się kasują. Pionki i zdjęcia zostają. Tej operacji NIE da się cofnąć.')) return;
+      if (!confirm('Zresetować CAŁĄ grę Snakes? Każdy gracz wraca na pole 0 z wyzerowanymi coins, punktami i ekwipunkiem. Historia i pula co-op/boss też się kasują. Pionki i zdjęcia zostają. Tej operacji NIE da się cofnąć.')) return;
       const typed = prompt('Wpisz RESET, żeby potwierdzić:');
       if (typed !== 'RESET') {
         showToast('Anulowano — nic nie zresetowano.');

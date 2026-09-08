@@ -1261,7 +1261,7 @@ app.post('/api/admin/discord-test', async (req, res) => {
 //  • Punkty = wartość rzutu + pola bonusowe + postęp po planszy (przebyty dystans
 //    i ukończone okrążenia). Punkty się kumulują (leaderboard) i są walutą sklepu.
 //  • Power-upy kupowane za punkty (NIE losowe dropy): Freeze, Curse (3 warianty),
-//    Double Move oraz Shield (obrona — blokuje najbliższy Freeze/Curse).
+//    Extra Move oraz Shield (obrona — blokuje najbliższy Freeze/Curse).
 //  • Wydarzenie kooperacyjne: gracze dorzucają punkty do wspólnej puli; po przekroczeniu
 //    progu rusza event „bossowy", a po jego ukończeniu kontrybutorzy dostają nagrody.
 
@@ -1272,10 +1272,11 @@ const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
 const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
 const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
 
-// Koszty power-upów (w punktach). Shield jest droższy od Freeze/Curse — to kontra
-// na cudzy atak, więc ma kosztować więcej niż sam atak, ale zostaje w zasięgu
-// kilku dni zbierania (dzienny ruch to ~10–30 pkt).
-const SL_POWERUP_COSTS = { freeze: 30, curse: 50, double_move: 40, shield: 70 };
+// Koszty power-upów (w coins). Shield jest najdroższy, bo to kontra na cudzy atak —
+// ma kosztować więcej niż sam atak, ale zostaje w zasięgu kilku dni zbierania (dzienny
+// ruch to ~10–30 coins). Curse jest najtańszy mimo ośmiu wariantów: pojedynczy wariant
+// trafia się losowo, więc rzucający nie kupuje konkretnego efektu, tylko loterię.
+const SL_POWERUP_COSTS = { freeze: 30, curse: 15, double_move: 40, shield: 70 };
 const SL_POWERUP_TYPES = Object.keys(SL_POWERUP_COSTS);
 // Typy ataków, które Shield potrafi zablokować (zużywa się przy pierwszym z nich).
 const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
@@ -1287,7 +1288,7 @@ const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
 // w slResolveTileEffect) — inaczej gracz lądowałby na złym polu. Warianty 3/4/6/7
 // działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
 const SL_CURSE_VARIANTS = 8;
-const SL_CURSE_COIN_STEAL = 50; // ile monet zabiera Kieszonkowiec (wariant 3)
+const SL_CURSE_COIN_STEAL = 50; // ile coins zabiera Kieszonkowiec (wariant 3)
 // Drożyzna (wariant 8) jako JEDYNA klątwa nie odpala się na ruchu, tylko przy najbliższym
 // zakupie w sklepie — podbija jego cenę o ten mnożnik i dopiero wtedy się zużywa.
 const SL_CURSE_PRICE_VARIANT = 8;
@@ -1305,7 +1306,7 @@ const SL_CURSE_LABELS = {
 const SL_CURSE_DESCRIPTIONS = {
   1: 'kość cofa zamiast pchać do przodu (np. rzut 4 = 4 pola W TYŁ)',
   2: 'rzut liczy się w połowie, w dół (rzut 5 = ruch o 2 pola)',
-  3: `traci ${SL_CURSE_COIN_STEAL} monet na rzecz tego, kto rzucił klątwę`,
+  3: `traci ${SL_CURSE_COIN_STEAL} coins na rzecz tego, kto rzucił klątwę`,
   4: 'połowa punktów zdobytych tym ruchem przepada',
   5: 'na ten ruch drabiny i węże działa się od drugiego końca — ze szczytu drabiny zjeżdżasz na dół, z ogona węża wjeżdżasz do góry',
   6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
@@ -1342,12 +1343,12 @@ const SL_KNOCKBACK_TILES_BACK_MIN = 3;
 const SL_KNOCKBACK_TILES_BACK_MAX = 6;
 
 // Ile ruchów (rzutów) dziennie ma każdy gracz na starcie dnia. Freeze blokuje JEDEN
-// z nich (nie cały dzień), a Double Move DOKŁADA jeden ruch ponad ten limit — od ręki,
+// z nich (nie cały dzień), a Extra Move DOKŁADA jeden ruch ponad ten limit — od ręki,
 // w momencie użycia (patrz POST /api/snakes/shop/use i slDailyRollsFor).
 const SL_DAILY_ROLLS = 3;
-// Ile slotów PONAD dzienny limit można w sumie dołożyć Double Move'ami w ciągu jednego
-// dnia. Bez tego sufitu Double Move był dziurą w ekonomii: każdy rzut daje punkty, punkty
-// są walutą sklepu, więc gracz z zapasem monet kupował kolejne Double Move'y i rzucał
+// Ile slotów PONAD dzienny limit można w sumie dołożyć Extra Move'ami w ciągu jednego
+// dnia. Bez tego sufitu Extra Move był dziurą w ekonomii: każdy rzut daje punkty, punkty
+// są walutą sklepu, więc gracz z zapasem monet kupował kolejne Extra Move'y i rzucał
 // w kółko (zdarzyło się 31 ruchów jednego dnia). Twardy limit dnia to
 // SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS = 5 rzutów.
 const SL_MAX_EXTRA_ROLLS = 2;
@@ -1503,7 +1504,7 @@ db.exec(`
     player_id  INTEGER,
     move_date  TEXT NOT NULL,           -- YYYY-MM-DD (Europe/Warsaw)
     move_seq   INTEGER NOT NULL DEFAULT 1, -- który to ruch danego dnia (1, 2, ...)
-    rolls      TEXT DEFAULT '[]',       -- JSON: rzucone wartości (1 lub 2 przy Double Move)
+    rolls      TEXT DEFAULT '[]',       -- JSON: rzucone wartości (1 lub 2 przy Extra Move)
     from_abs   INTEGER,
     to_abs     INTEGER,
     points     INTEGER DEFAULT 0,
@@ -1615,7 +1616,7 @@ ensureColumn('sl_state', 'rolls_today', 'INTEGER DEFAULT 0');
 // Dokładny moment ostatniego ruchu — sam w sobie niczego nie blokuje (odstęp między
 // ruchami zniknął), zostaje jako ślad w danych i pod ewentualne statystyki.
 ensureColumn('sl_state', 'last_move_at', 'DATETIME');
-// Dodatkowe ruchy PONAD dzienny limit, przyznane przez Double Move (patrz
+// Dodatkowe ruchy PONAD dzienny limit, przyznane przez Extra Move (patrz
 // slDailyRollsFor). Ważne wyłącznie w dniu z extra_rolls_date — nazajutrz licznik
 // jest ignorowany, więc niewykorzystane sloty przepadają razem z resztą limitu.
 ensureColumn('sl_state', 'extra_rolls', 'INTEGER DEFAULT 0');
@@ -1721,7 +1722,8 @@ const SL_ACTIVITY_TYPES = {
   shop_use:  'Użycie power-upów',
   knockback: 'Wypychanie z pola',
   boss_hit:  'Walka z bossem',
-  avatar:    'Zmiana zdjęcia profilowego'
+  avatar:    'Zmiana zdjęcia profilowego',
+  bonus_grant: 'Doładowania coins od admina'
 };
 
 // Widoczność typów — ten sam wzorzec co przełączniki Discorda (patrz slEventsConfig):
@@ -1879,7 +1881,7 @@ function slBossHitEntry(damage, source) {
 }
 
 // Etykiety power-upów do czytelnych wpisów w dzienniku i na Discordzie.
-const SL_POWERUP_LABELS = { freeze: 'Freeze', curse: 'Curse', double_move: 'Double Move', shield: 'Shield' };
+const SL_POWERUP_LABELS = { freeze: 'Freeze', curse: 'Curse', double_move: 'Extra Move', shield: 'Shield' };
 
 // ── META (klucz-wartość) ──
 function slMetaGet(key) {
@@ -2017,7 +2019,7 @@ function slKnockbackTilesBack() {
   return SL_KNOCKBACK_TILES_BACK_MIN + Math.floor(Math.random() * span);
 }
 
-// Ile ruchów ma DZIŚ dany gracz: bazowy limit plus dodatkowe sloty kupione Double
+// Ile ruchów ma DZIŚ dany gracz: bazowy limit plus dodatkowe sloty kupione Extra
 // Move'em. Dodatki liczą się tylko w dniu, w którym power-up został użyty — inny dzień
 // (albo pusta data) znaczy zero, więc kolumny nie trzeba zerować o północy. `st` to
 // wiersz sl_state (wystarczą kolumny extra_rolls i extra_rolls_date).
@@ -2197,10 +2199,10 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     if (resolved.note === 'ladder') bits.push('🪜 i wjechał na drabinę!');
     if (resolved.note === 'snake') bits.push('🐍 i zjechał wężem niżej!');
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
-    if (stolen > 0) bits.push(`💰 stracił ${stolen} monet na rzecz ${pusherNickname}`);
+    if (stolen > 0) bits.push(`💰 stracił ${stolen} coins na rzecz ${pusherNickname}`);
     slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`);
     if (stolen > 0) {
-      slLogActivity(pusherId, 'knockback', `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} monet!`);
+      slLogActivity(pusherId, 'knockback', `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} coins!`);
     }
 
     pushedIds.add(occ.player_id);
@@ -2219,6 +2221,9 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
 // wolny tekst w sl_activity ("💰 Zbiłeś X i zgarnąłeś N monet!"), więc parsujemy
 // go regexem. Zabezpieczone znacznikiem w sl_meta — leci raz, kolejne restarty
 // serwera to no-op (patrz też migracja układu planszy wyżej, ten sam wzorzec).
+// UWAGA: szukamy słowa "monet", a nie "coins", CELOWO. Waluta nazywa się dziś coins,
+// ale ta migracja czyta wpisy sprzed tej zmiany nazwy — i tylko takie ma naprawiać.
+// Podmiana na "coins" sprawiłaby, że nie znajdzie niczego.
 (function backfillKnockbackPoints() {
   if (slMetaGet('knockback_points_backfilled') === '1') return;
   const rows = db.prepare(
@@ -2244,7 +2249,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
   slMetaSet('knockback_points_backfilled', '1');
 })();
 
-// ── MIGRACJA (jednorazowa): Double Move przestał być efektem czekającym na następną
+// ── MIGRACJA (jednorazowa): Extra Move przestał być efektem czekającym na następną
 // turę (dwie kostki w jednym ruchu) — teraz dokłada osobny ruch od ręki, w momencie
 // użycia. Wpisy, które zostały w kolejce jako 'pending', nigdy by już nie odpaliły,
 // więc oddajemy graczom power-up do ekwipunku, żeby wykorzystali go na nowych zasadach.
@@ -2260,10 +2265,10 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
           .run(e.id);
         slAddPowerup(e.target_player_id, 'double_move', 1);
         slLogActivity(e.target_player_id, 'shop_use',
-          '⏩ Double Move wrócił do ekwipunku — nowe zasady: daje dodatkowy ruch od ręki, nie dwie kostki w turze.');
+          '⏩ Extra Move wrócił do ekwipunku — nowe zasady: daje dodatkowy ruch od ręki, nie dwie kostki w turze.');
       }
     });
-    console.log(`Snakes: oddano ${stale.length} niewykorzystanych Double Move do ekwipunku (nowe zasady)`);
+    console.log(`Snakes: oddano ${stale.length} niewykorzystanych Extra Move do ekwipunku (nowe zasady)`);
   }
   slMetaSet('double_move_instant_migrated', '1');
 })();
@@ -2671,7 +2676,7 @@ const SL_DISCORD_WEBHOOK_URL = process.env.SNAKES_DISCORD_WEBHOOK_URL || process
 const SNAKES_URL = (process.env.APP_URL || 'https://frog03-21535.wykr.es/').replace(/\/+$/, '') + '/snakes';
 
 // Domyślnie ON to rzeczy „warte pingu": ataki, tarcze, węże/drabiny, kamienie milowe
-// co-opu i dzienne podsumowanie. Codzienny wynik każdego rzutu i Double Move są
+// co-opu i dzienne podsumowanie. Codzienny wynik każdego rzutu i Extra Move są
 // domyślnie OFF, żeby nie zasypywać kanału.
 const SL_EVENT_DEFAULTS = {
   roll_result:        false,
@@ -2692,7 +2697,7 @@ const SL_EVENT_LABELS = {
   powerup_freeze:     'Użycie Freeze (kto na kogo)',
   powerup_curse:      'Użycie Curse (kto na kogo)',
   shield_block:       'Shield zablokował atak',
-  double_move:        'Użycie Double Move',
+  double_move:        'Użycie Extra Move',
   knockback:          'Wypchnięcie z zajętego pola (i efekt domina)',
   coop_milestone:     'Pula co-op przekroczyła próg',
   coop_completed:     'Wydarzenie co-op ukończone (nagrody wypłacone, kolejna edycja rusza)',
@@ -2826,8 +2831,8 @@ function slEmitBossTimeout(outcome) {
       title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
       url: SNAKES_URL,
       description: (outcome.defeated
-        ? `Wpłacający (${outcome.contributors}) dzielą **${outcome.points_awarded} pkt** i odzyskują **${outcome.coins_refunded}** z wpłaconych **${outcome.coins_paid}** monet.`
-        : `Nie zdążyliście dobić bossa na czas. Nagrody nie ma. Boss zabrał do **${outcome.timeout_penalty} monet** każdemu graczowi (walczącym pomniejszone o zadane obrażenia; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
+        ? `Wpłacający (${outcome.contributors}) dzielą **${outcome.points_awarded} pkt** i odzyskują **${outcome.coins_refunded}** z wpłaconych **${outcome.coins_paid}** coins.`
+        : `Nie zdążyliście dobić bossa na czas. Nagrody nie ma. Boss zabrał do **${outcome.timeout_penalty} coins** każdemu graczowi (walczącym pomniejszone o zadane obrażenia; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
       ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie kolejnego bossa.`,
       color: outcome.defeated ? 0x53D06B : 0xE85D4A
     }]
@@ -2908,12 +2913,51 @@ function slRevertBossRewards() {
     const wiped = db.prepare(`DELETE FROM sl_activity WHERE type = 'boss_hit'`).run();
     slMetaSet('boss_enabled', '0');
     console.log(
-      `Snakes/Boss: WYŁĄCZONY. Cofnięto ${undone.total} pkt i monet od ${undone.players} ` +
+      `Snakes/Boss: WYŁĄCZONY. Cofnięto ${undone.total} pkt i coins od ${undone.players} ` +
       `${undone.players === 1 ? 'gracza' : 'graczy'} (${undone.cycles} rozliczonych walk), ` +
       `domknięto ${closed.changes} trwającą walkę, usunięto ${wiped.changes} wpisów z dziennika. ` +
       `Włączyć z powrotem można z panelu admina.`
     );
   });
+})();
+
+// ── MIGRACJA (jednorazowa): DOŁADOWANIE „bank się pomylił" — każdy gracz dostaje
+// SL_BANK_ERROR_GRANT coins do portfela. Jednorazowy prezent od admina przy okazji
+// przemianowania waluty na coins, nie element mechaniki.
+//
+// To ŚWIADOMA EMISJA coins, czyli jedyne miejsce w grze, gdzie waluta powstaje poza
+// rzutem kostką (patrz komentarz o pętli przy bossie wyżej). Jest bezpieczna dokładnie
+// dlatego, że leci RAZ: flaga w sl_meta pilnuje, żeby restart serwera nie dosypywał
+// kolejnej setki. Bez niej każdy deploy drukowałby graczom pieniądze.
+//
+// Punktów rankingowych NIE dotyka — coins i total_points to dwie różne wielkości i to
+// rozdzielenie trzyma ekonomię (patrz slCoopContribReward).
+const SL_BANK_ERROR_GRANT = 100;
+(function grantBankErrorCoins() {
+  const FLAG = 'bank_error_grant_100_done';
+  if (slMetaGet(FLAG)) return;
+
+  const granted = transaction(() => {
+    slMetaSet(FLAG, new Date().toISOString());
+    const players = db.prepare('SELECT id FROM players').all();
+    const add = db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?');
+    for (const p of players) {
+      slEnsureState(p.id);
+      add.run(SL_BANK_ERROR_GRANT, p.id);
+      slLogActivity(p.id, 'bonus_grant',
+        `🏦 Bank się pomylił — +${SL_BANK_ERROR_GRANT} coins dla wszystkich`);
+    }
+    return players.length;
+  });
+
+  console.log(`Snakes: doładowano ${SL_BANK_ERROR_GRANT} coins dla ${granted} ${granted === 1 ? 'gracza' : 'graczy'} („bank się pomylił") — leci tylko raz.`);
+
+  // Ogłoszenie idzie DOPIERO po commicie transakcji i nigdy nie blokuje startu serwera:
+  // jak Discord nie odpowie, coins i tak są przyznane, a flaga już ustawiona.
+  if (granted > 0) {
+    slPostDiscord({ content: `🏦 **Bank się pomylił, każdy otrzymuje ${SL_BANK_ERROR_GRANT} coins!**` })
+      .catch(err => console.error('Snakes/Discord [bank_error_grant]:', err.message));
+  }
 })();
 
 // ── MIGRACJA (jednorazowa): edycje, które utknęły w starym statusie 'collecting' (sprzed
@@ -3111,7 +3155,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     // rolls_today liczy się dla dnia zapisanego w last_move_date — inny dzień = licznik
     // efektywnie na zero, bez potrzeby osobnego resetu o północy.
     const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
-    const dailyRolls = slDailyRollsFor(st, today); // limit bazowy + sloty z Double Move
+    const dailyRolls = slDailyRollsFor(st, today); // limit bazowy + sloty z Extra Move
     if (rollsUsedToday >= dailyRolls) return { locked: true, daily_rolls: dailyRolls };
     const moveSeq = rollsUsedToday + 1;
 
@@ -3164,7 +3208,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       return { frozen: true, source: freeze.source_player_id, source_nickname: freezeSourceNick, rolls_used_today: moveSeq };
     }
 
-    // Jedna kostka na turę. (Double Move nie dokłada tu drugiego rzutu — daje osobny,
+    // Jedna kostka na turę. (Extra Move nie dokłada tu drugiego rzutu — daje osobny,
     // dodatkowy ruch już w momencie użycia; patrz POST /api/snakes/shop/use.) Tablica
     // zostaje, bo klątwa „Rozdwojona Kostka" nadal potrafi zmienić wynik rzutu.
     const rolls = [d6()];
@@ -3210,7 +3254,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
     // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
     // Sprawdzane na OSTATECZNYM polu lądowania tej tury (po drabinach/wężach/klątwie,
-    // po obu rzutach przy Double Move) — nie na każdym pośrednim kroku.
+    // po obu rzutach przy Extra Move) — nie na każdym pośrednim kroku.
     const knockback = slApplyKnockback(playerId, abs, board, nickname);
     if (knockback.length) notes.push('knockback');
 
@@ -3253,7 +3297,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`);
     if (curseVariant) {
       slLogActivity(playerId, 'roll',
-        `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} monet)` : ''}`);
+        `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} coins)` : ''}`);
     }
 
     // ── SZTURM NA BOSSA: jeśli trwa event bossowy, KAŻDY rzut zadaje mu obrażenia —
@@ -3296,7 +3340,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   });
 
   if (result.locked) {
-    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00 (albo dołóż sobie ruch Double Move'em).` });
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00 (albo dołóż sobie ruch Extra Move'em).` });
   }
 
   // Plansza u gracza była nieaktualna — rzut się NIE odbył (limit dzienny nietknięty).
@@ -3334,7 +3378,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       const extraFor = k => (k.tile_effect === 'ladder' ? ' 🪜 i wjechał na drabinę!'
         : k.tile_effect === 'snake' ? ' 🐍 i zjechał wężem niżej!'
         : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
-        : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} monet na rzecz ${k.stolen_by}` : '');
+        : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} coins na rzecz ${k.stolen_by}` : '');
       slEmit('knockback', () => result.knockback.map((k, i) => i === 0
         ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.to_tile}**${extraFor(k)}.`
         : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.to_tile}**${extraFor(k)}.`
@@ -3351,7 +3395,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
           embeds: [{
             title: `Edycja #${result.boss_hit.victory.cycle}`,
             url: SNAKES_URL,
-            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** monet.`,
+            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** coins.`,
             color: 0x53D06B
           }]
         }));
@@ -3404,7 +3448,7 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     // naprawdę niczego nie zdradza.
     if (type !== 'shield') {
       slLogActivity(playerId, 'shop_buy',
-        `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} pkt)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
+        `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} coins)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
     }
     // Ten wpis jest publiczny, a przy zakupie tarczy zdradziłby ją okrężną drogą: „ktoś
     // przepłacił", a w feedzie ani śladu zakupu — czyli kupił Shield. Świadomy koszt:
@@ -3412,7 +3456,7 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     // szczelna. Kupujący i tak widzi klątwę u siebie w toaście.
     if (priceCurse && priceCurse.source_player_id && type !== 'shield') {
       slLogActivity(priceCurse.source_player_id, 'shop_use',
-        `🧾 Twoja klątwa ${priceCurseLabel} odpaliła — ${nickname} przepłacił o ${cost - baseCost} pkt!`);
+        `🧾 Twoja klątwa ${priceCurseLabel} odpaliła — ${nickname} przepłacił o ${cost - baseCost} coins!`);
     }
     return { poor: false, cost, cursed: !!priceCurse, extra: cost - baseCost };
   });
@@ -3421,7 +3465,7 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     // Cena z klątwy nie jest zagadką w momencie, w którym zaczyna boleć — mówimy wprost,
     // czemu w sklepie widniało mniej.
     return res.status(400).json({
-      error: `Za mało punktów — koszt ${out.cost}${out.cursed ? ` (klątwa ${priceCurseLabel}: +${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}%)` : ''}, masz ${out.balance}.`,
+      error: `Za mało coins — koszt ${out.cost}${out.cursed ? ` (klątwa ${priceCurseLabel}: +${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}%)` : ''}, masz ${out.balance}.`,
       price_curse: out.cursed ? { label: priceCurseLabel, cost: out.cost, base_cost: baseCost } : null
     });
   }
@@ -3431,7 +3475,7 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
   // (a sama kwota i tak by go zdradziła). Kupujący widzi klątwę u siebie w toaście.
   if (out.cursed && type !== 'shield') {
     slEmit('powerup_curse', () =>
-      `🧾 **${nickname}** wpadł na klątwę **${priceCurseLabel}** — za ${SL_POWERUP_LABELS[type]} zapłacił ${out.cost} zamiast ${baseCost} pkt.`);
+      `🧾 **${nickname}** wpadł na klątwę **${priceCurseLabel}** — za ${SL_POWERUP_LABELS[type]} zapłacił ${out.cost} zamiast ${baseCost} coins.`);
   }
 
   res.json({
@@ -3444,10 +3488,10 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
 });
 
 // POST /api/snakes/shop/use { type, target_player_id? } — użyj power-up z ekwipunku.
-// Freeze/Curse wymagają celu (innego gracza). Double Move i Shield działają na siebie.
+// Freeze/Curse wymagają celu (innego gracza). Extra Move i Shield działają na siebie.
 // Jeśli cel ma aktywny Shield, atak zostaje ZABLOKOWANY: tarcza znika, atak nie działa
 // (power-up atakującego i tak się zużywa — ryzyko wpisane w atak).
-// Freeze, Curse i Shield lądują w sl_effects i czekają na swój moment; Double Move jako
+// Freeze, Curse i Shield lądują w sl_effects i czekają na swój moment; Extra Move jako
 // jedyny działa NATYCHMIAST — dokłada ruch do dzisiejszej puli, do wykonania od razu.
 app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   const playerId = req.player.id;
@@ -3458,16 +3502,16 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     return res.status(400).json({ error: 'Nieznany power-up' });
   }
 
-  // Double Move daje ruch OD RAZU, więc poza oknem gry nie ma czego dać — zamiast
+  // Extra Move daje ruch OD RAZU, więc poza oknem gry nie ma czego dać — zamiast
   // spalić power-up na ruch, którego i tak nie da się wykonać, odmawiamy użycia.
   // (Freeze/Curse/Shield celowo bez tej bramki: one czekają na swój moment.)
   if (type === 'double_move') {
     if (isWeekendStr(today)) {
-      return res.status(400).json({ error: 'W weekend nie gramy — zostaw Double Move na poniedziałek.', is_weekend: true });
+      return res.status(400).json({ error: 'W weekend nie gramy — zostaw Extra Move na poniedziałek.', is_weekend: true });
     }
     if (!slOfficeOpenAt()) {
       return res.status(400).json({
-        error: `Double Move daje ruch od ręki, a biuro jest zamknięte — użyj go między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.`,
+        error: `Extra Move daje ruch od ręki, a biuro jest zamknięte — użyj go między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.`,
         office_closed: true
       });
     }
@@ -3497,7 +3541,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     // Shield można trzymać tylko jeden naraz — drugi byłby wyrzuceniem punktów.
     if (type === 'shield' && slHasShield(playerId)) return { already: true };
 
-    // Double Move ma dzienny sufit (SL_MAX_EXTRA_ROLLS) — sprawdzamy go PRZED zużyciem
+    // Extra Move ma dzienny sufit (SL_MAX_EXTRA_ROLLS) — sprawdzamy go PRZED zużyciem
     // sztuki, żeby odbity użytkownik nie stracił przedmiotu za nic.
     const stBefore = type === 'double_move' ? slEnsureState(playerId) : null;
     const extraToday = stBefore && stBefore.extra_rolls_date === today ? Number(stBefore.extra_rolls || 0) : 0;
@@ -3507,7 +3551,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
 
     slAddPowerup(playerId, type, -1);
 
-    // DOUBLE MOVE: nie czeka na następną turę — od razu dokłada JEDEN ruch ponad
+    // EXTRA MOVE: nie czeka na następną turę — od razu dokłada JEDEN ruch ponad
     // dzienny limit, do wykonania natychmiast (przycisk „Rzuć" odblokowuje się w tej
     // samej odpowiedzi). Dodatkowe sloty żyją tylko dziś: extra_rolls_date pilnuje, żeby
     // niewykorzystane przepadły o północy razem z resztą limitu.
@@ -3552,7 +3596,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   }
   if (out.capped) {
     return res.status(400).json({
-      error: `Dziś wykorzystałeś już ${out.max_extra} dodatkowe ruchy z Double Move — dzienny limit to ${out.daily_max} rzutów. Sztuka została w ekwipunku, użyjesz jej jutro.`
+      error: `Dziś wykorzystałeś już ${out.max_extra} dodatkowe ruchy z Extra Move — dzienny limit to ${out.daily_max} rzutów. Sztuka została w ekwipunku, użyjesz jej jutro.`
     });
   }
 
@@ -3587,14 +3631,14 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   } else if (type === 'curse') {
     slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
   } else if (out.extra_roll) {
-    slEmit('double_move', () => `⏩ **${nickname}** użył Double Move — dołożył sobie ruch ponad dzienny limit i rzuca od razu.`);
+    slEmit('double_move', () => `⏩ **${nickname}** użył Extra Move — dołożył sobie ruch ponad dzienny limit i rzuca od razu.`);
   }
 
   res.json({
     success: true,
     applied_to: targetId,
     blocked: !!out.blocked,
-    extra_roll: !!out.extra_roll, // Double Move: ruch dołożony do dzisiejszej puli, do wykonania od ręki
+    extra_roll: !!out.extra_roll, // Extra Move: ruch dołożony do dzisiejszej puli, do wykonania od ręki
     curse_variant: out.variant, // wylosowany wariant (patrz SL_CURSE_LABELS) — efekt ujawnia się dopiero, gdy odpali
     state: slBuildState(playerId)
   });
@@ -3619,7 +3663,7 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
   const amount = parseInt(req.body.amount, 10);
 
   if (!Number.isInteger(amount) || amount <= 0) {
-    return res.status(400).json({ error: 'Podaj dodatnią liczbę monet.' });
+    return res.status(400).json({ error: 'Podaj dodatnią liczbę coins.' });
   }
 
   const out = transaction(() => {
@@ -3634,7 +3678,7 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
     db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
     db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'coins')")
       .run(coop.cycle, playerId, amount);
-    slLogActivity(playerId, 'boss_hit', slBossHitEntry(amount, 'monety'));
+    slLogActivity(playerId, 'boss_hit', slBossHitEntry(amount, 'coins'));
 
     let victory = null;
     if (newHp <= 0) {
@@ -3651,7 +3695,7 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
     return res.status(400).json({ error: 'Żaden boss aktualnie nie walczy.' });
   }
   if (out.poor) {
-    return res.status(400).json({ error: `Za mało monet — chcesz wpłacić ${amount}, masz ${out.balance}.` });
+    return res.status(400).json({ error: `Za mało coins — chcesz wpłacić ${amount}, masz ${out.balance}.` });
   }
 
   if (out.victory) {
@@ -3662,7 +3706,7 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
         title: `Edycja #${v.cycle}`,
         url: SNAKES_URL,
         description: `Ostateczny cios zadał **${nickname}**. Wpłacający (${v.contributors}) dzielą ` +
-          `**${v.points_awarded} pkt** i odzyskują **${v.coins_refunded}** z wpłaconych **${v.coins_paid}** monet.`,
+          `**${v.points_awarded} pkt** i odzyskują **${v.coins_refunded}** z wpłaconych **${v.coins_paid}** coins.`,
         color: 0x53D06B
       }]
     }));
@@ -3686,6 +3730,9 @@ app.get('/api/snakes/admin/settings', (req, res) => {
     summary_hour: SL_SUMMARY_HOUR,
     board: { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS },
     powerup_costs: SL_POWERUP_COSTS,
+    // Panel pokazuje koszty pod nazwami, które widzi gracz — inaczej admin czytałby
+    // surowy klucz `double_move`, gdy reszta gry mówi o nim „Extra Move".
+    powerup_labels: SL_POWERUP_LABELS,
     boss_enabled: slBossEnabled(),
     // null = boss wyłączony; panel czyta to jako „nie ma czym sterować" (patrz renderInfo).
     coop: slBossEnabled() ? slCoopPayload(null) : null
@@ -3694,7 +3741,7 @@ app.get('/api/snakes/admin/settings', (req, res) => {
 
 // POST /api/snakes/admin/reset { password } — twardy reset CAŁEJ gry Snakes do stanu
 // zerowego: każdy gracz wraca na pole 0 z saldem/punktami 0, ekwipunkiem power-upów
-// wyczyszczonym i bez oczekujących efektów (Freeze/Curse/Shield/Double Move). Historia
+// wyczyszczonym i bez oczekujących efektów (Freeze/Curse/Shield/Extra Move). Historia
 // ruchów i dziennik aktywności są kasowane, a pula co-op wraca do świeżej edycji #1
 // z bazowym progiem/czasem (patrz slCurrentCoop). Gracze i ich AWATARY
 // (pionki) NIE są ruszane — konta w Snakes zostają, tylko ich postęp w grze wraca do zera.
@@ -3865,9 +3912,9 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
       title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
       url: SNAKES_URL,
       description: (out.defeated
-        ? `Wpłacono **${out.coins_paid}** monet, wróciło **${out.coins_refunded}**, przyznano **${out.points_awarded}** pkt.\n\n` +
-          out.payouts.filter(p => p.coins > 0).map(p => `• **${p.nickname}** — wpłata ${p.coins} → **+${p.points}** pkt, zwrot **${p.refund}** monet`).join('\n')
-        : `Nagrody nie ma, wpłacona kasa przepada. Boss zaatakował — zabrał do **${out.timeout_penalty} monet** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).`
+        ? `Wpłacono **${out.coins_paid}** coins, wróciło **${out.coins_refunded}**, przyznano **${out.points_awarded}** pkt.\n\n` +
+          out.payouts.filter(p => p.coins > 0).map(p => `• **${p.nickname}** — wpłata ${p.coins} → **+${p.points}** pkt, zwrot **${p.refund}** coins`).join('\n')
+        : `Nagrody nie ma, wpłacona kasa przepada. Boss zaatakował — zabrał do **${out.timeout_penalty} coins** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).`
       ),
       color: 0xC8F135
     }]
@@ -4052,7 +4099,7 @@ app.post('/api/snakes/admin/coop/toggle', (req, res) => {
       embeds: [{
         title: `Edycja #${out.cycle} — ${out.boss_name}`,
         url: SNAKES_URL,
-        description: 'Każdy rzut kostką go rani, a za monety można dobić go ręcznym atakiem.',
+        description: 'Każdy rzut kostką rani go za darmo, a wpłacone coins ranią go 1:1.',
         color: 0xF5C842
       }]
     }));
@@ -4419,7 +4466,7 @@ function slRollbackDay(date) {
         AND a.player_id NOT IN (SELECT player_id FROM sl_moves WHERE move_date = ?)
     `).all(date, date).map(r => r.nickname);
 
-    // Gracze bez ruchów, ale z licznikiem/slotami z tego dnia (np. kupili Double Move
+    // Gracze bez ruchów, ale z licznikiem/slotami z tego dnia (np. kupili Extra Move
     // i nie zdążyli go zużyć) — też wracają do czystego limitu.
     db.prepare(`UPDATE sl_state SET rolls_today = 0, last_move_date = NULL, last_move_at = NULL WHERE last_move_date = ?`).run(date);
     db.prepare(`UPDATE sl_state SET extra_rolls = 0, extra_rolls_date = NULL WHERE extra_rolls_date = ?`).run(date);
@@ -4468,7 +4515,7 @@ app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
 
   const bad = (v, min, max, label) =>
     v != null && (!Number.isInteger(v) || v < min || (max != null && v > max)) ? label : null;
-  const err = bad(balance, 0, null, 'Saldo musi być liczbą całkowitą ≥ 0.')
+  const err = bad(balance, 0, null, 'Coins muszą być liczbą całkowitą ≥ 0.')
     || bad(totalPoints, 0, null, 'Punkty muszą być liczbą całkowitą ≥ 0.')
     || bad(tile, 0, SL_BOARD_SIZE - 1, `Pole musi być z zakresu 0–${SL_BOARD_SIZE - 1}.`)
     || bad(laps, 0, null, 'Okrążenia muszą być liczbą całkowitą ≥ 0.')
