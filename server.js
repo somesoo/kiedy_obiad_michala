@@ -1325,9 +1325,15 @@ function slCurseAdjustRoll(variant, roll) {
 // "Próg" to dziś WPROST punkty życia bossa (mnożnik HP wynosi 1, patrz niżej) — jedna
 // liczba, którą admin przesuwa z panelu, zamiast dwóch mnożących się przez siebie.
 const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 3500;
-// Ile PUNKTÓW RANKINGOWYCH daje jedna wpłacona moneta, gdy boss padnie. Poniżej 1, bo
-// wpłata ma boleć: oddajesz walutę sklepu, dostajesz połowę wartości w rankingu.
-const SL_COOP_POINTS_PER_COIN = Number(process.env.SNAKES_COOP_POINTS_PER_COIN || 0.5);
+// Ile PUNKTÓW RANKINGOWYCH daje jeden wpłacony coin, gdy boss padnie. Poniżej 1, bo
+// wpłata ma boleć — ale niewiele poniżej, i to jest wyliczone, nie wzięte z sufitu:
+// jeden rzut kostką daje średnio ~17 pkt i tyle samo coins, więc Extra Move za 40 coins
+// wychodzi ~1,35 coina za punkt. Przy 0,5 wpłata ponad zwrot kosztowała 2 coiny za punkt
+// i była BEZWZGLĘDNIE GORSZA od sklepu — nikomu nie opłacało się wpłacać więcej niż
+// zwrot, więc optymalna gra całej ekipy dawała ~83% progu i bossa nie dało się ubić.
+// Przy 0,7 marginalna wpłata to ~1,43 coina za punkt, czyli tuż obok Extra Move — a że
+// Extra Move ma dzienny sufit 2 sztuk, po jego wyczerpaniu boss jest najlepszym sinkiem.
+const SL_COOP_POINTS_PER_COIN = Number(process.env.SNAKES_COOP_POINTS_PER_COIN || 0.7);
 // Zwrot monet dla każdego, kto wpłacił — ale NIGDY więcej, niż sam włożył (patrz
 // slFinishBossEvent). Bez tego ograniczenia wpłata 1 monety oddawałaby 50 i mielibyśmy
 // nową pętlę: emisja monet musi być zawsze mniejsza od tego, co spłonęło.
@@ -1419,7 +1425,8 @@ const SL_COOP_RELIEF_FACTOR = Number(process.env.SNAKES_COOP_RELIEF_FACTOR || 0.
 //               zwykłe granie już "walczy", ale rzutów jest najwyżej 5 na dobę,
 //   • 'coins' — wpłata z portfela: 1 MONETA = 1 OBRAŻENIE, dowolna kwota, bez limitu
 //               (limitem jest saldo, a saldo napełnia się wyłącznie grą).
-// Nagroda za pokonanie liczy się WYŁĄCZNIE od wpłaconych monet: połowa wpłaty wraca jako
+// Nagroda za pokonanie liczy się WYŁĄCZNIE od wpłaconych monet: SL_COOP_POINTS_PER_COIN
+// × wpłata wraca jako
 // punkty rankingowe + zwrot do SL_COOP_CONTRIB_REFUND monet (nie więcej niż wpłata).
 // Obrażenia z kości nie płacą nic — są darmowe, więc nie mają czego zwracać. Dzięki temu
 // monety mogą z gry tylko WYPŁYWAĆ, a rosną jedynie punkty, których nie da się wydać
@@ -2499,9 +2506,10 @@ function slCoopPayload(meId) {
     previous_result: previousResult,
     timeout_penalty: SL_BOSS_TIMEOUT_PENALTY,
     // Realna kara DLA MNIE, gdyby event skończył się porażką TERAZ — pomniejszona o to,
-    // ile obrażeń już zadałem w tym cyklu (patrz slFinishBossEvent). Kto nie walczył,
-    // widzi tu pełne timeout_penalty.
-    my_timeout_penalty: Math.max(0, SL_BOSS_TIMEOUT_PENALTY - mine),
+    // ile COINS już wpłaciłem w tym cyklu (patrz slFinishBossEvent). Musi liczyć się tak
+    // samo jak tam, z mineCoins a nie z mine — inaczej UI obiecywałoby zniżkę za rzuty,
+    // której rozliczenie by nie dało. Kto nie wpłacił, widzi tu pełne timeout_penalty.
+    my_timeout_penalty: Math.max(0, SL_BOSS_TIMEOUT_PENALTY - mineCoins),
     // Konkretne liczby na "co będzie, jak wygracie/przegracie" — żeby UI mógł pokazać
     // realną karę/nagrodę zamiast ogólnikowego opisu (patrz slCoopNextDifficulty).
     next_on_win: slCoopNextDifficulty(coop, true),
@@ -2524,7 +2532,7 @@ function slCoopPayload(meId) {
             : null),
       time_limit_days: Number(coop.time_limit_days),
       dice_damage_mult: SL_BOSS_DICE_DAMAGE_MULT,
-      // Kurs wpłaty: 1 moneta = 1 obrażenie, a po zabiciu połowa wpłaty wraca w punktach
+      // Kurs wpłaty: 1 moneta = 1 obrażenie, a po zabiciu część wpłaty wraca w punktach
       // plus zwrot monet (nie więcej, niż się włożyło).
       points_per_coin: SL_COOP_POINTS_PER_COIN,
       contrib_refund: SL_COOP_CONTRIB_REFUND
@@ -2557,7 +2565,7 @@ function resolveCoopBossEvent(coop) {
 }
 
 // Co dostaje gracz, gdy boss padnie — liczone WYŁĄCZNIE z jego wpłaty w monetach.
-// Punkty: połowa wpłaty (SL_COOP_POINTS_PER_COIN) — trafiają tylko do rankingu, nie da się
+// Punkty: SL_COOP_POINTS_PER_COIN × wpłata — trafiają tylko do rankingu, nie da się
 // ich wydać w sklepie, więc nie mogą napędzić kolejnej wpłaty.
 // Monety: zwrot części kosztu, ale NIGDY więcej, niż gracz sam włożył. To ograniczenie
 // trzyma całą ekonomię: suma zwróconych monet jest zawsze ≤ suma wpłaconych, więc nie da
@@ -2601,18 +2609,19 @@ function slCoopNextDifficulty(coop, defeated) {
 // po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty; nowy boss
 // budzi się natychmiast, patrz slCoopInsertCycle). Wołane automatycznie, gdy HP bossa
 // spadnie do zera (rzut albo wpłata), albo gdy minie termin (scheduler niżej),
-// a boss wciąż żyje. Pokonanie bossa płaci TYLKO tym, którzy wpłacili monety: każdy
-// dostaje połowę swojej wpłaty w punktach rankingowych i zwrot monet ograniczony do
-// wysokości własnej wpłaty (patrz slCoopContribReward). Kto walczył samymi rzutami, nie
-// dostaje nic ponad punkty, które rzuty i tak dały — bo nic nie zaryzykował.
+// a boss wciąż żyje. Pokonanie bossa płaci TYLKO tym, którzy wpłacili coins: każdy
+// dostaje SL_COOP_POINTS_PER_COIN × swoją wpłatę w punktach rankingowych i zwrot coins
+// ograniczony do wysokości własnej wpłaty (patrz slCoopContribReward). Kto walczył samymi
+// rzutami, nie dostaje nic ponad punkty, które rzuty i tak dały — bo nic nie zaryzykował.
 // Punkty i monety dopisujemy OSOBNO, bo to dwie różne wielkości (dawniej ta sama liczba
 // szła do obu kolumn i to był rdzeń pętli).
 // Nie pokonanie na czas = PRZEGRANA: nagrody NIE MA, wpłacone monety przepadają,
 // a boss "atakuje" i zabiera do
 // SL_BOSS_TIMEOUT_PENALTY monet KAŻDEMU graczowi (nie tylko tym, którzy walczyli) —
-// realna stawka za bierność. Ci, którzy walczyli, mają jednak karę pomniejszoną o to,
-// ile obrażeń zadali w TYM cyklu (zadał obrażenia warte 30 → traci 20; zadał więcej niż
-// pełna kara → nic nie traci) — jedyna ulga za udział w walce, gdy się nie uda.
+// realna stawka za bierność. Ci, którzy WPŁACILI, mają jednak karę pomniejszoną o wysokość
+// własnej wpłaty (wpłacił 30 → traci 20; wpłacił 50 lub więcej → nic nie traci) — jedyna
+// ulga, gdy się nie uda. Liczy się sama wpłata, nie obrażenia: rzuty są darmowe, więc
+// gdyby dawały zniżkę, kara omijałaby każdego, kto tylko klika kostką.
 function slFinishBossEvent(coop, defeated) {
   const attackers = slCoopAttackers(coop.cycle);
   const payouts = attackers.map(c => {
@@ -2629,11 +2638,17 @@ function slFinishBossEvent(coop, defeated) {
 
   let playersPenalized = 0;
   if (!defeated) {
-    const damageByPlayer = new Map(attackers.map(c => [c.player_id, c.amount]));
+    // Zniżka od kary liczy się WYŁĄCZNIE z wpłaconych coins (c.coins), nigdy z sumy
+    // obrażeń (c.amount). Wcześniej liczyła się z amount, czyli razem z trafieniami
+    // z kości — a te są darmowe i przez cykl uzbierają grubo ponad pełną karę, więc
+    // KAŻDY, kto w ogóle rzucał, był z kary zwolniony, nie ryzykując ani jednego coina.
+    // Kara nie karała więc nikogo poza tymi, którzy i tak nie grali. Teraz zniżkę kupuje
+    // się wyłącznie wpłatą — tym samym, co realnie decyduje o życiu bossa.
+    const paidByPlayer = new Map(attackers.map(c => [c.player_id, c.coins]));
     const allPlayers = db.prepare('SELECT player_id, balance FROM sl_state').all();
     const upd = db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?');
     for (const p of allPlayers) {
-      const discount = damageByPlayer.get(p.player_id) || 0;
+      const discount = paidByPlayer.get(p.player_id) || 0;
       const penalty = Math.max(0, SL_BOSS_TIMEOUT_PENALTY - discount);
       const taken = Math.min(penalty, Math.max(0, Number(p.balance)));
       if (taken > 0) {
@@ -2832,7 +2847,7 @@ function slEmitBossTimeout(outcome) {
       url: SNAKES_URL,
       description: (outcome.defeated
         ? `Wpłacający (${outcome.contributors}) dzielą **${outcome.points_awarded} pkt** i odzyskują **${outcome.coins_refunded}** z wpłaconych **${outcome.coins_paid}** coins.`
-        : `Nie zdążyliście dobić bossa na czas. Nagrody nie ma. Boss zabrał do **${outcome.timeout_penalty} coins** każdemu graczowi (walczącym pomniejszone o zadane obrażenia; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
+        : `Nie zdążyliście dobić bossa na czas. Nagrody nie ma. Boss zabrał do **${outcome.timeout_penalty} coins** każdemu graczowi (wpłacającym pomniejszone o własną wpłatę; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
       ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie kolejnego bossa.`,
       color: outcome.defeated ? 0x53D06B : 0xE85D4A
     }]

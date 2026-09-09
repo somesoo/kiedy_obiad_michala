@@ -1011,7 +1011,7 @@
             👹 <strong>${esc(b.name)}</strong> — HP ${b.hp}/${b.max_hp} (${b.percent}%)
             ${b.defeated ? ' · <strong style="color:var(--accent)">POKONANY</strong>' : ' · <strong>WALKA TRWA</strong>'}
             ${b.deadline_at ? `· termin: ${fmtDate(b.deadline_at)}` : ''}<br>
-            Obrażenia od kości: oczka × ${b.dice_damage_mult} · wpłata: 1 coin = 1 obrażenie · po zabiciu: połowa wpłaty w pkt + zwrot do ${b.contrib_refund} coins
+            Obrażenia od kości: oczka × ${b.dice_damage_mult} · wpłata: 1 coin = 1 obrażenie · po zabiciu: wpłata × ${b.points_per_coin} w pkt + zwrot do ${b.contrib_refund} coins
           </div>
           ${renderBossParticipants(c.attackers)}`;
         const deadlineInput = document.getElementById('coop-deadline-input');
@@ -1068,7 +1068,7 @@
         const rewardTxt = res.defeated
           ? `wpłacono ${res.coins_paid} coins, wróciło ${res.coins_refunded}, przyznano ${res.points_awarded} pkt (${res.contributors} wpłacających).`
           : `nagrody nie ma, kasa przepadła.`;
-        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} coins każdemu, walczącym pomniejszone o zadane obrażenia (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle} rusza od razu: ${res.next_cycle.time_limit_days} dni na pokonanie kolejnego bossa.`);
+        showToast(`🏆 Wydarzenie #${res.cycle} zamknięte — ${rewardTxt}${res.timeout_penalty ? ` Boss zaatakował — zabrał do ${res.timeout_penalty} coins każdemu, wpłacającym pomniejszone o własną wpłatę (${res.players_attacked}).` : ''} Edycja #${res.next_cycle.cycle} rusza od razu: ${res.next_cycle.time_limit_days} dni na pokonanie kolejnego bossa.`);
         await loadSettings();
       } catch (e) {
         showToast(e.message);

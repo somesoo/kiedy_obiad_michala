@@ -944,7 +944,7 @@ function renderCoop(g) {
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>👹 Każdy rzut kostką rani bossa za darmo, a wpłata to <strong>1 coin = 1 obrażenie</strong> (wpłacasz ile chcesz). Pokonacie go na czas — każdy, kto wpłacił, dostaje <strong>połowę wpłaty w punktach</strong> i odzyskuje do ${b.contrib_refund} coins (nie więcej, niż włożył). Nie zdążycie — wpłaty przepadają, a boss zabierze do ${c.timeout_penalty} coins każdemu (walczącym mniej — Ty stracisz ${c.my_timeout_penalty}). Tak czy siak od razu staje kolejny.${c.my_coins ? ` Wpłaciłeś dziś w tej walce: ${c.my_coins}.` : ''}</span>
+      <span>🏆 Pokonacie bossa — <strong>nagroda</strong>. Nie zdążycie — <strong>kara</strong>.${c.my_coins ? ` Wpłaciłeś w tej walce: <strong>${c.my_coins}</strong> coins.` : ''}</span>
       ${prevTxt}
     </div>
     ${slCoopChipsHtml(c)}`;
