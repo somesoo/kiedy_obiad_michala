@@ -600,7 +600,7 @@
     let histPlayers = [];
     // Te same ikony co w dzienniku gracza (public/snakes.js) — podgląd ma wyglądać
     // dokładnie tak, jak to, co widzi biuro.
-    const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦' };
+    const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆' };
 
     function histFilters() {
       return {
@@ -981,6 +981,22 @@
       </div>`;
     }
 
+    // Rozliczenie ZAKOŃCZONEJ edycji — kto ile realnie dostał. Liczone po stronie serwera
+    // z zachowanych wpłat (sl_coop_contributions przeżywa zamknięcie cyklu), tymi samymi
+    // funkcjami co samo rozliczenie, więc działa też WSTECZ: dla walk zamkniętych zanim
+    // rozliczenie zaczęło zapisywać cokolwiek do dziennika.
+    function renderPrevPayouts(prev) {
+      if (!prev || !prev.defeated || !prev.payouts || !prev.payouts.length) return '';
+      const rows = prev.payouts
+        .map(p => `${esc(p.nickname)} — wpłata <strong>${p.coins}</strong> → +${p.points} pkt, zwrot ${p.refund} coins`)
+        .join('<br>');
+      return `<div class="adm-note" style="margin-top:8px">
+        <strong>Rozliczenie edycji #${prev.cycle}</strong> — wpłacono ${prev.coins_paid} coins,
+        wróciło ${prev.coins_refunded}, przyznano ${prev.points_awarded} pkt (${prev.contributors} wpłacających):<br>
+        <span class="pl-mini" style="display:block;margin-top:4px">${rows}</span>
+      </div>`;
+    }
+
     function renderInfo() {
       const c = cfg.coop;
       const bossOn = !!c;
@@ -1001,7 +1017,8 @@
         `Nagroda: wpłata × ${c.boss ? c.boss.points_per_coin : '–'} w punktach + zwrot do ${c.boss ? c.boss.contrib_refund : '–'} coins (nie więcej niż wpłata)<br>` +
         `Start edycji: ${fmtDate(c.started_at)} · limit na pokonanie bossa: <strong>${c.time_limit_days} dni robocze</strong><br>` +
         `Suwak trudności (dla nowej edycji od zera): <strong>${c.default_threshold}</strong>` +
-        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? 'pokonany' : `nie zdążono — boss zabrał do ${c.previous_result.timeout_penalty} coins`}` : '');
+        (c.previous_result ? `<br>Poprzednia edycja #${c.previous_result.cycle} (${esc(c.previous_result.boss_name)}): ${c.previous_result.defeated ? 'pokonany' : `nie zdążono — boss zabrał do ${c.previous_result.timeout_penalty} coins`}` : '') +
+        renderPrevPayouts(c.previous_result);
 
       const bossEl = document.getElementById('boss-info');
       if (c.boss) {

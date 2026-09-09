@@ -325,7 +325,7 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 });
 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆' };
 
 async function loadActivity(date) {
   try {
@@ -937,10 +937,17 @@ function renderCoop(g) {
     `<input type="number" id="coop-amount" min="1" step="1" max="${g.me.balance}" placeholder="coins" />
      <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Wpłać</button>`;
 
-  const prevTxt = c.previous_result
-    ? `<span class="coop-prev">${c.previous_result.defeated
-        ? `🏆 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} pokonany`
-        : `💥 #${c.previous_result.cycle} ${esc(c.previous_result.boss_name)} zaatakował, do -${c.previous_result.timeout_penalty} coins`}</span>`
+  // Po wygranej dopisujemy MOJĄ wypłatę. Wcześniej karta mówiła tylko „pokonany", więc
+  // nagroda pojawiała się na koncie bez słowa wyjaśnienia — to była jedyna zmiana salda
+  // i punktów, o której gracz nie dostawał żadnej informacji.
+  const pr = c.previous_result;
+  const myPrevTxt = pr && pr.defeated && pr.my_coins > 0
+    ? ` — dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem za wpłatę ${pr.my_coins}`
+    : '';
+  const prevTxt = pr
+    ? `<span class="coop-prev">${pr.defeated
+        ? `🏆 #${pr.cycle} ${esc(pr.boss_name)} pokonany${myPrevTxt}`
+        : `💥 #${pr.cycle} ${esc(pr.boss_name)} zaatakował, do -${pr.timeout_penalty} coins`}</span>`
     : '';
 
   el.innerHTML = `

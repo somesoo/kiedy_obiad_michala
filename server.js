@@ -1730,7 +1730,8 @@ const SL_ACTIVITY_TYPES = {
   knockback: 'Wypychanie z pola',
   boss_hit:  'Walka z bossem',
   avatar:    'Zmiana zdjęcia profilowego',
-  bonus_grant: 'Doładowania coins od admina'
+  bonus_grant: 'Doładowania coins od admina',
+  boss_reward: 'Rozliczenie walki z bossem'
 };
 
 // Widoczność typów — ten sam wzorzec co przełączniki Discorda (patrz slEventsConfig):
@@ -2494,6 +2495,25 @@ function slCoopPayload(meId) {
         defeated: !!prev.boss_defeated_at,
         timeout_penalty: prev.boss_defeated_at ? 0 : SL_BOSS_TIMEOUT_PENALTY
       };
+      // MOJA wypłata z tamtej walki. Odtwarzamy ją z zachowanych wpłat (sl_coop_contributions
+      // przeżywa zamknięcie cyklu) tymi samymi funkcjami, którymi liczyło ją rozliczenie —
+      // slCoopAttackers + slCoopContribReward — więc liczby nie mogą się rozminąć z tym,
+      // co realnie trafiło na konto. Bez tego karta bossa umiała napisać wyłącznie
+      // „pokonany", a gracz nie miał skąd wiedzieć, ile dostał.
+      if (prev.boss_defeated_at) {
+        const prevPayouts = slCoopAttackers(prev.cycle)
+          .filter(c => c.coins > 0)
+          .map(c => ({ ...c, ...slCoopContribReward(c.coins) }));
+        const myPrev = meId ? prevPayouts.find(c => c.player_id === meId) : null;
+        previousResult.payouts = prevPayouts;
+        previousResult.contributors = prevPayouts.length;
+        previousResult.coins_paid = prevPayouts.reduce((a, p) => a + p.coins, 0);
+        previousResult.points_awarded = prevPayouts.reduce((a, p) => a + p.points, 0);
+        previousResult.coins_refunded = prevPayouts.reduce((a, p) => a + p.refund, 0);
+        previousResult.my_coins = myPrev ? myPrev.coins : 0;
+        previousResult.my_points = myPrev ? myPrev.points : 0;
+        previousResult.my_refund = myPrev ? myPrev.refund : 0;
+      }
     }
   }
 
@@ -2641,6 +2661,15 @@ function slFinishBossEvent(coop, defeated) {
   for (const p of payouts) {
     if (p.points > 0) payPoints.run(p.points, p.player_id);
     if (p.refund > 0) payCoins.run(p.refund, p.player_id);
+    // KAŻDA wypłata zostawia ślad w dzienniku. Wcześniej rozliczenie robiło wyłącznie
+    // UPDATE na sl_state — punkty i coins pojawiały się na koncie bez śladu i gracz nie
+    // miał ŻADNEGO sposobu dowiedzieć się, ile dostał (Discord podawał tylko sumy
+    // zbiorcze, a previous_result nie niósł liczb). Wpis ma player_id, więc dziennik
+    // podświetli każdemu jego własną wypłatę.
+    if (p.points > 0 || p.refund > 0) {
+      slLogActivity(p.player_id, 'boss_reward',
+        `🏆 ${coop.boss_name} pokonany — za wpłatę ${p.coins} coins: +${p.points} pkt i zwrot ${p.refund} coins`);
+    }
   }
 
   let playersPenalized = 0;
@@ -2661,6 +2690,11 @@ function slFinishBossEvent(coop, defeated) {
       if (taken > 0) {
         upd.run(taken, p.player_id);
         playersPenalized++;
+        // Zabranie coins też musi zostawić ślad — z tego samego powodu, co wypłata wyżej.
+        // Logujemy `taken`, czyli kwotę FAKTYCZNIE zabraną (przyciętą do salda), a nie
+        // nominalną karę: gracz ma w dzienniku zobaczyć to, co realnie zniknęło z konta.
+        slLogActivity(p.player_id, 'boss_reward',
+          `💥 ${coop.boss_name} zaatakował — zabrał ${taken} coins`);
       }
     }
   }
@@ -2844,6 +2878,19 @@ function slResolveBossTimeout(cycle) {
     if (Date.now() < Date.parse(fresh.boss_deadline_at.replace(' ', 'T') + 'Z')) return null;
     return slFinishBossEvent(fresh, Number(fresh.boss_hp) <= 0);
   });
+}
+
+// Rozpiska „kto ile dostał" na Discorda. JEDNO miejsce, bo są TRZY ścieżki zamknięcia walki
+// (zabicie rzutem, zabicie wpłatą, ręczne zamknięcie z panelu) i wcześniej rozpiskę miała
+// tylko ostatnia z nich — dwie pozostałe podawały same sumy zbiorcze, więc przy bossie
+// padającym samoistnie nikt nie wiedział, komu co przyszło. Wspólny helper sprawia, że nie
+// da się ich znów rozjechać.
+function slBossPayoutLines(outcome) {
+  const paid = (outcome.payouts || []).filter(p => p.coins > 0);
+  if (!paid.length) return '';
+  return '\n\n' + paid
+    .map(p => `• **${p.nickname}** — wpłata ${p.coins} → **+${p.points}** pkt, zwrot **${p.refund}** coins`)
+    .join('\n');
 }
 
 function slEmitBossTimeout(outcome) {
@@ -3417,7 +3464,8 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
           embeds: [{
             title: `Edycja #${result.boss_hit.victory.cycle}`,
             url: SNAKES_URL,
-            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** coins.`,
+            description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** coins.`
+              + slBossPayoutLines(result.boss_hit.victory),
             color: 0x53D06B
           }]
         }));
@@ -3728,7 +3776,8 @@ app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
         title: `Edycja #${v.cycle}`,
         url: SNAKES_URL,
         description: `Ostateczny cios zadał **${nickname}**. Wpłacający (${v.contributors}) dzielą ` +
-          `**${v.points_awarded} pkt** i odzyskują **${v.coins_refunded}** z wpłaconych **${v.coins_paid}** coins.`,
+          `**${v.points_awarded} pkt** i odzyskują **${v.coins_refunded}** z wpłaconych **${v.coins_paid}** coins.`
+          + slBossPayoutLines(v),
         color: 0x53D06B
       }]
     }));
@@ -3934,8 +3983,8 @@ app.post('/api/snakes/admin/coop/complete', (req, res) => {
       title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
       url: SNAKES_URL,
       description: (out.defeated
-        ? `Wpłacono **${out.coins_paid}** coins, wróciło **${out.coins_refunded}**, przyznano **${out.points_awarded}** pkt.\n\n` +
-          out.payouts.filter(p => p.coins > 0).map(p => `• **${p.nickname}** — wpłata ${p.coins} → **+${p.points}** pkt, zwrot **${p.refund}** coins`).join('\n')
+        ? `Wpłacono **${out.coins_paid}** coins, wróciło **${out.coins_refunded}**, przyznano **${out.points_awarded}** pkt.`
+          + slBossPayoutLines(out)
         : `Nagrody nie ma, wpłacona kasa przepada. Boss zaatakował — zabrał do **${out.timeout_penalty} coins** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).`
       ),
       color: 0xC8F135
