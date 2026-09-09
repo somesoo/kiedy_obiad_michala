@@ -428,10 +428,21 @@
   display: flex;
   align-items: baseline;
   gap: 5px;
-  padding: 3px 0;
+  /* Pasek po lewej mają WSZYSTKIE wpisy, tylko przezroczysty — inaczej wiersz „to ja"
+     przeskakiwałby w bok o jego szerokość względem sąsiadów. Kolor dostaje wyłącznie .is-me. */
+  padding: 3px 0 3px 6px;
+  border-left: 2px solid transparent;
+  border-radius: 0 4px 4px 0;
   font-size: 11px;
   line-height: 1.4;
 }
+/* Wpisy dotyczące MOJEGO pionka — ten sam przepis co .lb-row.is-me w rankingu
+   (rgba to --accent #C8F135), żeby „to ja" wyglądało wszędzie tak samo. */
+.activity-entry.is-me {
+  border-left-color: var(--accent);
+  background: rgba(200, 241, 53, 0.07);
+}
+.activity-entry.is-me .activity-body strong { color: var(--accent); }
 .activity-time { color: var(--text-muted); font-size: 9px; flex: 0 0 auto; }
 .activity-icon { flex: 0 0 auto; }
 .activity-body { min-width: 0; word-break: break-word; }

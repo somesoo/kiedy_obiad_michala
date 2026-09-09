@@ -325,7 +325,7 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 });
 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦' };
 
 async function loadActivity(date) {
   try {
@@ -371,8 +371,20 @@ function renderActivity(data) {
     const time = new Date(e.created_at.replace(' ', 'T') + 'Z')
       .toLocaleTimeString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit' });
     const icon = ACTIVITY_ICONS[e.type] || '•';
+    // Wyróżniamy wpisy DOTYCZĄCE MOJEGO PIONKA — po player_id wpisu, nigdy po treści.
+    // To nie jest wybór estetyczny, tylko warunek bezpieczeństwa: serwer celowo zapisuje
+    // wpis obu stronom wszędzie tam, gdzie obie strony mają wiedzieć (klątwa rzucona na
+    // mnie, tarcza, Freeze W MOMENCIE ODPALENIA), a Freeze przy rzucaniu NIE dostaje wpisu
+    // dla ofiary — bo cel ma się nie dowiedzieć, że jest zamrożony, dopóki nie kliknie
+    // „Rzuć". Dopasowywanie po nicku w tekście podświetliłoby „ktoś użył Freeze" u ofiary
+    // i rozwaliło całą mechanikę ukrycia. Po player_id nie wycieka nic.
+    //
+    // Number() po OBU stronach jest konieczne: state.playerId bywa stringiem z localStorage
+    // (patrz loadAuth), a liczbą dopiero po loginSuccess — gołe === dałoby false przy
+    // pierwszym renderze po odświeżeniu strony.
+    const mine = Number(e.player_id) === Number(state.playerId);
     html += `
-      <div class="activity-entry">
+      <div class="activity-entry${mine ? ' is-me' : ''}"${mine ? ' title="Twoja akcja"' : ''}>
         <span class="activity-time mono">${time}</span>
         <span class="activity-icon">${icon}</span>
         <span class="activity-body"><strong>${esc(e.nickname)}</strong> ${esc(e.detail)}</span>

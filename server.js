@@ -2208,9 +2208,16 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
     if (stolen > 0) bits.push(`💰 stracił ${stolen} coins na rzecz ${pusherNickname}`);
     slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`);
-    if (stolen > 0) {
-      slLogActivity(pusherId, 'knockback', `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} coins!`);
-    }
+    // Wypychający dostaje wpis ZAWSZE, także gdy nie było czego ukraść. Wcześniej ta linia
+    // siedziała pod `if (stolen > 0)`, więc zbicie gracza z pustym portfelem nie zostawiało
+    // po sobie w dzienniku ŻADNEGO śladu po stronie zbijającego — a to jego akcja i chce ją
+    // u siebie zobaczyć (dziennik podświetla wpisy po player_id, patrz renderActivity).
+    // UWAGA: w tym tekście nie może paść słowo „Wypchnięty". Cofanie całego dnia szuka ofiar
+    // przez `detail LIKE '%Wypchnięty%'` na wpisach typu knockback (patrz /admin/day/rollback)
+    // i policzyłoby zbijającego jako kogoś, kogo trzeba ręcznie przestawić na planszy.
+    slLogActivity(pusherId, 'knockback', stolen > 0
+      ? `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} coins!`
+      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} — nie miał ani jednego coina do zabrania.`);
 
     pushedIds.add(occ.player_id);
     pusherId = occ.player_id;
