@@ -603,9 +603,10 @@ function renderCell(idx, sp, players, rowStyle, isTurn) {
     const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
     const pushCls = (state.pushFlash && state.pushFlash.has(p.player_id)) ? ' sl-pawn-pushed' : '';
     const shieldBadge = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
-    const tip = `${esc(p.nickname)} (okr. ${p.laps})${p.has_shield ? ' — chroniony tarczą' : ''}`;
+    // Natywny title zniknął: nie da się w nim zrobić wielowierszowej rozpiski punktów.
+    // Dane dla dymka jadą w data-* i są czytane dopiero przy najechaniu (patrz slTipShow).
     return `
-      <span class="sl-pawn-wrap${meCls}${shieldCls}${pushCls}" title="${tip}">
+      <span class="sl-pawn-wrap${meCls}${shieldCls}${pushCls}" data-tip-player="${p.player_id}">
         <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />
         ${shieldBadge}
       </span>`;
@@ -1047,6 +1048,89 @@ async function contributeToBoss() {
   }
 }
 
+// ── DYMEK Z ROZBICIEM PUNKTÓW ──
+// Jeden komponent dla pionków na planszy i wierszy rankingu. Natywny title odpadł, bo nie
+// da się w nim zrobić wielowierszowej rozpiski. Dymek jest doklejany do <body>, a nie do
+// elementu, na który najeżdżamy — plansza i ranking mają własne przewijanie i overflow,
+// więc pozycjonowany wewnątrz nich potrafiłby zostać przycięty.
+const SL_POINT_CATEGORY_LABELS = [
+  ['dice',      '🎲', 'ruchy kostką'],
+  ['boss',      '👹', 'walka z bossem'],
+  ['knockback', '💥', 'zbicia przeciwnika'],
+  ['bonus',     '⭐', 'punkty bonusowe'],
+  ['pre_split', '📦', 'sprzed podziału'],
+];
+
+let slTipEl = null;
+
+function slTipFor(playerId) {
+  const g = state.game;
+  if (!g) return null;
+  // Ranking ma WSZYSTKICH, plansza tylko tych ze zdjęciem — dlatego szukamy najpierw tam.
+  const src = (g.leaderboard || []).find(p => p.player_id === playerId)
+           || (g.players || []).find(p => p.player_id === playerId);
+  if (!src || !src.points_breakdown) return null;
+
+  const b = src.points_breakdown;
+  const total = Number(src.total_points) || 0;
+  const rows = SL_POINT_CATEGORY_LABELS
+    // Pustych kategorii nie pokazujemy — dymek ma być listą tego, co gracz faktycznie
+    // zdobył, a nie tabelą zer. „Sprzed podziału" znika sama, gdy wyzeruje się historia.
+    .filter(([key]) => (b[key] || 0) > 0)
+    .map(([key, icon, label]) => {
+      const val = b[key];
+      const pct = total > 0 ? Math.round(val / total * 100) : 0;
+      return `<div class="sl-tip-row">
+        <span class="sl-tip-ico">${icon}</span>
+        <span class="sl-tip-lbl">${label}</span>
+        <span class="sl-tip-val mono">${val}</span>
+        <span class="sl-tip-pct mono">${pct}%</span>
+      </div>`;
+    }).join('');
+
+  return `<div class="sl-tip-head">${esc(src.nickname)}<span class="sl-tip-total mono">${total} pkt</span></div>`
+    + (rows || '<div class="sl-tip-empty">Jeszcze bez punktów.</div>');
+}
+
+function slTipShow(target, playerId) {
+  const html = slTipFor(playerId);
+  if (!html) return;
+  if (!slTipEl) {
+    slTipEl = document.createElement('div');
+    slTipEl.className = 'sl-tip';
+    document.body.appendChild(slTipEl);
+  }
+  slTipEl.innerHTML = html;
+  slTipEl.style.display = 'block';
+
+  // Pozycjonowanie nad elementem, a jeśli u góry brakuje miejsca — pod nim. Wyjście poza
+  // prawą krawędź okna też przycinamy, żeby dymek przy skrajnym pionku nie uciekał.
+  const r = target.getBoundingClientRect();
+  const t = slTipEl.getBoundingClientRect();
+  let left = r.left + r.width / 2 - t.width / 2;
+  left = Math.max(6, Math.min(left, window.innerWidth - t.width - 6));
+  const above = r.top - t.height - 8;
+  slTipEl.style.left = `${Math.round(left)}px`;
+  slTipEl.style.top = `${Math.round(above >= 6 ? above : r.bottom + 8)}px`;
+}
+
+function slTipHide() {
+  if (slTipEl) slTipEl.style.display = 'none';
+}
+
+// Delegacja na document: plansza i ranking przerysowują się co 10 s, więc listenery
+// wpięte w konkretne elementy ginęłyby przy każdym odświeżeniu.
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest && e.target.closest('[data-tip-player]');
+  if (el) slTipShow(el, Number(el.dataset.tipPlayer));
+});
+document.addEventListener('mouseout', e => {
+  const el = e.target.closest && e.target.closest('[data-tip-player]');
+  if (el && !el.contains(e.relatedTarget)) slTipHide();
+});
+// Przewinięcie odkleiłoby dymek od pionka — prościej go schować niż przeliczać pozycję.
+window.addEventListener('scroll', slTipHide, true);
+
 // ── LEADERBOARD ──
 function renderLeaderboard(g) {
   const list = document.getElementById('leaderboard-list');
@@ -1059,7 +1143,7 @@ function renderLeaderboard(g) {
     const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
     const meClass = p.is_me ? ' is-me' : '';
     return `
-      <div class="lb-row${meClass}">
+      <div class="lb-row${meClass}" data-tip-player="${p.player_id}">
         <span class="lb-rank">${medal}</span>
         <div class="lb-main">
           <div class="lb-top">

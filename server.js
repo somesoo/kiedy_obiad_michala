@@ -1579,6 +1579,28 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Rozbicie ZDOBYTYCH PUNKTÓW na kategorie. Osobna tabela, a nie liczniki na sl_state,
+  -- bo gra ma pięć różnych ścieżek cofania (cały dzień, pojedynczy ruch, nagrody bossa,
+  -- reset gry, wyczyszczenie gracza) — licznik przy każdej z nich rozjechałby się po cichu
+  -- i nikt by tego nie zauważył. Wiersze da się skasować dokładnie tak samo, jak cofa się
+  -- to, co je stworzyło: po dniu (kolumna "day") albo po konkretnym ruchu (kolumna "ref").
+  --
+  -- Rozbicie liczy się WYŁĄCZNIE od wdrożenia tej tabeli. Punkty zdobyte wcześniej nie
+  -- są tu policzone i nie da się ich rzetelnie odtworzyć (patrz slPointsBreakdownMap),
+  -- więc UI pokazuje różnicę jako osobną pozycję „sprzed podziału" — dzięki temu suma
+  -- kategorii ZAWSZE zgadza się co do punktu z total_points, zamiast kłamać.
+  CREATE TABLE IF NOT EXISTS snakes.sl_points_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id  INTEGER NOT NULL,
+    day        TEXT NOT NULL,           -- YYYY-MM-DD (Europe/Warsaw), do cofania dnia
+    category   TEXT NOT NULL,           -- 'dice' | 'bonus' | 'knockback' | 'boss'
+    points     INTEGER NOT NULL,
+    ref        TEXT,                    -- 'move:<id>' dla dice/bonus — do cofania ruchu
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS snakes.idx_points_log_player ON sl_points_log(player_id, category);
+  CREATE INDEX IF NOT EXISTS snakes.idx_points_log_day ON sl_points_log(day);
+
   -- Dziennik aktywności (ruchy + sklep + walka z bossem + knockback) — widoczny dla
   -- wszystkich, do przeglądania "kto co zrobił którego dnia" w prawej kolumnie UI.
   -- Kolumna "detail" to ZAWSZE oryginał zapisany przez grę; to, co widzą gracze, składa
@@ -1705,6 +1727,51 @@ db.exec(`
 // Zapisuje wpis do dziennika aktywności. Wołane z ruchu, sklepu, walki z bossem i knockbacku.
 // UWAGA: `detail` trafia do UI PO nicku i ikonie typu (patrz renderActivity w snakes.js),
 // więc nie powtarzamy w nim ani jednego, ani drugiego — wpis ma być krótki jak nagłówek.
+// ── ROZBICIE PUNKTÓW NA KATEGORIE ──
+// Kolejność ma znaczenie — UI wypisuje kategorie dokładnie w tej kolejności.
+const SL_POINT_CATEGORIES = ['dice', 'bonus', 'knockback', 'boss'];
+
+// Dopisuje punkty do rozbicia. Wołane RAZEM z każdym dopisaniem do total_points — jeśli
+// kiedyś dojdzie nowe źródło punktów, ma tu trafić także, inaczej po cichu wpadnie do puli
+// „sprzed podziału" i nikt nie zauważy, że kategoria jest niepełna.
+function slLogPoints(playerId, category, points, ref = null, day = null) {
+  const pts = Math.round(Number(points) || 0);
+  if (pts === 0) return;
+  db.prepare('INSERT INTO sl_points_log (player_id, day, category, points, ref) VALUES (?, ?, ?, ?, ?)')
+    .run(playerId, day || todayWaw(), category, pts, ref);
+}
+
+// Rozbicie dla WSZYSTKICH graczy jednym zapytaniem — payloady planszy i rankingu budują
+// się dla kilkunastu graczy naraz, więc odpytywanie per gracz byłoby N+1.
+function slPointsBreakdownMap() {
+  const rows = db.prepare(
+    'SELECT player_id, category, SUM(points) AS pts FROM sl_points_log GROUP BY player_id, category'
+  ).all();
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.player_id)) map.set(r.player_id, {});
+    map.get(r.player_id)[r.category] = Number(r.pts);
+  }
+  return map;
+}
+
+// Rozbicie JEDNEGO gracza, gotowe do wysłania. `pre_split` jest LICZONE jako reszta do
+// total_points, a nie zapisywane — dzięki temu suma kategorii zgadza się co do punktu
+// zawsze, także gdyby jakaś ścieżka cofania kiedyś minęła się z tabelą. Ujemna reszta
+// (teoretycznie możliwa przy ręcznej korekcie punktów z panelu) jest przycinana do zera,
+// żeby UI nie pokazywał bzdury.
+function slPointsBreakdown(totalPoints, raw) {
+  const out = {};
+  let sum = 0;
+  for (const cat of SL_POINT_CATEGORIES) {
+    const v = Math.max(0, Number((raw || {})[cat]) || 0);
+    out[cat] = v;
+    sum += v;
+  }
+  out.pre_split = Math.max(0, Math.round(Number(totalPoints) || 0) - sum);
+  return out;
+}
+
 function slLogActivity(playerId, type, detail) {
   db.prepare('INSERT INTO sl_activity (player_id, type, detail, day) VALUES (?, ?, ?, ?)')
     .run(playerId, type, detail, todayWaw());
@@ -2185,9 +2252,16 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
       WHERE player_id = ?
     `).run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), bonusPoints - stolen, bonusPoints, occ.player_id);
 
+    // Wypchnięty mógł wylądować na polu bonusowym — to jego punkty z BONUSU, nie z kostki:
+    // nie rzucał, tylko został tam przesunięty.
+    slLogPoints(occ.player_id, 'bonus', bonusPoints);
+
     if (stolen > 0) {
       db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
         .run(stolen, stolen, pusherId);
+      // Łup ze zbicia liczy się do rankingu (patrz komentarz o kradzieży wyżej), więc ma
+      // własną kategorię — to jedyne punkty, które gracz zdobywa cudzym kosztem.
+      slLogPoints(pusherId, 'knockback', stolen);
     }
 
     const entry = {
@@ -2312,6 +2386,8 @@ function slPlayersPayload(meId) {
   const shielded = new Set(db.prepare(
     `SELECT DISTINCT target_player_id AS id FROM sl_effects WHERE type = 'shield' AND status = 'pending'`
   ).all().map(r => r.id));
+  // Też jednym zapytaniem na wszystkich — inaczej byłoby N+1 przy kilkunastu pionkach.
+  const breakdown = slPointsBreakdownMap();
   return rows.map(r => {
     const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
     const dailyRolls = slDailyRollsFor(r, today);
@@ -2323,6 +2399,8 @@ function slPlayersPayload(meId) {
       abs_pos: Number(r.abs_pos),
       laps: Number(r.laps),
       total_points: Number(r.total_points),
+      // Rozbicie punktów na kategorie — do dymka po najechaniu na pionek.
+      points_breakdown: slPointsBreakdown(r.total_points, breakdown.get(r.player_id)),
       moved_today: rollsUsedToday >= dailyRolls,
       rolls_used_today: rollsUsedToday,
       rolls_remaining_today: Math.max(0, dailyRolls - rollsUsedToday),
@@ -2362,11 +2440,13 @@ function slLeaderboard(meId) {
     FROM sl_state s JOIN players p ON p.id = s.player_id
     ORDER BY s.total_points DESC, s.laps DESC, s.abs_pos DESC
   `).all();
+  const breakdown = slPointsBreakdownMap();
   return rows.map((r, i) => ({
     rank: i + 1,
     player_id: r.player_id,
     nickname: r.nickname,
     total_points: Number(r.total_points),
+    points_breakdown: slPointsBreakdown(r.total_points, breakdown.get(r.player_id)),
     laps: Number(r.laps),
     tile: slTileOf(r.abs_pos),
     is_me: meId ? r.player_id === meId : false
@@ -2661,6 +2741,9 @@ function slFinishBossEvent(coop, defeated) {
   for (const p of payouts) {
     if (p.points > 0) payPoints.run(p.points, p.player_id);
     if (p.refund > 0) payCoins.run(p.refund, p.player_id);
+    // Nagroda za bossa to własna kategoria — jedyne punkty, za które gracz realnie zapłacił.
+    // `ref` niesie cykl, żeby slRevertBossRewards mogło skasować dokładnie te wiersze.
+    slLogPoints(p.player_id, 'boss', p.points, `cycle:${coop.cycle}`);
     // KAŻDA wypłata zostawia ślad w dzienniku. Wcześniej rozliczenie robiło wyłącznie
     // UPDATE na sl_state — punkty i coins pojawiały się na koncie bez śladu i gracz nie
     // miał ŻADNEGO sposobu dowiedzieć się, ile dostał (Discord podawał tylko sumy
@@ -2953,6 +3036,10 @@ function slRevertBossRewards() {
     WHERE player_id = ?
   `);
   for (const [playerId, v] of takeBack) upd.run(v.coins, v.points, playerId);
+
+  // Skoro punkty za bossa wracają, rozbicie nie może dalej twierdzić, że gracz je ma.
+  // Kasujemy CAŁĄ kategorię, bo ta funkcja cofa nagrody ze WSZYSTKICH rozliczonych walk.
+  db.prepare("DELETE FROM sl_points_log WHERE category = 'boss'").run();
 
   return {
     cycles: cycles.length,
@@ -3351,10 +3438,23 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
     if (curse) consume(curse.id);
 
-    db.prepare(`
+    const moveIns = db.prepare(`
       INSERT INTO sl_moves (player_id, move_date, move_seq, rolls, from_abs, to_abs, points, note)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(playerId, today, moveSeq, JSON.stringify(rolls), from_abs, abs, earned, notes.join(',') || null);
+
+    // ── ROZBICIE PUNKTÓW Z TEGO RUCHU ──
+    // `earned` jest jedną liczbą, ale składa się z dwóch rzeczy, które gracz rozróżnia:
+    // gry kostką (oczka + postęp + okrążenie) i pola bonusowego. Dzielimy PROPORCJONALNIE
+    // do surowej sumy, bo Chciwość połowi całość PO zsumowaniu — proporcja jest jedynym
+    // podziałem, który po takim obcięciu nadal sumuje się dokładnie do `earned`.
+    // `tilePoints` jest tu już po ewentualnym wyzerowaniu przez klątwę Bez Bonusu, więc
+    // ruch bez działającego bonusu poprawnie wpada w całości do kategorii „kostka".
+    const rawTotal = pipPoints + progressPoints + lapPoints + tilePoints;
+    const bonusPart = rawTotal > 0 ? Math.round(earned * (tilePoints / rawTotal)) : 0;
+    const moveRef = `move:${moveIns.lastInsertRowid}`;
+    slLogPoints(playerId, 'bonus', bonusPart, moveRef, today);
+    slLogPoints(playerId, 'dice', earned - bonusPart, moveRef, today);
 
     db.prepare(`
       UPDATE sl_state
@@ -3831,6 +3931,7 @@ app.post('/api/snakes/admin/reset', (req, res) => {
       DELETE FROM sl_effects;
       DELETE FROM sl_activity;
       DELETE FROM sl_coop_contributions;
+      DELETE FROM sl_points_log;
       DELETE FROM sl_coop;
     `);
     // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
@@ -3893,6 +3994,7 @@ app.delete('/api/snakes/admin/players/:id', (req, res) => {
     db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
     db.prepare('DELETE FROM sl_coop_contributions WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
+    db.prepare('DELETE FROM sl_points_log WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);
   });
 
@@ -4543,6 +4645,10 @@ function slRollbackDay(date) {
     db.prepare(`UPDATE sl_state SET extra_rolls = 0, extra_rolls_date = NULL WHERE extra_rolls_date = ?`).run(date);
 
     const moves = db.prepare('DELETE FROM sl_moves WHERE move_date = ?').run(date);
+    // Rozbicie punktów z tego dnia znika razem z ruchami — inaczej kategorie zostałyby
+    // z punktami, których w total_points już nie ma, i pula „sprzed podziału" zeszłaby
+    // na minus. Kasujemy po `day`, bo dokładnie po to ta kolumna jest.
+    db.prepare('DELETE FROM sl_points_log WHERE day = ?').run(date);
     const activity = db.prepare('DELETE FROM sl_activity WHERE day = ?').run(date);
 
     return {
@@ -4772,6 +4878,13 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
     `).run(fromAbs, Math.floor(fromAbs / SL_BOARD_SIZE), pts, pts, nextRolls, playerId);
 
     db.prepare('DELETE FROM sl_moves WHERE id = ?').run(move.id);
+    // Ruch ma własne wiersze rozbicia oznaczone kolumną "ref" — kasujemy dokładnie je, żeby
+    // cofnięcie jednego ruchu nie ruszyło pozostałych z tego samego dnia.
+    // UWAGA: string składamy w JS, a NIE w SQL-u przez ('move:' || ?). node:sqlite binduje
+    // liczbę JS jako REAL, więc taka konkatenacja daje 'move:16.0' zamiast 'move:16'
+    // i warunek po cichu nie trafia w nic — cofnięty ruch zostawiłby swoje punkty
+    // w rozbiciu, mimo że total_points już ich nie ma.
+    db.prepare('DELETE FROM sl_points_log WHERE ref = ?').run(`move:${move.id}`);
     return {
       none: false, move_date: move.move_date, move_seq: Number(move.move_seq),
       points_removed: pts, back_to_tile: slTileOf(fromAbs), player: slAdminPlayerDetail(playerId)
