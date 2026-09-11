@@ -140,8 +140,10 @@ function stateSignature(g) {
   return JSON.stringify([
     g.players.map(p => [p.player_id, p.abs_pos, p.total_points]),
     g.me.abs_pos, g.me.balance, g.me.total_points, g.me.rolls_remaining_today,
+    // has_shield wystarczy: to jedyny efekt, o którym gracz ma prawo wiedzieć, zanim
+    // odpali. Freeze i Curse celowo NIE są w sygnaturze — przerysowanie panelu w chwili
+    // trafienia byłoby samo w sobie sygnałem, że coś na graczu wisi.
     g.me.can_roll, g.me.has_shield,
-    g.pending_effects.map(e => e.type),
     g.inventory,
     g.coop ? [g.coop.status, g.coop.attackers.length, g.coop.boss ? g.coop.boss.hp : null] : null
   ]);
@@ -413,7 +415,6 @@ function renderAll() {
   renderShop(g);
   renderLeaderboard(g);
   renderRollButton(g);
-  renderEffectsHint(g);
   renderCoop(g);
 }
 
@@ -636,8 +637,8 @@ function renderRollButton(g) {
   const left = g.me.rolls_remaining_today;
   if (g.me.can_roll) {
     btn.disabled = false;
-    // Żadnej wzmianki o Freeze — serwer w ogóle nie zdradza nam, że ktoś nas zamroził
-    // (patrz slPendingEffects). Dowiadujemy się dopiero po kliknięciu.
+    // Żadnej wzmianki o Freeze ani o klątwie — serwer w ogóle nie zdradza nam, że coś
+    // na nas wisi. Dowiadujemy się dopiero po kliknięciu.
     const countTxt = g.me.daily_rolls > 1 ? ` (${left}/${g.me.daily_rolls})` : '';
     btn.textContent = `🎲 Rzuć kostką${countTxt}`;
   } else {
@@ -871,17 +872,6 @@ document.getElementById('target-modal').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeTargetPicker();
 });
 
-// ── EFEKTY OCZEKUJĄCE ──
-function renderEffectsHint(g) {
-  const el = document.getElementById('effects-hint');
-  if (!g.pending_effects.length) { el.textContent = ''; return; }
-  const txt = g.pending_effects.map(e => {
-    const meta = POWERUP_META[e.type];
-    const from = e.source_nickname ? ` od ${esc(e.source_nickname)}` : '';
-    return `${meta.icon} ${meta.name}${from}`;
-  }).join(', ');
-  el.innerHTML = `⚠️ Czeka Cię: ${txt}`;
-}
 
 // ── WALKA Z BOSSEM ──
 // Jedna, ciągła faza — boss walczy ZAWSZE, więc panel zawsze pokazuje to samo: kto to,

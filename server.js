@@ -2412,27 +2412,6 @@ function slPlayersPayload(meId) {
   });
 }
 
-// Oczekujące efekty na danym graczu (do pokazania „co Cię czeka").
-// FREEZE JEST TU CELOWO POMINIĘTY: ofiara nie ma prawa wiedzieć, że jest zamrożona,
-// dopóki nie kliknie „Rzuć" i sama się nie przekona (patrz POST /api/snakes/roll).
-// Freeze widzi wyłącznie ten, kto go rzucił — w dzienniku ma własny wpis, ale bez celu,
-// więc reszta stołu wie tylko TYLE, że ktoś kogoś zamroził.
-function slPendingEffects(playerId) {
-  return db.prepare(`
-    SELECT e.type, e.variant, p.nickname AS source_nickname
-    FROM sl_effects e LEFT JOIN players p ON p.id = e.source_player_id
-    WHERE e.target_player_id = ? AND e.status = 'pending' AND e.type != 'freeze'
-    ORDER BY e.id
-  `).all(playerId).map(e => ({
-    type: e.type,
-    // WARIANT KLĄTWY CELOWO NIE WYCHODZI NA ZEWNĄTRZ: cel ma wiedzieć, że coś na nim
-    // wisi i od kogo, ale nie CO — inaczej wystarczyłoby zajrzeć w odpowiedź API, żeby
-    // rozbroić całą niespodziankę. Wariant ujawnia się dopiero, gdy klątwa odpali
-    // (na ruchu albo — przy Drożyźnie — przy zakupie).
-    variant: null,
-    source_nickname: e.source_nickname
-  }));
-}
 
 function slLeaderboard(meId) {
   const rows = db.prepare(`
@@ -3212,7 +3191,6 @@ function slBuildState(playerId) {
       avatar_url: slAvatarUrl(playerId, st.avatar_updated_at)
     },
     inventory: slInventory(playerId),
-    pending_effects: slPendingEffects(playerId),
     leaderboard: slLeaderboard(playerId),
     shop: SL_POWERUP_TYPES.map(type => ({ type, cost: SL_POWERUP_COSTS[type] })),
     coop: slCoopPayload(playerId),
@@ -3770,11 +3748,14 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     });
   }
 
-  // ── DZIENNIK AKTYWNOŚCI (obie strony, gdy dotyczy) ──
-  // Freeze dostaje wpis BEZ CELU: stół ma wiedzieć, że ktoś zamroził kogoś (bo to zmienia
-  // rachuby), ale na kogo padło — wie tylko rzucający. Ofiara nie dostaje własnego wpisu
-  // i nie widzi Freeze'a w swoim panelu (patrz slPendingEffects); dowie się dopiero, gdy
-  // kliknie „Rzuć" (wtedy POST /api/snakes/roll dopisuje obu stronom pełną wersję).
+  // ── DZIENNIK AKTYWNOŚCI ──
+  // ATAKI NIE NAZYWAJĄ CELU. Freeze i Curse dostają wpis mówiący tylko, że ktoś zaatakował
+  // — biuro ma wiedzieć, że coś się dzieje (to zmienia rachuby), ale kto oberwał, wie
+  // wyłącznie rzucający. Ofiara nie dostaje własnego wpisu i nie widzi nic w swoim panelu;
+  // dowie się dopiero przy odpaleniu: Freeze i większość klątw gdy kliknie „Rzuć", a
+  // Drożyzna przy najbliższym zakupie. Dopiero wtedy POST /api/snakes/roll (albo /shop/buy)
+  // dopisuje obu stronom pełną wersję z nazwiskiem i wariantem.
+  // Wyjątek: zablokowanie tarczą (gałąź niżej) — atak przepadł, więc nie ma już czego kryć.
   const label = SL_POWERUP_LABELS[type];
   if (out.blocked) {
     slLogActivity(playerId, 'shop_use', `${label} na ${targetNick} zablokowany tarczą`);
@@ -3784,8 +3765,12 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   } else if (out.extra_roll) {
     slLogActivity(playerId, 'shop_use', `⏩ Użył ${label} — dodatkowy ruch do wykonania od razu`);
   } else if (needsTarget) {
-    slLogActivity(playerId, 'shop_use', `Użył ${label} na ${targetNick}`);
-    slLogActivity(targetId, 'shop_use', `${nickname} rzucił na Ciebie ${label}${type === 'curse' ? ' — zobaczysz jaka, dopiero gdy odpali' : ''}`);
+    // KLĄTWA ZOSTAWIA DOKŁADNIE JEDEN WPIS — rzucającego, BEZ celu i BEZ wariantu.
+    // Dziennik jest publiczny, więc nazwanie celu ("Użył Curse na Bartka") mówiło ofierze
+    // wprost, że coś na niej wisi — a klątwa ma się ujawniać dopiero, gdy odpali. Z tego
+    // samego powodu zniknął wpis kierowany do celu. Dokładnie tak samo zachowuje się
+    // Freeze (gałąź wyżej) i to jest wzorzec dla obu ataków.
+    slLogActivity(playerId, 'shop_use', `💀 Rzucił klątwę — na kogo i jaka, okaże się dopiero, gdy odpali`);
   } else if (type === 'shield') {
     // Cisza — tarcza ujawnia się WYŁĄCZNIE wtedy, gdy coś zablokuje (gałąź out.blocked
     // wyżej dopisuje wpis obu stronom). Inaczej cały jej sens znika.
@@ -3799,7 +3784,9 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     slEmit('shield_block', () =>
       `🛡️ **${targetNick}** zablokował tarczą ${type === 'freeze' ? 'Freeze' : 'Curse'} od **${nickname}**! Tarcza zużyta.`);
   } else if (type === 'curse') {
-    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę na **${targetNick}** — jaką, przekonacie się na jego następnym ruchu.`);
+    // Bez nazwiska celu — Discord czyta całe biuro, więc podanie ofiary zdradzałoby ją
+    // dokładnie tak samo jak wpis w dzienniku. Kto oberwał, wyjdzie przy odpaleniu.
+    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę — na kogo i jaką, przekonacie się, gdy odpali.`);
   } else if (out.extra_roll) {
     slEmit('double_move', () => `⏩ **${nickname}** użył Extra Move — dołożył sobie ruch ponad dzienny limit i rzuca od razu.`);
   }
