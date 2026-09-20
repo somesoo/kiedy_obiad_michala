@@ -953,11 +953,13 @@ function slCoopPaceHtml(c) {
 function slCoopMilestonesHtml(c) {
   if (!c.milestones || !c.milestones.length || !c.boss) return '';
   const hp = c.boss.hp;
+  // Etykieta musi powiedzieć, CZEGO brakuje. „75% (za 747)" czytało się jak cena albo
+  // jakieś punkty — a to jest liczba OBRAŻEŃ, które dzielą ekipę od progu.
   const items = c.milestones.map(m => m.reached
-    ? `<span class="coop-ms is-done" title="próg zaliczony">✓ ${m.percent}%</span>`
-    : `<span class="coop-ms" title="+${m.points} pkt dla wpłacających">${m.percent}% <span class="mono">(za ${hp - m.hp_at})</span></span>`
+    ? `<span class="coop-ms is-done" title="Ten próg już padł — wpłacający dostali +${m.points} pkt">✓ ${m.percent}% zaliczone</span>`
+    : `<span class="coop-ms" title="Gdy HP bossa spadnie do ${m.hp_at}, każdy kto już wpłacił dostaje +${m.points} pkt">${m.percent}% — jeszcze <span class="mono">${hp - m.hp_at}</span> obrażeń</span>`
   ).join('');
-  return `<div class="coop-ms-row"><span class="text-muted">🎯 Kamienie milowe (+${c.milestones[0].points} pkt dla wpłacających):</span>${items}</div>`;
+  return `<div class="coop-ms-row"><span class="text-muted">🎯 Gdy zbijecie HP bossa do progu, każdy kto już wpłacił dostaje <strong>+${c.milestones[0].points} pkt</strong> od ręki:</span>${items}</div>`;
 }
 
 // ── OGŁOSZENIE: NOWA MECHANIKA BOSSA, FAZA TESTÓW ──
@@ -1090,10 +1092,16 @@ function renderCoop(g) {
   const myPrevTxt = pr && pr.defeated && (pr.my_points > 0 || pr.my_refund > 0)
     ? ` — dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem`
     : '';
+  // Trzy różne zakończenia, nie dwa. „Nie pokonany" nie znaczy automatycznie „zaatakował":
+  // walkę domkniętą administracyjnie (wyłącznik bossa, wdrożenie) nikt nie przypłacił,
+  // więc ogłaszanie przy niej straty 50 coins byłoby zwykłym kłamstwem.
   const prevTxt = pr
-    ? `<span class="coop-prev">${pr.defeated
-        ? `🏆 #${pr.cycle} ${esc(pr.boss_name)} pokonany${myPrevTxt}`
-        : `💥 #${pr.cycle} ${esc(pr.boss_name)} zaatakował — ${pr.timeout_penalty} coins każdemu`}</span>`
+    ? `<span class="coop-prev">${
+        pr.defeated ? `🏆 #${pr.cycle} ${esc(pr.boss_name)} pokonany${myPrevTxt}`
+      : !pr.settled ? `⚪ #${pr.cycle} ${esc(pr.boss_name)} — walka domknięta bez rozliczenia, nikt nic nie stracił`
+      : `💥 #${pr.cycle} ${esc(pr.boss_name)} zaatakował — ${pr.timeout_penalty} coins każdemu${
+          pr.my_penalty > 0 ? ` (Tobie zabrał ${pr.my_penalty})` : ''}`
+      }</span>`
     : '';
 
   el.innerHTML = `
