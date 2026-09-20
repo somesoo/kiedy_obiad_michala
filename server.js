@@ -1321,23 +1321,9 @@ function slCurseAdjustRoll(variant, roll) {
   return roll;
 }
 
-// ── WYDARZENIE KOOPERACYJNE (co-op) ──
-// "Próg" to dziś WPROST punkty życia bossa (mnożnik HP wynosi 1, patrz niżej) — jedna
-// liczba, którą admin przesuwa z panelu, zamiast dwóch mnożących się przez siebie.
-const SL_COOP_THRESHOLD = parseInt(process.env.SNAKES_COOP_THRESHOLD, 10) || 3500;
-// Ile PUNKTÓW RANKINGOWYCH daje jeden wpłacony coin, gdy boss padnie. Poniżej 1, bo
-// wpłata ma boleć — ale niewiele poniżej, i to jest wyliczone, nie wzięte z sufitu:
-// jeden rzut kostką daje średnio ~17 pkt i tyle samo coins, więc Extra Move za 40 coins
-// wychodzi ~1,35 coina za punkt. Przy 0,5 wpłata ponad zwrot kosztowała 2 coiny za punkt
-// i była BEZWZGLĘDNIE GORSZA od sklepu — nikomu nie opłacało się wpłacać więcej niż
-// zwrot, więc optymalna gra całej ekipy dawała ~83% progu i bossa nie dało się ubić.
-// Przy 0,7 marginalna wpłata to ~1,43 coina za punkt, czyli tuż obok Extra Move — a że
-// Extra Move ma dzienny sufit 2 sztuk, po jego wyczerpaniu boss jest najlepszym sinkiem.
-const SL_COOP_POINTS_PER_COIN = Number(process.env.SNAKES_COOP_POINTS_PER_COIN || 0.7);
-// Zwrot monet dla każdego, kto wpłacił — ale NIGDY więcej, niż sam włożył (patrz
-// slFinishBossEvent). Bez tego ograniczenia wpłata 1 monety oddawałaby 50 i mielibyśmy
-// nową pętlę: emisja monet musi być zawsze mniejsza od tego, co spłonęło.
-const SL_COOP_CONTRIB_REFUND = parseInt(process.env.SNAKES_COOP_CONTRIB_REFUND, 10) || 50;
+// ── WYDARZENIE KOOPERACYJNE (co-op) / WALKA Z BOSSEM ──
+// Cała mechanika bossa — stałe, schemat, rozliczenia i trasy — mieszka w lib/boss.js.
+// Tutaj zostaje wyłącznie punkt podpięcia (szukaj "const boss = createBossModule").
 
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
 // Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
@@ -1397,52 +1383,6 @@ function slOfficeCloseMs(ms = Date.now()) {
   return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_END_HOUR);
 }
 
-// ── ESKALACJA TRUDNOŚCI CO-OP ──
-// JEDNA FAZA: boss walczy ZAWSZE — nie ma już zbiórki/progu poprzedzającej walkę. Gdy
-// jeden cykl się rozstrzyga (wygrana albo czas minął), KOLEJNY boss budzi się OD RAZU,
-// z góry naliczonym HP i terminem (patrz slCoopInsertCycle/startCoopBossEvent). Termin
-// to DOMYŚLNIE tyle DNI ROBOCZYCH od startu (weekendy nie liczą się do odliczania — patrz
-// addBusinessDaysMs), ale admin może w każdej chwili nadpisać go na konkretną godzinę
-// w panelu (patrz POST /api/snakes/admin/coop/config, pole deadline_at) — działa to
-// zawsze, nie tylko przy zakładaniu cyklu. "Próg" (threshold) zostaje jako WEWNĘTRZNY
-// suwak trudności: skaluje HP bossa i pulę nagród (patrz SL_BOSS_HP_MULTIPLIER,
-// SL_BOSS_HP_MULTIPLIER = 1, więc próg JEST punktami życia), a nie zbiórką punktów —
-// zmienia się wyłącznie między cyklami:
-//   • wygrana: próg × GROWTH (trudniej), czas × SHRINK, ale nie mniej niż MIN_TIME_DAYS
-//   • przegrana (czas minął, boss przeżył): próg i czas łagodnieją o RELIEF_FACTOR,
-//     ale nigdy poniżej/powyżej wartości bazowej (BASE) — to tylko "odbicie", nie reset.
-const SL_COOP_BASE_TIME_DAYS = Number(process.env.SNAKES_COOP_BASE_TIME_DAYS || 5);
-const SL_COOP_MIN_TIME_DAYS = Number(process.env.SNAKES_COOP_MIN_TIME_DAYS || 2);
-const SL_COOP_THRESHOLD_GROWTH = Number(process.env.SNAKES_COOP_THRESHOLD_GROWTH || 1.2);
-const SL_COOP_TIME_SHRINK = Number(process.env.SNAKES_COOP_TIME_SHRINK || 0.8);
-const SL_COOP_RELIEF_FACTOR = Number(process.env.SNAKES_COOP_RELIEF_FACTOR || 0.9); // próg ×0.9, czas ÷0.9
-
-// ── WALKA Z BOSSEM ──
-// Losowy biurowy boss z paskiem HP walczy ZAWSZE — każdy nowy cykl budzi go od razu
-// (patrz slCoopInsertCycle). Obrażenia płyną z DWÓCH źródeł, rozróżnianych w
-// sl_coop_contributions kolumną `source`:
-//   • 'dice'  — każdy rzut kostką rani bossa za darmo (suma oczek × SL_BOSS_DICE_DAMAGE_MULT);
-//               zwykłe granie już "walczy", ale rzutów jest najwyżej 5 na dobę,
-//   • 'coins' — wpłata z portfela: 1 MONETA = 1 OBRAŻENIE, dowolna kwota, bez limitu
-//               (limitem jest saldo, a saldo napełnia się wyłącznie grą).
-// Nagroda za pokonanie liczy się WYŁĄCZNIE od wpłaconych monet: SL_COOP_POINTS_PER_COIN
-// × wpłata wraca jako
-// punkty rankingowe + zwrot do SL_COOP_CONTRIB_REFUND monet (nie więcej niż wpłata).
-// Obrażenia z kości nie płacą nic — są darmowe, więc nie mają czego zwracać. Dzięki temu
-// monety mogą z gry tylko WYPŁYWAĆ, a rosną jedynie punkty, których nie da się wydać
-// w sklepie — pętla "wpłać, zabij, zarób więcej niż włożyłeś" jest arytmetycznie niemożliwa.
-// Jeśli czas minie, a boss przeżyje, wpłaty przepadają i boss jeszcze "atakuje", zabierając
-// monety (patrz slFinishBossEvent) — to jest ryzyko, które czyni wpłatę decyzją.
-const SL_BOSS_NAMES = [
-  'Ksero-Golem', 'Duch Deadline\'u', 'Hydra Niekończących Się Maili',
-  'Excel Behemot', 'Automat do Kawy Zła', 'Syndrom Poniedziałku', 'Rozdzielacz Wi-Fi Zagłady'
-];
-const SL_BOSS_HP_MULTIPLIER = Number(process.env.SNAKES_BOSS_HP_MULTIPLIER || 1); // HP = próg × to (1 = próg JEST punktami życia)
-const SL_BOSS_DICE_DAMAGE_MULT = Number(process.env.SNAKES_BOSS_DICE_DAMAGE_MULT || 3); // dmg = suma oczek × to
-// Jeśli boss NIE zostanie pokonany na czas, "atakuje" i zabiera tyle monet KAŻDEMU
-// graczowi (nie tylko kontrybutorom) — realna stawka za zignorowanie walki, nie tylko
-// łagodniejszy próg na następną rundę. Nigdy nie schodzi poniżej salda gracza (0 min).
-const SL_BOSS_TIMEOUT_PENALTY = parseInt(process.env.SNAKES_BOSS_TIMEOUT_PENALTY, 10) || 50;
 
 // ── MIGRACJA: Snakes trzymał dotąd tabele sl_* w tym samym pliku co Wordle
 // (michal.db). Od teraz mają własny plik (snakes.db, dołączony wyżej jako "snakes").
@@ -1547,37 +1487,8 @@ db.exec(`
     value TEXT
   );
 
-  -- Wydarzenie kooperacyjne: jedna aktywna „edycja" (cykl) walki z bossem naraz. Kolumna
-  -- "total" zostaje z dawnego mechanizmu zbiórki i dziś jest nieużywana. 'collecting' to STARY
-  -- status (sprzed przejścia na jedną, ciągłą fazę walki — patrz "ESKALACJA TRUDNOŚCI
-  -- CO-OP" wyżej); nowe wiersze zawsze startują jako 'event_active' (patrz
-  -- slCoopInsertCycle), a legacy-wiersze ze starym statusem aktywuje jednorazowa
-  -- migracja przy starcie (patrz activateLegacyCollectingCycles).
-  CREATE TABLE IF NOT EXISTS snakes.sl_coop (
-    cycle            INTEGER PRIMARY KEY,
-    threshold        INTEGER NOT NULL,
-    total            INTEGER DEFAULT 0,
-    status           TEXT DEFAULT 'event_active', -- 'collecting' (legacy) | 'event_active' | 'completed'
-    reward_pool      INTEGER DEFAULT 0,
-    started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-    triggered_at     DATETIME,
-    completed_at     DATETIME,
-    boss_name        TEXT,
-    boss_max_hp      INTEGER DEFAULT 0,
-    boss_hp          INTEGER DEFAULT 0,
-    boss_defeated_at DATETIME,
-    time_limit_days  INTEGER DEFAULT 5,   -- dni robocze na pokonanie TEGO bossa
-    boss_deadline_at DATETIME             -- policzone przy wybudzeniu (patrz addBusinessDaysMs)
-  );
-
-  -- Wkłady graczy do puli (per cykl) — na ich podstawie liczymy nagrody.
-  CREATE TABLE IF NOT EXISTS snakes.sl_coop_contributions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    cycle      INTEGER NOT NULL,
-    player_id  INTEGER,
-    amount     INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+  -- Tabele walki z bossem (sl_coop, sl_coop_contributions, sl_boss_payouts) zakłada
+  -- lib/boss.js przez initSchema() — patrz podpięcie modułu niżej.
 
   -- Rozbicie ZDOBYTYCH PUNKTÓW na kategorie. Osobna tabela, a nie liczniki na sl_state,
   -- bo gra ma pięć różnych ścieżek cofania (cały dzień, pojedynczy ruch, nagrody bossa,
@@ -1651,31 +1562,7 @@ ensureColumn('sl_state', 'last_move_at', 'DATETIME');
 ensureColumn('sl_state', 'extra_rolls', 'INTEGER DEFAULT 0');
 ensureColumn('sl_state', 'extra_rolls_date', 'TEXT');
 
-// sl_coop: dołóż kolumny bossa dla wdrożeń sprzed walki z bossem.
-ensureColumn('sl_coop', 'boss_name', 'TEXT');
-ensureColumn('sl_coop', 'boss_max_hp', 'INTEGER DEFAULT 0');
-ensureColumn('sl_coop', 'boss_hp', 'INTEGER DEFAULT 0');
-ensureColumn('sl_coop', 'boss_defeated_at', 'DATETIME');
-ensureColumn('sl_coop', 'time_limit_days', 'INTEGER DEFAULT 5');
-ensureColumn('sl_coop', 'boss_deadline_at', 'DATETIME');
-// Moment wybudzenia bossa — sam w sobie niczego nie rozstrzyga (o przegranej decyduje
-// boss_deadline_at), ale bez niego nie da się narysować paska „ile czasu zostało",
-// bo termin liczy się w DNIACH ROBOCZYCH i długość walki w zegarze bywa różna.
-ensureColumn('sl_coop', 'boss_started_at', 'DATETIME');
-// Kolumna z dawnego mechanizmu zbiórki (termin, po którym boss budził się sam) —
-// nieużywana od przejścia na jedną, ciągłą fazę walki. Zostaje w schemacie
-// nietknięta (unikamy DROP COLUMN na SQLite), po prostu nic już do niej nie pisze.
-ensureColumn('sl_coop', 'collect_deadline_at', 'DATETIME');
-
-// sl_activity: moderacja widoku. Obie kolumny to NADPISANIA pojedynczego wpisu — NULL
-// (domyślnie) oddaje decyzję warstwom niżej: regułom i domyślnej widoczności typu.
-// `visibility` = 'hidden' chowa wpis mimo wszystko, 'shown' przypina go widocznym mimo
-// reguł. `public_detail` podmienia TREŚĆ pokazywaną graczom — oryginał w `detail` zostaje
-// nietknięty, bo czyta go logika wewnętrzna (patrz backfillKnockbackPoints i rollback dnia).
-// sl_coop_contributions: skąd wzięły się obrażenia. 'coins' = wpłata z portfela (tylko ta
-// liczy się do nagrody za zabicie), 'dice' = darmowe trafienie z rzutu. Brak wartości
-// w starych wierszach czytamy jak 'dice' — historyczne trafienia nie dostają zwrotu monet.
-ensureColumn('sl_coop_contributions', 'source', 'TEXT');
+// Kolumny bossa dokłada lib/boss.js (initSchema).
 
 ensureColumn('sl_activity', 'visibility', 'TEXT');
 ensureColumn('sl_activity', 'public_detail', 'TEXT');
@@ -1939,21 +1826,6 @@ function slPublicActivity({ date = null, limit = 150 } = {}) {
   };
 }
 
-// Odmiana „obrażenie/obrażenia/obrażeń" — dziennik czyta się jak zdanie, więc liczba
-// mnoga musi się zgadzać (1 obrażenie, 24 obrażenia, 45 obrażeń, ale 12 obrażeń).
-function slDamageWord(n) {
-  const abs = Math.abs(n);
-  if (abs === 1) return 'obrażenie';
-  const last = abs % 10;
-  const lastTwo = abs % 100;
-  return last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14) ? 'obrażenia' : 'obrażeń';
-}
-
-// Jednolita treść wpisu o trafieniu bossa: „atak na bossa — 24 obrażenia (kość)".
-// `source` mówi, skąd poszło uderzenie (kość / monety / admin / wpłata).
-function slBossHitEntry(damage, source) {
-  return `atak na bossa — ${damage} ${slDamageWord(damage)} (${source})`;
-}
 
 // Etykiety power-upów do czytelnych wpisów w dzienniku i na Discordzie.
 const SL_POWERUP_LABELS = { freeze: 'Freeze', curse: 'Curse', double_move: 'Extra Move', shield: 'Shield' };
@@ -2438,351 +2310,6 @@ function slLeaderboard(meId) {
 // Po przekroczeniu progu rusza event „bossowy" (mechanika = stub do uzupełnienia),
 // a po jego zakończeniu kontrybutorzy dostają nagrody wg wybranego podziału.
 
-// Domyślny próg dla NOWYCH cykli — admin może go podmienić na stałe (patrz
-// POST /api/snakes/admin/coop/config), bez tego trzeba by grzebać w .env i restartować.
-// Zmiana dotyczy tylko przyszłych cykli; bieżący ma już swój próg zapisany w wierszu.
-function slCoopDefaultThreshold() {
-  const override = parseInt(slMetaGet('coop_threshold_override'), 10);
-  return Number.isInteger(override) && override > 0 ? override : SL_COOP_THRESHOLD;
-}
-
-// ── WYŁĄCZNIK BOSSA ──
-// Cała walka z bossem chodzi na jednym przełączniku trzymanym w sl_meta, więc da się ją
-// zgasić i zapalić z panelu admina bez deployu. Wyłączony boss znika kompletnie: payload
-// dla UI jest pusty (panel i punkt regulaminu się chowają), rzuty nie zadają obrażeń,
-// ręczny atak odpada, scheduler nie rozlicza terminów, a nowe cykle się nie zakładają.
-// Domyślnie WŁĄCZONY — na produkcji gasi go jednorazowa migracja (patrz
-// shutDownBossAndRevertRewards), więc świeża instalacja dostaje bossa normalnie.
-function slBossEnabled() {
-  return slMetaGet('boss_enabled') !== '0';
-}
-
-// Zapala/gasi bossa. Przy gaszeniu domykamy trwającą walkę BEZ rozliczenia (nikt nie
-// dostaje nagrody ani kary — walka po prostu przestaje istnieć), przy zapalaniu startuje
-// świeży cykl z nowym bossem i nowym terminem. Bez tego po ponownym włączeniu odżyłby
-// stary cykl z terminem dawno po czasie i pierwszy tik schedulera ukarałby wszystkich
-// za przegraną, której nikt nie miał szans rozegrać.
-function slSetBossEnabled(on) {
-  return transaction(() => {
-    slMetaSet('boss_enabled', on ? '1' : '0');
-    if (!on) {
-      const closed = db.prepare(`
-        UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-        WHERE status = 'event_active'
-      `).run();
-      return { enabled: false, closed_cycles: closed.changes };
-    }
-    const last = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
-    if (last && last.status === 'event_active') return { enabled: true, cycle: Number(last.cycle), boss_name: last.boss_name };
-    const next = slCoopInsertCycle(
-      last ? Number(last.cycle) + 1 : 1,
-      slCoopDefaultThreshold(),
-      SL_COOP_BASE_TIME_DAYS
-    );
-    return { enabled: true, cycle: Number(next.cycle), boss_name: next.boss_name };
-  });
-}
-
-// Wstawia nowy cykl co-op — rusza NATYCHMIAST (started_at = teraz, domyślnie w schemacie)
-// i OD RAZU budzi bossa (jedna faza — patrz komentarz "ESKALACJA TRUDNOŚCI CO-OP" wyżej):
-// żadnej zbiórki, żadnego czekania. `threshold` to WPROST punkty życia bossa (patrz
-// startCoopBossEvent i SL_BOSS_HP_MULTIPLIER = 1), `timeLimitDays` to domyślny czas na
-// pokonanie GO, który admin może potem w każdej chwili nadpisać na konkretną godzinę
-// (patrz POST /api/snakes/admin/coop/config). Kolumna reward_pool została po dawnej puli
-// nagród i nie jest już do niczego używana — nagroda liczy się z wpłat (slFinishBossEvent).
-function slCoopInsertCycle(cycle, threshold, timeLimitDays) {
-  db.prepare(`
-    INSERT INTO sl_coop (cycle, threshold, time_limit_days, status, triggered_at)
-    VALUES (?, ?, ?, 'event_active', CURRENT_TIMESTAMP)
-  `).run(cycle, threshold, timeLimitDays);
-  const coop = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
-  startCoopBossEvent(coop);
-  return db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
-}
-
-// Zwraca bieżący cykl co-op — wystarczy ostatni wiersz; jeśli baza jest zupełnie pusta, zakłada świeży cykl #1
-// z wartościami bazowymi (próg z ewentualnego override'u admina, czas z SL_COOP_BASE_TIME_DAYS).
-function slCurrentCoop() {
-  const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
-  if (coop) return coop;
-  return slCoopInsertCycle(1, slCoopDefaultThreshold(), SL_COOP_BASE_TIME_DAYS);
-}
-
-// Udział graczy w cyklu. `amount` to SUMA ZADANYCH OBRAŻEŃ (kości + wpłaty), a `coins`
-// to sama część kupiona za monety — i to WYŁĄCZNIE od niej liczy się nagroda za zabicie
-// (patrz slFinishBossEvent). Obrażenia z kości są darmowe, więc nie mają czego zwracać;
-// gdyby wchodziły do nagrody, granie samo w sobie drukowałoby monety.
-// Wiersze sprzed rozdzielenia źródeł mają source = NULL i traktujemy je jak 'dice'.
-function slCoopAttackers(cycle) {
-  return db.prepare(`
-    SELECT c.player_id, p.nickname,
-           SUM(c.amount) AS amount,
-           SUM(CASE WHEN c.source = 'coins' THEN c.amount ELSE 0 END) AS coins
-    FROM sl_coop_contributions c JOIN players p ON p.id = c.player_id
-    WHERE c.cycle = ?
-    GROUP BY c.player_id
-    ORDER BY coins DESC, amount DESC
-  `).all(cycle).map(r => ({
-    player_id: r.player_id,
-    nickname: r.nickname,
-    amount: Number(r.amount),
-    coins: Number(r.coins)
-  }));
-}
-
-// Zwraca null, gdy boss jest wyłączony — UI po stronie gracza i panel admina czytają to
-// jako „nie ma czego pokazywać". Sprawdzenie jest PRZED slCurrentCoop(), bo tamto samo
-// zakłada nowy cykl, gdy tabela jest pusta — wyłączony boss nie ma prawa się tak wskrzesić.
-function slCoopPayload(meId) {
-  if (!slBossEnabled()) return null;
-  const coop = slCurrentCoop();
-  const attackers = slCoopAttackers(coop.cycle);
-  const me = meId ? attackers.find(c => c.player_id === meId) : null;
-  const mine = me ? me.amount : 0;
-  const mineCoins = me ? me.coins : 0;
-  const threshold = Number(coop.threshold);
-
-  // Poprzednia edycja (jeśli już się rozstrzygnęła) — do krótkiego podsumowania "co się
-  // stało ostatnio i dlatego trudność jest taka, jaka jest" w UI zaraz po sukcesji.
-  let previousResult = null;
-  if (coop.cycle > 1) {
-    const prev = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle - 1);
-    if (prev && prev.completed_at) {
-      previousResult = {
-        cycle: Number(prev.cycle),
-        boss_name: prev.boss_name,
-        defeated: !!prev.boss_defeated_at,
-        timeout_penalty: prev.boss_defeated_at ? 0 : SL_BOSS_TIMEOUT_PENALTY
-      };
-      // MOJA wypłata z tamtej walki. Odtwarzamy ją z zachowanych wpłat (sl_coop_contributions
-      // przeżywa zamknięcie cyklu) tymi samymi funkcjami, którymi liczyło ją rozliczenie —
-      // slCoopAttackers + slCoopContribReward — więc liczby nie mogą się rozminąć z tym,
-      // co realnie trafiło na konto. Bez tego karta bossa umiała napisać wyłącznie
-      // „pokonany", a gracz nie miał skąd wiedzieć, ile dostał.
-      if (prev.boss_defeated_at) {
-        const prevPayouts = slCoopAttackers(prev.cycle)
-          .filter(c => c.coins > 0)
-          .map(c => ({ ...c, ...slCoopContribReward(c.coins) }));
-        const myPrev = meId ? prevPayouts.find(c => c.player_id === meId) : null;
-        previousResult.payouts = prevPayouts;
-        previousResult.contributors = prevPayouts.length;
-        previousResult.coins_paid = prevPayouts.reduce((a, p) => a + p.coins, 0);
-        previousResult.points_awarded = prevPayouts.reduce((a, p) => a + p.points, 0);
-        previousResult.coins_refunded = prevPayouts.reduce((a, p) => a + p.refund, 0);
-        previousResult.my_coins = myPrev ? myPrev.coins : 0;
-        previousResult.my_points = myPrev ? myPrev.points : 0;
-        previousResult.my_refund = myPrev ? myPrev.refund : 0;
-      }
-    }
-  }
-
-  return {
-    cycle: Number(coop.cycle),
-    status: coop.status,
-    // `threshold` to dziś po prostu startowe HP bossa — zostaje w payloadzie dla panelu
-    // admina, gdzie służy za suwak trudności (patrz GET /api/snakes/admin/settings).
-    threshold,
-    default_threshold: slCoopDefaultThreshold(),
-    my_damage: mine,
-    // Ile MONET wpłaciłem w tym cyklu — od tego (a nie od obrażeń z kości) liczy się
-    // nagroda, więc UI musi umieć pokazać jedno i drugie osobno.
-    my_coins: mineCoins,
-    attackers,
-    time_limit_days: Number(coop.time_limit_days),
-    previous_result: previousResult,
-    timeout_penalty: SL_BOSS_TIMEOUT_PENALTY,
-    // Realna kara DLA MNIE, gdyby event skończył się porażką TERAZ — pomniejszona o to,
-    // ile COINS już wpłaciłem w tym cyklu (patrz slFinishBossEvent). Musi liczyć się tak
-    // samo jak tam, z mineCoins a nie z mine — inaczej UI obiecywałoby zniżkę za rzuty,
-    // której rozliczenie by nie dało. Kto nie wpłacił, widzi tu pełne timeout_penalty.
-    my_timeout_penalty: Math.max(0, SL_BOSS_TIMEOUT_PENALTY - mineCoins),
-    // Konkretne liczby na "co będzie, jak wygracie/przegracie" — żeby UI mógł pokazać
-    // realną karę/nagrodę zamiast ogólnikowego opisu (patrz slCoopNextDifficulty).
-    next_on_win: slCoopNextDifficulty(coop, true),
-    next_on_loss: slCoopNextDifficulty(coop, false),
-    // Boss walczy ZAWSZE (jedna faza — nie ma już zbiórki poprzedzającej), więc ten
-    // obiekt jest tu praktycznie zawsze (null tylko w teoretycznym momencie tuż po
-    // INSERT, zanim startCoopBossEvent zdąży dopisać HP — patrz slCoopInsertCycle).
-    boss: coop.boss_name ? {
-      name: coop.boss_name,
-      hp: Math.max(0, Number(coop.boss_hp)),
-      max_hp: Number(coop.boss_max_hp),
-      percent: Math.max(0, Math.min(100, Math.round((Number(coop.boss_hp) / Math.max(1, Number(coop.boss_max_hp))) * 100))),
-      defeated: !!coop.boss_defeated_at,
-      active: coop.status === 'event_active',
-      deadline_at: coop.boss_deadline_at ? new Date(coop.boss_deadline_at.replace(' ', 'T') + 'Z').toISOString() : null,
-      started_at: coop.boss_started_at
-        ? new Date(coop.boss_started_at.replace(' ', 'T') + 'Z').toISOString()
-        : (coop.boss_deadline_at
-            ? new Date(Date.parse(coop.boss_deadline_at.replace(' ', 'T') + 'Z') - Number(coop.time_limit_days) * 86400000).toISOString()
-            : null),
-      time_limit_days: Number(coop.time_limit_days),
-      dice_damage_mult: SL_BOSS_DICE_DAMAGE_MULT,
-      // Kurs wpłaty: 1 moneta = 1 obrażenie, a po zabiciu część wpłaty wraca w punktach
-      // plus zwrot monet (nie więcej, niż się włożyło).
-      points_per_coin: SL_COOP_POINTS_PER_COIN,
-      contrib_refund: SL_COOP_CONTRIB_REFUND
-    } : null
-  };
-}
-
-// ── WALKA Z BOSSEM ──
-// Wołane od razu przy założeniu nowego cyklu (patrz slCoopInsertCycle) — boss budzi się
-// natychmiast, nie ma już żadnej zbiórki, po której miałby czekać. Losuje bossa, ustawia
-// mu HP proporcjonalne do progu (suwaka trudności) i liczy termin pokonania —
-// coop.time_limit_days DNI ROBOCZYCH od teraz (weekendy nie liczą się do odliczania,
-// patrz addBusinessDaysMs). `coop` musi mieć aktualne `threshold`/`time_limit_days`/`cycle`.
-function startCoopBossEvent(coop) {
-  const name = SL_BOSS_NAMES[Math.floor(Math.random() * SL_BOSS_NAMES.length)];
-  const maxHp = Math.round(Number(coop.threshold) * SL_BOSS_HP_MULTIPLIER);
-  const deadlineMs = addBusinessDaysMs(Date.now(), Number(coop.time_limit_days));
-  db.prepare(`
-    UPDATE sl_coop SET boss_name = ?, boss_max_hp = ?, boss_hp = ?,
-                       boss_started_at = CURRENT_TIMESTAMP, boss_deadline_at = datetime(?, 'unixepoch')
-    WHERE cycle = ?
-  `).run(name, maxHp, maxHp, Math.floor(deadlineMs / 1000), coop.cycle);
-  return { started: true, cycle: Number(coop.cycle), boss_name: name, boss_max_hp: maxHp, deadline_ms: deadlineMs };
-}
-
-// Warunek zwycięstwa: HP bossa spadło do zera (od rzutów graczy lub ręcznych ataków —
-// patrz obsługa w POST /api/snakes/roll i /api/snakes/coop/contribute).
-function resolveCoopBossEvent(coop) {
-  return { defeated: Number(coop.boss_hp) <= 0, cycle: Number(coop.cycle) };
-}
-
-// Co dostaje gracz, gdy boss padnie — liczone WYŁĄCZNIE z jego wpłaty w monetach.
-// Punkty: SL_COOP_POINTS_PER_COIN × wpłata — trafiają tylko do rankingu, nie da się
-// ich wydać w sklepie, więc nie mogą napędzić kolejnej wpłaty.
-// Monety: zwrot części kosztu, ale NIGDY więcej, niż gracz sam włożył. To ograniczenie
-// trzyma całą ekonomię: suma zwróconych monet jest zawsze ≤ suma wpłaconych, więc nie da
-// się wyjść z walki z bossem na plusie. Bez niego wpłata 1 monety oddawałaby 50.
-function slCoopContribReward(coins) {
-  const paid = Math.max(0, Number(coins) || 0);
-  if (paid <= 0) return { points: 0, refund: 0 };
-  return {
-    points: Math.round(paid * SL_COOP_POINTS_PER_COIN),
-    refund: Math.min(SL_COOP_CONTRIB_REFUND, paid)
-  };
-}
-
-// Próg/czas KOLEJNEJ edycji na podstawie wyniku tej: wygrana = trudniej i szybciej
-// (× GROWTH / × SHRINK); przegrana (czas minął) = odrobinę łatwiej (RELIEF_FACTOR)
-// — "delikatna pomoc", żeby ekipa mogła się odbić, a nie utknąć na niemożliwym progu.
-// W obie strony trzymamy się widełek [BASE .. wynik poprzedniej edycji] — porażka
-// nigdy nie schodzi PONIŻEJ progu bazowego ani nie wydłuża czasu PONAD bazowy.
-function slCoopNextDifficulty(coop, defeated) {
-  const threshold = Number(coop.threshold);
-  const timeLimit = Number(coop.time_limit_days);
-  const base = slCoopDefaultThreshold();
-  if (defeated) {
-    // Trudniej: zaokrąglenia ZAWSZE w stronę większej trudności (próg w górę, czas w
-    // dół), żeby zaokrąglenie nigdy przypadkiem nie ułatwiło kolejnej edycji.
-    return {
-      threshold: Math.ceil(threshold * SL_COOP_THRESHOLD_GROWTH),
-      time_limit_days: Math.max(SL_COOP_MIN_TIME_DAYS, Math.floor(timeLimit * SL_COOP_TIME_SHRINK))
-    };
-  }
-  // Łatwiej: zaokrąglenia ZAWSZE w stronę większej ulgi (próg w dół, czas w górę) —
-  // inaczej przy małych wartościach czasu (dni) zaokrąglenie potrafi "utknąć" i ulga
-  // z porażki nigdy realnie nie nadejdzie.
-  return {
-    threshold: Math.max(base, Math.floor(threshold * SL_COOP_RELIEF_FACTOR)),
-    time_limit_days: Math.min(SL_COOP_BASE_TIME_DAYS, Math.ceil(timeLimit / SL_COOP_RELIEF_FACTOR))
-  };
-}
-
-// Zamyka event bossowy, wypłaca nagrody/karę i OD RAZU otwiera kolejną edycję (trudniejszą
-// po wygranej, odrobinę łagodniejszą po porażce — patrz slCoopNextDifficulty; nowy boss
-// budzi się natychmiast, patrz slCoopInsertCycle). Wołane automatycznie, gdy HP bossa
-// spadnie do zera (rzut albo wpłata), albo gdy minie termin (scheduler niżej),
-// a boss wciąż żyje. Pokonanie bossa płaci TYLKO tym, którzy wpłacili coins: każdy
-// dostaje SL_COOP_POINTS_PER_COIN × swoją wpłatę w punktach rankingowych i zwrot coins
-// ograniczony do wysokości własnej wpłaty (patrz slCoopContribReward). Kto walczył samymi
-// rzutami, nie dostaje nic ponad punkty, które rzuty i tak dały — bo nic nie zaryzykował.
-// Punkty i monety dopisujemy OSOBNO, bo to dwie różne wielkości (dawniej ta sama liczba
-// szła do obu kolumn i to był rdzeń pętli).
-// Nie pokonanie na czas = PRZEGRANA: nagrody NIE MA, wpłacone monety przepadają,
-// a boss "atakuje" i zabiera do
-// SL_BOSS_TIMEOUT_PENALTY monet KAŻDEMU graczowi (nie tylko tym, którzy walczyli) —
-// realna stawka za bierność. Ci, którzy WPŁACILI, mają jednak karę pomniejszoną o wysokość
-// własnej wpłaty (wpłacił 30 → traci 20; wpłacił 50 lub więcej → nic nie traci) — jedyna
-// ulga, gdy się nie uda. Liczy się sama wpłata, nie obrażenia: rzuty są darmowe, więc
-// gdyby dawały zniżkę, kara omijałaby każdego, kto tylko klika kostką.
-function slFinishBossEvent(coop, defeated) {
-  const attackers = slCoopAttackers(coop.cycle);
-  const payouts = attackers.map(c => {
-    const r = defeated ? slCoopContribReward(c.coins) : { points: 0, refund: 0 };
-    return { ...c, points: r.points, refund: r.refund };
-  });
-
-  const payPoints = db.prepare('UPDATE sl_state SET total_points = total_points + ? WHERE player_id = ?');
-  const payCoins = db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?');
-  for (const p of payouts) {
-    if (p.points > 0) payPoints.run(p.points, p.player_id);
-    if (p.refund > 0) payCoins.run(p.refund, p.player_id);
-    // Nagroda za bossa to własna kategoria — jedyne punkty, za które gracz realnie zapłacił.
-    // `ref` niesie cykl, żeby slRevertBossRewards mogło skasować dokładnie te wiersze.
-    slLogPoints(p.player_id, 'boss', p.points, `cycle:${coop.cycle}`);
-    // KAŻDA wypłata zostawia ślad w dzienniku. Wcześniej rozliczenie robiło wyłącznie
-    // UPDATE na sl_state — punkty i coins pojawiały się na koncie bez śladu i gracz nie
-    // miał ŻADNEGO sposobu dowiedzieć się, ile dostał (Discord podawał tylko sumy
-    // zbiorcze, a previous_result nie niósł liczb). Wpis ma player_id, więc dziennik
-    // podświetli każdemu jego własną wypłatę.
-    if (p.points > 0 || p.refund > 0) {
-      slLogActivity(p.player_id, 'boss_reward',
-        `🏆 ${coop.boss_name} pokonany — za wpłatę ${p.coins} coins: +${p.points} pkt i zwrot ${p.refund} coins`);
-    }
-  }
-
-  let playersPenalized = 0;
-  if (!defeated) {
-    // Zniżka od kary liczy się WYŁĄCZNIE z wpłaconych coins (c.coins), nigdy z sumy
-    // obrażeń (c.amount). Wcześniej liczyła się z amount, czyli razem z trafieniami
-    // z kości — a te są darmowe i przez cykl uzbierają grubo ponad pełną karę, więc
-    // KAŻDY, kto w ogóle rzucał, był z kary zwolniony, nie ryzykując ani jednego coina.
-    // Kara nie karała więc nikogo poza tymi, którzy i tak nie grali. Teraz zniżkę kupuje
-    // się wyłącznie wpłatą — tym samym, co realnie decyduje o życiu bossa.
-    const paidByPlayer = new Map(attackers.map(c => [c.player_id, c.coins]));
-    const allPlayers = db.prepare('SELECT player_id, balance FROM sl_state').all();
-    const upd = db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?');
-    for (const p of allPlayers) {
-      const discount = paidByPlayer.get(p.player_id) || 0;
-      const penalty = Math.max(0, SL_BOSS_TIMEOUT_PENALTY - discount);
-      const taken = Math.min(penalty, Math.max(0, Number(p.balance)));
-      if (taken > 0) {
-        upd.run(taken, p.player_id);
-        playersPenalized++;
-        // Zabranie coins też musi zostawić ślad — z tego samego powodu, co wypłata wyżej.
-        // Logujemy `taken`, czyli kwotę FAKTYCZNIE zabraną (przyciętą do salda), a nie
-        // nominalną karę: gracz ma w dzienniku zobaczyć to, co realnie zniknęło z konta.
-        slLogActivity(p.player_id, 'boss_reward',
-          `💥 ${coop.boss_name} zaatakował — zabrał ${taken} coins`);
-      }
-    }
-  }
-
-  db.prepare(`
-    UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP, boss_hp = 0
-      ${defeated ? ", boss_defeated_at = CURRENT_TIMESTAMP" : ''}
-    WHERE cycle = ?
-  `).run(coop.cycle);
-
-  const next = slCoopNextDifficulty(coop, defeated);
-  const nextCoop = slCoopInsertCycle(coop.cycle + 1, next.threshold, next.time_limit_days);
-
-  return {
-    cycle: Number(coop.cycle), boss_name: coop.boss_name, payouts, defeated,
-    // Bilans cyklu — wprost do wglądu: ile monet wpłacono, ile wróciło, ile punktów powstało.
-    // coins_paid ≥ coins_refunded z definicji (patrz slCoopContribReward).
-    coins_paid: attackers.reduce((a, c) => a + c.coins, 0),
-    coins_refunded: payouts.reduce((a, p) => a + p.refund, 0),
-    points_awarded: payouts.reduce((a, p) => a + p.points, 0),
-    contributors: payouts.filter(p => p.coins > 0).length,
-    timeout_penalty: defeated ? 0 : SL_BOSS_TIMEOUT_PENALTY,
-    players_attacked: playersPenalized,
-    next_cycle: { cycle: Number(nextCoop.cycle), threshold: next.threshold, time_limit_days: next.time_limit_days }
-  };
-}
 
 // ══ DISCORD — SZYNA ZDARZEŃ ══
 // Zdarzenia gry lecą przez jedną szynę: każdy typ ma własny przełącznik, trzymany
@@ -2888,7 +2415,7 @@ function slBuildDailySummary() {
   const movedToday = Number(db.prepare(
     'SELECT COUNT(*) AS c FROM sl_moves WHERE move_date = ?'
   ).get(today).c);
-  const coop = slCoopPayload(null);
+  const coop = boss.slCoopPayload(null);
   const medals = ['🥇', '🥈', '🥉', '4.', '5.'];
   const lines = top.map((p, i) => `${medals[i]} **${p.nickname}** — ${p.total_points} pkt (okr. ${p.laps}, pole ${p.tile})`);
   return {
@@ -2924,137 +2451,29 @@ function startSnakesDiscordScheduler() {
 }
 startSnakesDiscordScheduler();
 
-// ── SCHEDULER TERMINU BOSSA ──
-// Jedna faza, jeden zegar: jeśli minie boss_deadline_at, a boss wciąż żyje, rozliczamy to
-// jak przegraną (patrz slFinishBossEvent) i OD RAZU startuje kolejna, łagodniejsza edycja
-// z nowym bossem. Jeśli boss padł wcześniej w grze, status jest już 'completed' i ten kod
-// nigdy się nie odpala — brak podwójnego rozliczenia. Działa ZAWSZE (niezależnie od
-// webhooka) — slEmit sam pomija wysyłkę, gdy webhook nie jest skonfigurowany. Tick co
-// minutę + raz od razu przy starcie (samo-naprawa po restarcie, także po tym, jak admin
-// ustawi termin w przeszłości przez /admin/coop/config — patrz tam).
-function slResolveBossTimeout(cycle) {
-  return transaction(() => {
-    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(cycle);
-    if (!fresh || fresh.status !== 'event_active') return null;
-    if (!fresh.boss_deadline_at) return null;
-    if (Date.now() < Date.parse(fresh.boss_deadline_at.replace(' ', 'T') + 'Z')) return null;
-    return slFinishBossEvent(fresh, Number(fresh.boss_hp) <= 0);
-  });
-}
-
-// Rozpiska „kto ile dostał" na Discorda. JEDNO miejsce, bo są TRZY ścieżki zamknięcia walki
-// (zabicie rzutem, zabicie wpłatą, ręczne zamknięcie z panelu) i wcześniej rozpiskę miała
-// tylko ostatnia z nich — dwie pozostałe podawały same sumy zbiorcze, więc przy bossie
-// padającym samoistnie nikt nie wiedział, komu co przyszło. Wspólny helper sprawia, że nie
-// da się ich znów rozjechać.
-function slBossPayoutLines(outcome) {
-  const paid = (outcome.payouts || []).filter(p => p.coins > 0);
-  if (!paid.length) return '';
-  return '\n\n' + paid
-    .map(p => `• **${p.nickname}** — wpłata ${p.coins} → **+${p.points}** pkt, zwrot **${p.refund}** coins`)
-    .join('\n');
-}
-
-function slEmitBossTimeout(outcome) {
-  slEmit('coop_completed', () => ({
-    content: outcome.defeated ? '🏆 **Boss pokonany!**' : '💥 **Czas minął — boss zaatakował!**',
-    embeds: [{
-      title: `Edycja #${outcome.cycle} — ${outcome.boss_name}`,
-      url: SNAKES_URL,
-      description: (outcome.defeated
-        ? `Wpłacający (${outcome.contributors}) dzielą **${outcome.points_awarded} pkt** i odzyskują **${outcome.coins_refunded}** z wpłaconych **${outcome.coins_paid}** coins.`
-        : `Nie zdążyliście dobić bossa na czas. Nagrody nie ma. Boss zabrał do **${outcome.timeout_penalty} coins** każdemu graczowi (wpłacającym pomniejszone o własną wpłatę; dotyczy ${outcome.players_attacked} ${outcome.players_attacked === 1 ? 'osoby' : 'osób'}).`
-      ) + `\n\n➡️ Edycja #${outcome.next_cycle.cycle} rusza od razu: **${outcome.next_cycle.time_limit_days}** dni roboczych na pokonanie kolejnego bossa.`,
-      color: outcome.defeated ? 0x53D06B : 0xE85D4A
-    }]
-  }));
-}
-
-function startCoopBossDeadlineScheduler() {
-  const tick = () => {
-    if (!slBossEnabled()) return;
-    const coop = slCurrentCoop();
-    if (coop.status !== 'event_active') return;
-    const outcome = slResolveBossTimeout(coop.cycle);
-    if (outcome) slEmitBossTimeout(outcome);
-  };
-  tick();
-  setInterval(tick, 60_000);
-  console.log(`Snakes/Co-op: eskalacja trudności — próg ×${SL_COOP_THRESHOLD_GROWTH} i czas ×${SL_COOP_TIME_SHRINK} po wygranej (min. ${SL_COOP_MIN_TIME_DAYS} dni robocze), ulga ×${SL_COOP_RELIEF_FACTOR} po porażce.`);
-}
-// ── COFANIE NAGRÓD BOSSA ──
-// Nagrody za pokonanie bossa NIE mają własnego rejestru — slFinishBossEvent dolicza je
-// wprost do salda i punktów gracza. Da się je jednak odtworzyć CO DO GROSZA, bo liczą się
-// z danych, które w bazie zostają: wpłat każdego gracza (sl_coop_contributions po
-// rozliczeniu cyklu już się nie zmienia). Puszczamy więc tę samą funkcję co przy wypłacie
-// (slCoopContribReward) i odejmujemy wynik — osobno punkty, osobno monety.
-// Bierzemy WYŁĄCZNIE cykle wygrane (boss_defeated_at) — przegrane nic nie wypłaciły.
-// Wpłacone monety NIE wracają: to był koszt walki, a nie nagroda. Kary z przegranych walk
-// też nie — przy zabieraniu kwota była przycinana do salda gracza, więc realnie zabrana
-// wartość nigdzie nie została zapisana. Odejmowanie ma podłogę na zerze — kto zdążył wydać
-// nagrodę, schodzi do zera, ale nie na minus.
-function slRevertBossRewards() {
-  const cycles = db.prepare(`
-    SELECT * FROM sl_coop WHERE completed_at IS NOT NULL AND boss_defeated_at IS NOT NULL
-  `).all();
-
-  const takeBack = new Map(); // player_id → { points, coins }
-  for (const c of cycles) {
-    for (const p of slCoopAttackers(c.cycle)) {
-      const r = slCoopContribReward(p.coins);
-      if (r.points <= 0 && r.refund <= 0) continue;
-      const acc = takeBack.get(p.player_id) || { points: 0, coins: 0 };
-      acc.points += r.points;
-      acc.coins += r.refund;
-      takeBack.set(p.player_id, acc);
-    }
-  }
-
-  const upd = db.prepare(`
-    UPDATE sl_state SET balance = MAX(0, balance - ?), total_points = MAX(0, total_points - ?)
-    WHERE player_id = ?
-  `);
-  for (const [playerId, v] of takeBack) upd.run(v.coins, v.points, playerId);
-
-  // Skoro punkty za bossa wracają, rozbicie nie może dalej twierdzić, że gracz je ma.
-  // Kasujemy CAŁĄ kategorię, bo ta funkcja cofa nagrody ze WSZYSTKICH rozliczonych walk.
-  db.prepare("DELETE FROM sl_points_log WHERE category = 'boss'").run();
-
-  return {
-    cycles: cycles.length,
-    players: takeBack.size,
-    total: [...takeBack.values()].reduce((a, b) => a + b, 0)
-  };
-}
-
-// ── MIGRACJA (jednorazowa): WYŁĄCZENIE BOSSA + COFNIĘCIE TEGO, CO ROZDAŁ ──
-// Wersja „awaryjny hamulec": po deployu produkcja sama gasi bossa i oddaje punkty oraz
-// monety, które wypłacił za pokonane walki. Flaga w sl_meta pilnuje, żeby stało się to
-// DOKŁADNIE RAZ — inaczej każdy restart zabierałby graczom kolejną porcję punktów, a
-// admin nie mógłby już nigdy włączyć bossa z panelu (kolejny restart znów by go zgasił).
-// Wpisy o walce znikają z dziennika, bo dotyczą czegoś, czego po cofnięciu już nie ma;
-// sl_coop i sl_coop_contributions ZOSTAJĄ jako ślad po tym, co i komu odjęto.
-(function shutDownBossAndRevertRewards() {
-  const FLAG = 'boss_shutdown_revert_done';
-  if (slMetaGet(FLAG)) return;
-
-  transaction(() => {
-    slMetaSet(FLAG, new Date().toISOString());
-    const undone = slRevertBossRewards();
-    const closed = db.prepare(`
-      UPDATE sl_coop SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-      WHERE status = 'event_active'
-    `).run();
-    const wiped = db.prepare(`DELETE FROM sl_activity WHERE type = 'boss_hit'`).run();
-    slMetaSet('boss_enabled', '0');
-    console.log(
-      `Snakes/Boss: WYŁĄCZONY. Cofnięto ${undone.total} pkt i coins od ${undone.players} ` +
-      `${undone.players === 1 ? 'gracza' : 'graczy'} (${undone.cycles} rozliczonych walk), ` +
-      `domknięto ${closed.changes} trwającą walkę, usunięto ${wiped.changes} wpisów z dziennika. ` +
-      `Włączyć z powrotem można z panelu admina.`
-    );
-  });
-})();
+// ══ WALKA Z BOSSEM (lib/boss.js) ══
+// Podpinamy TUTAJ, a nie wyżej, bo moduł potrzebuje szyny Discorda (slEmit) i SNAKES_URL,
+// a te powstają dopiero w tej sekcji. Helpery wstrzykujemy zamiast robić require w drugą
+// stronę: inaczej byłby cykl server → boss → server, a przy jednym pliku bazy dwa
+// niezależne uchwyty to proszenie się o „database is locked".
+// `snakesUrl` i `buildState` idą jako funkcje, a nie wartości, bo obie są zdefiniowane
+// niżej w pliku — opakowanie odracza sięgnięcie po nie do czasu realnego wywołania.
+const boss = require('./lib/boss')({
+  db, transaction, ensureColumn,
+  slMetaGet, slMetaSet,
+  slLogActivity, slLogPoints,
+  slEnsureState,
+  slEmit,
+  snakesUrl: () => SNAKES_URL,
+  todayWaw, addBusinessDaysMs
+});
+boss.initSchema();
+boss.runStartupMigrations();
+boss.registerRoutes(app, {
+  authPlayer, checkAdmin,
+  buildState: playerId => slBuildState(playerId)
+});
+boss.startDeadlineScheduler();
 
 // ── MIGRACJA (jednorazowa): DOŁADOWANIE „bank się pomylił" — każdy gracz dostaje
 // SL_BANK_ERROR_GRANT coins do portfela. Jednorazowy prezent od admina przy okazji
@@ -3095,65 +2514,6 @@ const SL_BANK_ERROR_GRANT = 100;
   }
 })();
 
-// ── MIGRACJA (jednorazowa): edycje, które utknęły w starym statusie 'collecting' (sprzed
-// przejścia na jedną fazę — boss walczy zawsze, patrz komentarz "ESKALACJA TRUDNOŚCI
-// CO-OP" wyżej), budzimy natychmiast — dostają swojego bossa i normalny termin na
-// pokonanie, tak jakby właśnie wystartowała ich edycja. Przy wyłączonym bossie nie ma
-// czego budzić — cykl czeka na ewentualne włączenie z panelu.
-(function activateLegacyCollectingCycles() {
-  if (!slBossEnabled()) return;
-  const rows = db.prepare(`SELECT * FROM sl_coop WHERE status = 'collecting'`).all();
-  for (const row of rows) {
-    db.prepare(`
-      UPDATE sl_coop SET status = 'event_active', triggered_at = CURRENT_TIMESTAMP
-      WHERE cycle = ?
-    `).run(row.cycle);
-    const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(row.cycle);
-    const info = startCoopBossEvent(fresh);
-    console.log(`Snakes/Co-op: edycja #${row.cycle} przełączona ze starej zbiórki na walkę — budzi się ${info.boss_name}`);
-  }
-})();
-
-// ── MIGRACJA (jednorazowa): WPŁATY Z CZASÓW ZBIÓRKI → OBRAŻENIA ──
-// Kasa wrzucona do puli, zanim boss wstał, nie może po prostu wyparować: przeliczamy ją
-// 1:1 na obrażenia i od razu je bossowi zadajemy. Wiersze sl_coop_contributions sprzed
-// `boss_started_at` to WŁAŚNIE tamte wpłaty (trafienia z walki są zapisywane dopiero po
-// wybudzeniu bossa, więc mają późniejsze created_at) — dlatego rozpoznajemy je po czasie,
-// a nie po statusie cyklu. Dzięki temu migracja działa tak samo, gdy boss wstał już przy
-// poprzednim restarcie, jak i gdy budzi się dopiero teraz.
-// Same wiersze zostają nietknięte — liczą się dalej jako wkład do podziału nagród
-// (patrz slCoopAttackers), zmienia się tylko to, że boss faktycznie to oberwał.
-// Flaga w sl_meta pilnuje, żeby odliczyć je DOKŁADNIE RAZ na cykl; HP nie schodzi poniżej
-// 1, bo dobicie ma pójść normalną drogą (rzut/atak gracza → nagrody, patrz slFinishBossEvent).
-(function convertLegacyContributionsToDamage() {
-  if (!slBossEnabled()) return;
-  const FLAG = 'coop_legacy_contrib_damage_cycle';
-  const coop = db.prepare('SELECT * FROM sl_coop ORDER BY cycle DESC LIMIT 1').get();
-  if (!coop || coop.status !== 'event_active' || !coop.boss_started_at) return;
-  if (String(slMetaGet(FLAG) || '') === String(coop.cycle)) return;
-
-  transaction(() => {
-    const legacy = db.prepare(`
-      SELECT player_id, SUM(amount) AS amount
-      FROM sl_coop_contributions
-      WHERE cycle = ? AND created_at < ?
-      GROUP BY player_id
-    `).all(coop.cycle, coop.boss_started_at);
-
-    slMetaSet(FLAG, coop.cycle); // ustawiamy ZAWSZE — nawet gdy nie było wpłat, żeby nie liczyć dwa razy
-    const total = legacy.reduce((a, r) => a + Number(r.amount), 0);
-    if (total <= 0) return;
-
-    const newHp = Math.max(1, Number(coop.boss_hp) - total);
-    db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
-    for (const r of legacy) {
-      slLogActivity(r.player_id, 'boss_hit', slBossHitEntry(Number(r.amount), 'wpłata'));
-    }
-    console.log(`Snakes/Co-op: wpłaty z przygotowań (${total}) zadane jako obrażenia — ${coop.boss_name} ma ${newHp}/${coop.boss_max_hp} HP`);
-  });
-})();
-
-startCoopBossDeadlineScheduler();
 
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
 function slBuildState(playerId) {
@@ -3193,7 +2553,7 @@ function slBuildState(playerId) {
     inventory: slInventory(playerId),
     leaderboard: slLeaderboard(playerId),
     shop: SL_POWERUP_TYPES.map(type => ({ type, cost: SL_POWERUP_COSTS[type] })),
-    coop: slCoopPayload(playerId),
+    coop: boss.slCoopPayload(playerId),
     server_date: today
   };
 }
@@ -3237,7 +2597,7 @@ app.get('/api/snakes/board', (req, res) => {
     board: slBoardPayload(),
     players: slPlayersPayload(null),
     leaderboard: slLeaderboard(null),
-    coop: slCoopPayload(null)
+    coop: boss.slCoopPayload(null)
   });
 });
 
@@ -3447,24 +2807,12 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
         `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} coins)` : ''}`);
     }
 
-    // ── SZTURM NA BOSSA: jeśli trwa event bossowy, KAŻDY rzut zadaje mu obrażenia —
+    // ── SZTURM NA BOSSA: jeśli trwa walka, KAŻDY rzut zadaje bossowi obrażenia —
     // normalna gra już "walczy", bez dodatkowej akcji. Liczone od SUROWYCH rzutów.
-    let bossHit = null;
-    const coopNow = slBossEnabled() ? slCurrentCoop() : null;
-    if (coopNow && coopNow.status === 'event_active' && Number(coopNow.boss_hp) > 0) {
-      const dmg = rolls.reduce((a, r) => a + r, 0) * SL_BOSS_DICE_DAMAGE_MULT;
-      const newHp = Math.max(0, Number(coopNow.boss_hp) - dmg);
-      db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coopNow.cycle);
-      db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'dice')")
-        .run(coopNow.cycle, playerId, dmg);
-      slLogActivity(playerId, 'boss_hit', slBossHitEntry(dmg, 'kość'));
-      bossHit = { damage: dmg, boss_name: coopNow.boss_name, hp_left: newHp, max_hp: Number(coopNow.boss_max_hp), defeated: false };
-      if (newHp <= 0) {
-        const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coopNow.cycle);
-        bossHit.defeated = true;
-        bossHit.victory = slFinishBossEvent(fresh, true);
-      }
-    }
+    // Obrażenia z kości NIE dają nagrody (te idą wyłącznie z wpłat coins — patrz
+    // lib/boss.js), ale zdejmują większość HP. `moveIns.lastInsertRowid` idzie jako `ref`,
+    // żeby cofnięcie tego ruchu umiało oddać bossowi dokładnie te obrażenia.
+    const bossHit = boss.slApplyDiceDamage(playerId, rolls, Number(moveIns.lastInsertRowid));
 
     return {
       frozen: false,
@@ -3543,13 +2891,21 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
             title: `Edycja #${result.boss_hit.victory.cycle}`,
             url: SNAKES_URL,
             description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** coins.`
-              + slBossPayoutLines(result.boss_hit.victory),
+              + boss.slBossPayoutLines(result.boss_hit.victory),
             color: 0x53D06B
           }]
         }));
       }
       // Pojedyncze trafienia bossa (bez finału) celowo NIE lecą na Discorda — spamowałyby
-      // kanał przy każdym rzucie podczas eventu.
+      // kanał przy każdym rzucie podczas eventu. Kamień milowy to co innego: pada najwyżej
+      // trzy razy na całą walkę i jest jedynym momentem, w którym gra może powiedzieć
+      // „zostało tyle, dorzućcie się".
+      if (result.boss_hit.milestones && result.boss_hit.milestones.length) {
+        boss.slEmitMilestones(
+          { boss_name: result.boss_hit.boss_name, cycle: result.boss_hit.cycle },
+          result.boss_hit.milestones
+        );
+      }
     }
   }
 
@@ -3806,76 +3162,7 @@ app.get('/api/snakes/players', authPlayer, (req, res) => {
   res.json({ players: slPlayersPayload(req.player.id) });
 });
 
-// POST /api/snakes/coop/contribute { amount } — wpłata monet na bossa: 1 MONETA = 1
-// OBRAŻENIE, dowolna kwota z własnego salda. Zastąpiła ryczałtowy "atak za 20 monet",
-// przy którym punkt obrażeń kosztował mniej, niż wypłacała za niego pula — i z tej
-// różnicy dało się zbudować pętlę (wpłać, zabij, wyjdź na plusie, powtórz).
-// Tu takiej różnicy nie ma: wpłata to koszt, a jedyne, co po zabiciu wraca w monetach,
-// to zwrot ograniczony do wysokości własnej wpłaty (patrz slCoopContribReward).
-// Bez limitu dziennego — limitem jest saldo, które napełnia się wyłącznie grą.
-// Jeśli wpłata dobija bossa, rozliczenie leci od razu (patrz slFinishBossEvent).
-app.post('/api/snakes/coop/contribute', authPlayer, (req, res) => {
-  const playerId = req.player.id;
-  const nickname = req.player.nickname;
-  const amount = parseInt(req.body.amount, 10);
-
-  if (!Number.isInteger(amount) || amount <= 0) {
-    return res.status(400).json({ error: 'Podaj dodatnią liczbę coins.' });
-  }
-
-  const out = transaction(() => {
-    const st = slEnsureState(playerId);
-    if (!slBossEnabled()) return { notActive: true };
-    const coop = slCurrentCoop();
-    if (coop.status !== 'event_active' || Number(coop.boss_hp) <= 0) return { notActive: true };
-    if (Number(st.balance) < amount) return { poor: true, balance: Number(st.balance) };
-
-    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(amount, playerId);
-    const newHp = Math.max(0, Number(coop.boss_hp) - amount);
-    db.prepare('UPDATE sl_coop SET boss_hp = ? WHERE cycle = ?').run(newHp, coop.cycle);
-    db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'coins')")
-      .run(coop.cycle, playerId, amount);
-    slLogActivity(playerId, 'boss_hit', slBossHitEntry(amount, 'coins'));
-
-    let victory = null;
-    if (newHp <= 0) {
-      const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
-      victory = slFinishBossEvent(fresh, true);
-    }
-    return {
-      notActive: false, poor: false, boss_name: coop.boss_name,
-      damage: amount, hp_left: newHp, max_hp: Number(coop.boss_max_hp), victory
-    };
-  });
-
-  if (out.notActive) {
-    return res.status(400).json({ error: 'Żaden boss aktualnie nie walczy.' });
-  }
-  if (out.poor) {
-    return res.status(400).json({ error: `Za mało coins — chcesz wpłacić ${amount}, masz ${out.balance}.` });
-  }
-
-  if (out.victory) {
-    const v = out.victory;
-    slEmit('coop_completed', () => ({
-      content: `🏆 **${out.boss_name} pokonany!**`,
-      embeds: [{
-        title: `Edycja #${v.cycle}`,
-        url: SNAKES_URL,
-        description: `Ostateczny cios zadał **${nickname}**. Wpłacający (${v.contributors}) dzielą ` +
-          `**${v.points_awarded} pkt** i odzyskują **${v.coins_refunded}** z wpłaconych **${v.coins_paid}** coins.`
-          + slBossPayoutLines(v),
-        color: 0x53D06B
-      }]
-    }));
-  }
-  // Uwaga: pojedyncze wpłaty (jak pojedyncze rzuty) NIE lecą na Discorda — tylko finał
-  // eventu (pokonanie / koniec czasu), żeby nie zasypywać kanału.
-
-  res.json({ success: true, damage: out.damage, hp_left: out.hp_left, max_hp: out.max_hp, defeated: !!out.victory, state: slBuildState(playerId) });
-});
-
-// ── ENDPOINTY ADMINA (Snakes) ──
+// Trasa POST /api/snakes/coop/contribute mieszka w lib/boss.js (registerRoutes).
 
 // GET /api/snakes/admin/settings?password= — konfiguracja zdarzeń + stan co-opu
 app.get('/api/snakes/admin/settings', (req, res) => {
@@ -3891,9 +3178,9 @@ app.get('/api/snakes/admin/settings', (req, res) => {
     // Panel pokazuje koszty pod nazwami, które widzi gracz — inaczej admin czytałby
     // surowy klucz `double_move`, gdy reszta gry mówi o nim „Extra Move".
     powerup_labels: SL_POWERUP_LABELS,
-    boss_enabled: slBossEnabled(),
+    boss_enabled: boss.slBossEnabled(),
     // null = boss wyłączony; panel czyta to jako „nie ma czym sterować" (patrz renderInfo).
-    coop: slBossEnabled() ? slCoopPayload(null) : null
+    coop: boss.slBossEnabled() ? boss.slCoopPayload(null) : null
   });
 });
 
@@ -3917,13 +3204,14 @@ app.post('/api/snakes/admin/reset', (req, res) => {
       DELETE FROM sl_inventory;
       DELETE FROM sl_effects;
       DELETE FROM sl_activity;
-      DELETE FROM sl_coop_contributions;
       DELETE FROM sl_points_log;
-      DELETE FROM sl_coop;
     `);
+    // ŚCIEŻKA COFANIA #4 — wszystko po bossie (cykle, obrażenia, rejestr wypłat) kasuje
+    // moduł, żeby lista tabel do wyczyszczenia mieszkała tam, gdzie te tabele powstają.
+    boss.slResetBossData();
     // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
     // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).
-    return { players_affected: playersAffected, coop: slCoopPayload(null) };
+    return { players_affected: playersAffected, coop: boss.slCoopPayload(null) };
   });
 
   slEmit('coop_completed', () => '🔄 **Admin zresetował grę Snakes & Ladders** — wszyscy wracają na start z zerowym kontem.');
@@ -3979,7 +3267,7 @@ app.delete('/api/snakes/admin/players/:id', (req, res) => {
     db.prepare('DELETE FROM sl_moves WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_inventory WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
-    db.prepare('DELETE FROM sl_coop_contributions WHERE player_id = ?').run(playerId);
+    boss.slClearPlayerBossData(playerId); // ŚCIEŻKA COFANIA #5 — wkłady i wypłaty bossa
     db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_points_log WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);
@@ -4043,235 +3331,8 @@ app.post('/api/snakes/admin/discord-test', async (req, res) => {
 // nagrody ręcznie. Normalnie robi to sama mechanika bossa (HP=0 przy rzucie/ataku, albo
 // timeout w schedulerze) — ten endpoint to głównie fallback na wypadek utkniętego eventu.
 // `force: true` domyka event NAWET jeśli boss żyje (bez premii za pokonanie — jak timeout).
-app.post('/api/snakes/admin/coop/complete', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const force = !!req.body.force;
-
-  const out = transaction(() => {
-    if (!slBossEnabled()) return { notActive: true, status: 'wyłączony' };
-    const coop = slCurrentCoop();
-    if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
-
-    const outcome = resolveCoopBossEvent(coop);
-    if (!outcome.defeated && !force) return { notDefeated: true };
-
-    const result = slFinishBossEvent(coop, outcome.defeated);
-    return { notActive: false, ...result };
-  });
-
-  if (out.notActive) {
-    return res.status(400).json({ error: `Żadne wydarzenie nie trwa (status: ${out.status}).` });
-  }
-  if (out.notDefeated) {
-    return res.status(400).json({ error: 'Boss jeszcze nie pokonany (dodaj force:true, żeby zamknąć mimo to — bez nagrody, jak przy przegranej).' });
-  }
-
-  slEmit('coop_completed', () => ({
-    content: '🏆 **Wydarzenie co-op ukończone (ręcznie przez admina)!**',
-    embeds: [{
-      title: `Edycja #${out.cycle} — ${out.boss_name}${out.defeated ? ' pokonany' : ' (event zamknięty bez pokonania)'}`,
-      url: SNAKES_URL,
-      description: (out.defeated
-        ? `Wpłacono **${out.coins_paid}** coins, wróciło **${out.coins_refunded}**, przyznano **${out.points_awarded}** pkt.`
-          + slBossPayoutLines(out)
-        : `Nagrody nie ma, wpłacona kasa przepada. Boss zaatakował — zabrał do **${out.timeout_penalty} coins** każdemu graczowi, kontrybutorom pomniejszone o wkład (${out.players_attacked}).`
-      ),
-      color: 0xC8F135
-    }]
-  }));
-
-  res.json({ success: true, ...out });
-});
-
-// POST /api/snakes/admin/coop/config { password, threshold?, deadline_at? } — kontrola
-// admina nad co-opem/bossem. `threshold` to czysto wewnętrzny suwak trudności (skaluje
-// HP i pulę nagród NASTĘPNYCH edycji, patrz slCoopDefaultThreshold) — boss BIEŻĄCEGO
-// cyklu ma już HP przyznane przy wybudzeniu, więc to nigdy go nie przeskalowuje z
-// mocą wsteczną. `deadline_at` ustawia DOKŁADNY termin (data+godzina, ISO) pokonania
-// AKTYWNEGO bossa — działa zawsze w trakcie walki (czyli praktycznie zawsze, bo boss
-// walczy w jednej, ciągłej fazie) i może być zmieniany dowolną liczbę razy. Jeśli nowy
-// termin już minął, event rozlicza się od razu (tak samo jak scheduler zrobiłby to
-// w ciągu minuty) — admin nie czeka na tick.
-app.post('/api/snakes/admin/coop/config', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const threshold = req.body.threshold != null ? parseInt(req.body.threshold, 10) : null;
-  const deadlineAt = req.body.deadline_at != null ? String(req.body.deadline_at) : null;
-  const deadlineMs = deadlineAt != null ? Date.parse(deadlineAt) : null;
-
-  if (threshold != null && (!Number.isInteger(threshold) || threshold <= 0)) {
-    return res.status(400).json({ error: 'Próg musi być dodatnią liczbą całkowitą.' });
-  }
-  if (deadlineAt != null && !Number.isFinite(deadlineMs)) {
-    return res.status(400).json({ error: 'Nieprawidłowa data/godzina terminu.' });
-  }
-
-  const out = transaction(() => {
-    if (!slBossEnabled()) return { notActive: true, status: 'wyłączony' };
-    const coop = slCurrentCoop();
-
-    // Walidacja PRZED jakimkolwiek zapisem — żeby błąd na jednym polu nie zostawił
-    // drugiego już zacommitowanego (transaction() commituje też przy zwykłym return).
-    if (deadlineMs != null && coop.status !== 'event_active') {
-      return { notActive: true, cycle: Number(coop.cycle), status: coop.status };
-    }
-
-    if (threshold != null) {
-      slMetaSet('coop_threshold_override', threshold); // dotyczy tylko przyszłych cykli
-    }
-
-    let deadlineChanged = false;
-    let resolved = null;
-    if (deadlineMs != null) {
-      db.prepare(`UPDATE sl_coop SET boss_deadline_at = datetime(?, 'unixepoch') WHERE cycle = ?`)
-        .run(Math.floor(deadlineMs / 1000), coop.cycle);
-      deadlineChanged = true;
-      if (deadlineMs <= Date.now()) {
-        const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
-        resolved = slFinishBossEvent(fresh, Number(fresh.boss_hp) <= 0);
-      }
-    }
-
-    return {
-      notActive: false, cycle: Number(coop.cycle), threshold_changed: threshold != null,
-      deadline_changed: deadlineChanged, resolved, coop: slCoopPayload(null)
-    };
-  });
-
-  if (out.notActive) {
-    return res.status(400).json({ error: `Nie ma czego ustawiać — boss nie walczy teraz (status: ${out.status}).` });
-  }
-
-  if (out.resolved) slEmitBossTimeout(out.resolved);
-
-  res.json({ success: true, ...out });
-});
-
-// POST /api/snakes/admin/coop/boss { password, hp?, max_hp?, name?, damage?, player_id? } —
-// ręczne sterowanie AKTYWNYM bossem, gdy trzeba coś podkręcić albo naprawić bez czekania
-// na mechanikę. Wszystkie pola są opcjonalne i można je łączyć w jednym strzale:
-//   • `max_hp` — nowe maksimum HP (pasek liczy się od niego; bieżące HP przycinamy do niego),
-//   • `hp`     — bieżące HP ustawione WPROST (przycinane do 0..max_hp),
-//   • `damage` — DELTA: dodatnia zabiera HP, ujemna leczy (nakłada się na `hp`, jeśli oba są),
-//   • `player_id` — komu policzyć te obrażenia (dopisuje wkład do podziału nagród, tak samo
-//     jak zwykłe trafienie); bez tego pola obrażenia są "od admina" i nikomu się nie liczą,
-//   • `name`   — nowa nazwa bossa.
-// Jeśli po zmianach HP dobije do zera, event rozlicza się OD RAZU jako wygrana (nagrody
-// lecą normalną drogą — patrz slFinishBossEvent — i budzi się kolejny boss).
-app.post('/api/snakes/admin/coop/boss', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const hp = req.body.hp != null ? parseInt(req.body.hp, 10) : null;
-  const maxHp = req.body.max_hp != null ? parseInt(req.body.max_hp, 10) : null;
-  const damage = req.body.damage != null ? parseInt(req.body.damage, 10) : null;
-  const playerId = req.body.player_id != null ? parseInt(req.body.player_id, 10) : null;
-  const name = req.body.name != null ? String(req.body.name).trim() : null;
-
-  if (hp != null && (!Number.isInteger(hp) || hp < 0)) {
-    return res.status(400).json({ error: 'HP musi być liczbą całkowitą ≥ 0.' });
-  }
-  if (maxHp != null && (!Number.isInteger(maxHp) || maxHp <= 0)) {
-    return res.status(400).json({ error: 'Maksymalne HP musi być dodatnią liczbą całkowitą.' });
-  }
-  if (damage != null && (!Number.isInteger(damage) || damage === 0)) {
-    return res.status(400).json({ error: 'Obrażenia muszą być niezerową liczbą całkowitą (ujemne leczą).' });
-  }
-  if (name != null && (!name || name.length > 60)) {
-    return res.status(400).json({ error: 'Nazwa bossa musi mieć od 1 do 60 znaków.' });
-  }
-  if (playerId != null && !Number.isInteger(playerId)) {
-    return res.status(400).json({ error: 'Nieprawidłowy gracz.' });
-  }
-  if (hp == null && maxHp == null && damage == null && name == null) {
-    return res.status(400).json({ error: 'Nie podano żadnej zmiany.' });
-  }
-
-  const out = transaction(() => {
-    if (!slBossEnabled()) return { notActive: true, status: 'wyłączony' };
-    const coop = slCurrentCoop();
-    if (coop.status !== 'event_active') return { notActive: true, status: coop.status };
-
-    let player = null;
-    if (playerId != null) {
-      player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-      if (!player) return { noPlayer: true };
-    }
-
-    const nextMaxHp = maxHp != null ? maxHp : Number(coop.boss_max_hp);
-    const nextName = name != null ? name : coop.boss_name;
-    // Kolejność ma znaczenie: najpierw ewentualne ustawienie HP wprost, dopiero na tym
-    // delta obrażeń — dzięki temu „ustaw 500 HP i od razu zbij o 100" działa w jednym strzale.
-    let nextHp = hp != null ? hp : Number(coop.boss_hp);
-    if (damage != null) nextHp -= damage;
-    nextHp = Math.max(0, Math.min(nextMaxHp, nextHp));
-
-    db.prepare('UPDATE sl_coop SET boss_hp = ?, boss_max_hp = ?, boss_name = ? WHERE cycle = ?')
-      .run(nextHp, nextMaxHp, nextName, coop.cycle);
-
-    // Wkład gracza dopisujemy tylko przy realnej delcie obrażeń — samo ustawienie HP
-    // to korekta stanu bossa, nie czyjeś trafienie, więc nie ma komu jej przypisać.
-    if (damage != null && player) {
-      db.prepare("INSERT INTO sl_coop_contributions (cycle, player_id, amount, source) VALUES (?, ?, ?, 'dice')")
-        .run(coop.cycle, player.id, damage);
-      slLogActivity(player.id, 'boss_hit', damage > 0
-        ? slBossHitEntry(damage, 'admin')
-        : `zwrot ${-damage} ${slDamageWord(damage)} (admin)`);
-    }
-
-    let resolved = null;
-    if (nextHp <= 0) {
-      const fresh = db.prepare('SELECT * FROM sl_coop WHERE cycle = ?').get(coop.cycle);
-      resolved = slFinishBossEvent(fresh, true);
-    }
-
-    return {
-      notActive: false, cycle: Number(coop.cycle), hp: nextHp, max_hp: nextMaxHp, boss_name: nextName,
-      credited_to: player ? player.nickname : null, resolved, coop: slCoopPayload(null)
-    };
-  });
-
-  if (out.notActive) {
-    return res.status(400).json({ error: `Boss nie walczy teraz (status: ${out.status}).` });
-  }
-  if (out.noPlayer) {
-    return res.status(404).json({ error: 'Gracz nie istnieje.' });
-  }
-
-  if (out.resolved) slEmitBossTimeout(out.resolved);
-
-  res.json({ success: true, ...out });
-});
-
-// POST /api/snakes/admin/coop/toggle { password, enabled } — gasi albo zapala całą walkę
-// z bossem (patrz slBossEnabled/slSetBossEnabled). Wyłączenie domyka trwającą walkę BEZ
-// nagród i bez kar; włączenie startuje świeżą edycję z nowym bossem i nowym terminem, więc
-// nikt nie obrywa za termin, który minął, gdy bossa nie było. Nie rusza punktów graczy —
-// od cofania wypłaconych nagród jest osobna, jednorazowa migracja przy starcie serwera.
-app.post('/api/snakes/admin/coop/toggle', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  if (typeof req.body.enabled !== 'boolean') {
-    return res.status(400).json({ error: 'Podaj enabled: true albo false.' });
-  }
-
-  const out = slSetBossEnabled(req.body.enabled);
-
-  if (out.enabled) {
-    slEmit('coop_milestone', () => ({
-      content: '👹 **Boss wraca do gry!**',
-      embeds: [{
-        title: `Edycja #${out.cycle} — ${out.boss_name}`,
-        url: SNAKES_URL,
-        description: 'Każdy rzut kostką rani go za darmo, a wpłacone coins ranią go 1:1.',
-        color: 0xF5C842
-      }]
-    }));
-  }
-
-  res.json({
-    success: true,
-    boss_enabled: out.enabled,
-    ...out,
-    coop: slCoopPayload(null)
-  });
-});
+// Trasy admina od bossa (coop/complete, coop/config, coop/boss, coop/toggle,
+// coop/revert-rewards) mieszkają w lib/boss.js (registerRoutes).
 
 // ── STEROWANIE HISTORIĄ ──
 // Dziennik aktywności i ruchy do przeglądania oraz kasowania z panelu. Filtry są
@@ -4636,6 +3697,9 @@ function slRollbackDay(date) {
     // z punktami, których w total_points już nie ma, i pula „sprzed podziału" zeszłaby
     // na minus. Kasujemy po `day`, bo dokładnie po to ta kolumna jest.
     db.prepare('DELETE FROM sl_points_log WHERE day = ?').run(date);
+    // ŚCIEŻKA COFANIA #1 — wypłaty i kary bossa z tego dnia wracają na konta, a obrażenia
+    // zadane tego dnia wracają bossowi na pasek (o ile walka wciąż trwa).
+    const bossBack = boss.slRevertBossDay(date);
     const activity = db.prepare('DELETE FROM sl_activity WHERE day = ?').run(date);
 
     return {
@@ -4644,6 +3708,8 @@ function slRollbackDay(date) {
       moves_deleted: moves.changes,
       activity_deleted: activity.changes,
       points_removed: details.reduce((a, d) => a + d.points_removed, 0),
+      boss_payouts_reverted: bossBack.payouts_reverted,
+      boss_hp_restored: bossBack.hp_restored,
       pushed_not_restored: pushedNotRestored,
       details
     };
@@ -4839,8 +3905,9 @@ app.post('/api/snakes/admin/players/:id/effects/clear', (req, res) => {
 // naprawdę: wraca na pole sprzed niego (from_abs), odejmuje zdobyte w nim punkty i monety
 // oraz oddaje zużyty slot, żeby dało się rzucić jeszcze raz. To coś innego niż „Dodaj ruch",
 // które tylko oddaje slot i zostawia zdobycze — tu ruch znika, jakby go nie było.
-// Nie odkręca skutków ubocznych tamtego rzutu: kogo wtedy wypchnął, komu ukradł monety,
-// ile obrażeń zadał bossowi — tego wiersz ruchu nie pamięta.
+// Odkręca też obrażenia, które ten rzut zadał bossowi (wkład znika, HP wraca — patrz
+// slRevertBossDamageForRef). Nie odkręca za to reszty skutków ubocznych: kogo wtedy
+// wypchnął ani komu ukradł monety — tego wiersz ruchu nie pamięta.
 app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
   if (!checkAdmin(req, res)) return;
   const playerId = parseInt(req.params.id, 10);
@@ -4872,9 +3939,12 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
     // i warunek po cichu nie trafia w nic — cofnięty ruch zostawiłby swoje punkty
     // w rozbiciu, mimo że total_points już ich nie ma.
     db.prepare('DELETE FROM sl_points_log WHERE ref = ?').run(`move:${move.id}`);
+    // ŚCIEŻKA COFANIA #2 — ten sam `ref` niesie obrażenia zadane bossowi tym rzutem.
+    const bossBack = boss.slRevertBossDamageForRef(`move:${move.id}`);
     return {
       none: false, move_date: move.move_date, move_seq: Number(move.move_seq),
-      points_removed: pts, back_to_tile: slTileOf(fromAbs), player: slAdminPlayerDetail(playerId)
+      points_removed: pts, back_to_tile: slTileOf(fromAbs),
+      boss_hp_restored: bossBack.hp_restored, player: slAdminPlayerDetail(playerId)
     };
   });
 

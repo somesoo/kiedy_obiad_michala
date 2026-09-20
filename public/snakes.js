@@ -734,6 +734,11 @@ function showRollResult(m) {
     noteTxt.push(m.boss_hit.defeated
       ? `🏆 Ostateczny cios! ${esc(m.boss_hit.boss_name)} pokonany — nagrody wypłacone!`
       : `⚔️ -${m.boss_hit.damage} HP dla ${esc(m.boss_hit.boss_name)} (${m.boss_hit.hp_left}/${m.boss_hit.max_hp}).`);
+    // Kamień milowy pada najwyżej trzy razy na całą walkę, więc wart jest osobnej linijki
+    // — także wtedy, gdy przekroczył go darmowy rzut, a nie czyjaś wpłata.
+    for (const ms of (m.boss_hit.milestones || [])) {
+      noteTxt.push(`🎯 Próg ${ms.percent}% zbity! +${ms.points} pkt dla ${ms.paid} wpłacających.`);
+    }
   }
 
   el.innerHTML = `
@@ -882,17 +887,111 @@ function slCoopChipsHtml(c) {
   // Lista pokazuje WPŁACONE COINS, a nie sumę obrażeń — bo to od wpłaty liczy się
   // nagroda. Obrażenia z kości są darmowe, więc ktoś, kto tylko rzucał, stałby wysoko
   // w rankingu wkładu, nic nie ryzykując. Kogo nie ma na liście, ten nie wpłacił.
-  const givers = c.attackers.filter(x => x.coins > 0);
-  return givers.length
-    ? `<div class="coop-chips">` + givers.map(x =>
-        `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}" title="wpłacone coins">${esc(x.nickname)}<span class="coop-amt mono">${x.coins}</span></span>`
-      ).join('') + `</div>`
-    : `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nie wpłacił — bądź pierwszy!</span></div>`;
+  // Kolejność jest tą samą, którą rozliczenie liczy podium, więc medale na chipach nie
+  // mogą się rozminąć z tym, co realnie wypłaci gra (patrz payout_plan w lib/boss.js).
+  const plan = c.payout_plan || [];
+  if (!plan.length) {
+    return `<div class="coop-chips"><span class="text-muted small">Nikt jeszcze nie wpłacił — bądź pierwszy!</span></div>`;
+  }
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  return `<div class="coop-chips">` + plan.map(x =>
+    `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}" ` +
+    `title="wpłacone coins → ${x.points} pkt przy zwycięstwie">` +
+    `${medals[x.podium_place] || ''}${esc(x.nickname)}<span class="coop-amt mono">${x.coins}</span></span>`
+  ).join('') + `</div>`;
+}
+
+// ── CO DOSTANĘ JA ──
+// Najważniejsza linijka panelu. Wcześniej stało tu wyłącznie „Pokonacie bossa — nagroda.
+// Nie zdążycie — kara.", bez ani jednej liczby, więc największe wydarzenie w grze nie
+// dawało się z niczym porównać i nikt nie wiedział, czy warto się dorzucać.
+function slCoopMyRewardHtml(c) {
+  const r = c.my_reward;
+  if (!r || !c.boss) return '';
+  // UWAGA na różnicę: `r.fighter_points` to ile ryczałtu MAM (czyli 0, dopóki nie przekroczę
+  // progu), a `c.boss.fighter_points` to STAWKA. Zachęta musi pokazywać stawkę — inaczej
+  // gracz poniżej progu czyta „dorzuć, żeby złapać +0 pkt" i zachęta działa odwrotnie.
+  const rate = c.boss.fighter_points;
+  const perCoin = String(c.boss.points_per_coin).replace('.', ',');
+  const earned = r.milestones_earned > 0
+    ? ` Z kamieni milowych masz już <strong>+${r.milestones_earned} pkt</strong>.`
+    : '';
+
+  if (c.my_coins <= 0) {
+    return `<span class="coop-mine">💸 Nie wpłaciłeś jeszcze nic. Wpłać ` +
+      `<strong>${r.fighter_min} coins</strong>, żeby złapać <strong>+${rate} pkt</strong> ` +
+      `ryczałtu za udział — plus ${perCoin} pkt za każdy coin i połowa wpłaty z powrotem.</span>`;
+  }
+
+  const bits = [`<strong>+${r.contrib_points} pkt</strong> za wpłatę`];
+  if (r.fighter_points > 0) bits.push(`<strong>+${r.fighter_points}</strong> za udział`);
+  if (r.podium_points > 0) bits.push(`<strong>+${r.podium_points}</strong> za ${r.podium_place}. miejsce`);
+  const todo = r.qualified
+    ? ''
+    : ` <span class="coop-kara">Dorzuć jeszcze ${r.coins_to_qualify} coins, żeby złapać +${rate} pkt za udział.</span>`;
+
+  return `<span class="coop-mine">💰 Wpłaciłeś <strong>${c.my_coins}</strong> coins → jeśli boss padnie: ` +
+    `${bits.join(', ')} i <strong>${r.refund} coins</strong> z powrotem ` +
+    `(razem <strong>+${r.points} pkt</strong>).${todo}${earned}</span>`;
+}
+
+// ── JAK NAM IDZIE ──
+// Jedna linijka, która mówi, czy idziecie na wygraną: ile trzeba zdejmować dziennie
+// i ile realnie zdjęliście ostatnio. To jedyny mechanizm koordynacji, jaki ta gra ma.
+function slCoopPaceHtml(c) {
+  const p = c.pace;
+  if (!p || !c.boss || !c.boss.active) return '';
+  const last = p.last_day ? `Ostatnio w ciągu dnia: <strong>${p.last_day.amount}</strong>.` : '';
+  const behind = p.last_day && p.last_day.amount < p.needed_per_day ? ' ⚠️' : '';
+  return `<span class="coop-pace">📉 Zdjęliście <strong>${p.dealt}</strong>/${c.boss.max_hp} HP. ` +
+    `Zostało <strong>${p.days_left}</strong> ${p.days_left === 1 ? 'dzień roboczy' : 'dni roboczych'} → ` +
+    `trzeba ~<strong>${p.needed_per_day}</strong> obrażeń dziennie. ${last}${behind}</span>`;
+}
+
+// Pasek kamieni milowych — trzy progi, po których wpłacający dostają punkty OD RAZU,
+// nie czekając na zabicie bossa.
+function slCoopMilestonesHtml(c) {
+  if (!c.milestones || !c.milestones.length || !c.boss) return '';
+  const hp = c.boss.hp;
+  const items = c.milestones.map(m => m.reached
+    ? `<span class="coop-ms is-done" title="próg zaliczony">✓ ${m.percent}%</span>`
+    : `<span class="coop-ms" title="+${m.points} pkt dla wpłacających">${m.percent}% <span class="mono">(za ${hp - m.hp_at})</span></span>`
+  ).join('');
+  return `<div class="coop-ms-row"><span class="text-muted">🎯 Kamienie milowe (+${c.milestones[0].points} pkt dla wpłacających):</span>${items}</div>`;
+}
+
+// ── REGULAMIN Z PRAWDZIWYMI LICZBAMI ──
+// Punkt regulaminu o bossie składamy ze stawek przysłanych przez serwer, zamiast trzymać
+// je zaszyte w HTML-u. Wcześniej były wpisane na sztywno i każda zmiana .env sprawiała,
+// że zasady zaczynały kłamać — a gracz nie miał jak się zorientować, że czyta nieprawdę.
+function slRenderBossRules(c) {
+  const el = document.getElementById('rules-boss-text');
+  if (!el || !c.boss) return;
+  const b = c.boss;
+  const pct = n => String(Math.round(n * 100)).replace('.', ',');
+  const perCoin = String(b.points_per_coin).replace('.', ',');
+  el.innerHTML =
+    `Boss walczy <strong>cały czas</strong> — jedna, ciągła faza: bijecie mu HP. Widać to na ` +
+    `<strong>dwóch paskach</strong> pod planszą: ile obrażeń już zadaliście i ile czasu zostało ` +
+    `do terminu. Obrażenia idą z dwóch źródeł: <strong>każdy Twój rzut kostką rani go za darmo</strong> ` +
+    `(oczka × ${b.dice_damage_mult}, bez dodatkowej akcji — zwykłe granie już walczy), ` +
+    `a dodatkowo możesz <strong>wpłacić coins: 1 coin = 1 obrażenie</strong>, dowolną kwotę ze swojego salda. ` +
+    `<strong>Nagrody dostają WYŁĄCZNIE ci, którzy wpłacili</strong> — rzuty są darmowe, więc nic nie ryzykują. ` +
+    `<strong>Pokonacie go na czas</strong>, a każdy wpłacający dostaje: <strong>${perCoin} pkt</strong> za każdy ` +
+    `wpłacony coin, <strong>${pct(b.refund_rate)}% wpłaty z powrotem</strong> w coins, ` +
+    `<strong>+${b.fighter_points} pkt</strong> ryczałtu za udział (od <strong>${b.fighter_min_coins} coins</strong> wzwyż) ` +
+    `oraz podium wpłat: <strong>+${b.podium_points.join(' / +')} pkt</strong> za trzy pierwsze miejsca. ` +
+    `Do tego <strong>kamienie milowe</strong>: gdy HP bossa spada poniżej 75%, 50% i 25%, każdy, kto do tej pory ` +
+    `wpłacił choć coina, dostaje <strong>+${b.milestone_points} pkt</strong> od ręki — więc im wcześniej się dorzucisz, ` +
+    `tym więcej progów złapiesz. <strong>Nie zdążycie do terminu</strong> — wpłacone coins przepadają, ` +
+    `a boss zabiera <strong>${c.timeout_penalty} coins</strong> KAŻDEMU graczowi, bez zniżki za wpłatę ` +
+    `i bez względu na saldo (można zejść pod kreskę; z długu wychodzisz normalną grą, ale sklep i wpłaty są wtedy zablokowane). ` +
+    `Tak czy inaczej kolejny boss staje od razu — po wygranej mocniejszy, po przegranej łagodniejszy.`;
 }
 
 // Jeden zwarty pasek pod planszą (nie karta z sekcjami) — plansza ma dostać jak
 // najwięcej miejsca w pionie. Wszystko (ikona, pasek HP/czasu, staty, timer, akcja)
-// w JEDNYM rzędzie; zasady + kara to jedna cienka linijka pod spodem.
+// w JEDNYM rzędzie; pod spodem linijki „co dostanę ja" i „jak nam idzie".
 function renderCoop(g) {
   const c = g.coop;
   const el = document.getElementById('coop-panel');
@@ -909,6 +1008,7 @@ function renderCoop(g) {
   }
   el.style.display = '';
   if (rulesItem) rulesItem.style.display = '';
+  slRenderBossRules(c);
 
   const b = c.boss;
   const timerHtml = b.deadline_at
@@ -932,13 +1032,13 @@ function renderCoop(g) {
   // nagroda pojawiała się na koncie bez słowa wyjaśnienia — to była jedyna zmiana salda
   // i punktów, o której gracz nie dostawał żadnej informacji.
   const pr = c.previous_result;
-  const myPrevTxt = pr && pr.defeated && pr.my_coins > 0
-    ? ` — dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem za wpłatę ${pr.my_coins}`
+  const myPrevTxt = pr && pr.defeated && (pr.my_points > 0 || pr.my_refund > 0)
+    ? ` — dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem`
     : '';
   const prevTxt = pr
     ? `<span class="coop-prev">${pr.defeated
         ? `🏆 #${pr.cycle} ${esc(pr.boss_name)} pokonany${myPrevTxt}`
-        : `💥 #${pr.cycle} ${esc(pr.boss_name)} zaatakował, do -${pr.timeout_penalty} coins`}</span>`
+        : `💥 #${pr.cycle} ${esc(pr.boss_name)} zaatakował — ${pr.timeout_penalty} coins każdemu`}</span>`
     : '';
 
   el.innerHTML = `
@@ -954,9 +1054,12 @@ function renderCoop(g) {
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-row-sub text-muted">
-      <span>🏆 Pokonacie bossa — <strong>nagroda</strong>. Nie zdążycie — <strong>kara</strong>.${c.my_coins ? ` Wpłaciłeś w tej walce: <strong>${c.my_coins}</strong> coins.` : ''}</span>
+      ${slCoopMyRewardHtml(c)}
+      <span class="coop-kara">💥 Nie zdążycie — boss zabiera <strong>${c.my_timeout_penalty} coins</strong> KAŻDEMU (także tym, którzy wpłacili; saldo może zejść pod kreskę).</span>
       ${prevTxt}
     </div>
+    <div class="coop-row-sub text-muted">${slCoopPaceHtml(c)}</div>
+    ${slCoopMilestonesHtml(c)}
     ${slCoopChipsHtml(c)}`;
 
   if (keepAmount || keepFocus) {
@@ -1024,9 +1127,18 @@ async function contributeToBoss() {
     state.game = res.state;
     if (input) input.value = '';
     renderAll();
-    if (res.defeated) {
+    // Trasa zwraca `victory` (cały wynik rozliczenia), a nie `defeated` — wcześniej front
+    // pytał o `defeated`, którego w odpowiedzi nigdy nie było, więc dobicie bossa wpłatą
+    // przechodziło bez konfetti i bez słowa o nagrodzie.
+    if (res.victory) {
+      const mine = (res.victory.payouts || []).find(p => p.player_id === state.playerId);
       showConfetti();
-      showToast('🏆 Twoja wpłata dobiła bossa! Nagrody rozliczone.');
+      showToast(mine
+        ? `🏆 Twoja wpłata dobiła bossa! Dostajesz +${mine.points} pkt i ${mine.refund} coins z powrotem.`
+        : '🏆 Twoja wpłata dobiła bossa! Nagrody rozliczone.');
+    } else if (res.milestones && res.milestones.length) {
+      const ms = res.milestones[res.milestones.length - 1];
+      showToast(`🎯 Zbiliście bossa do ${ms.percent}%! Kamień milowy: +${ms.points} pkt dla wpłacających.`);
     } else {
       showToast(`💰 Wpłacono ${amount} coins = ${amount} obrażeń (bossowi zostało ${res.hp_left}/${res.max_hp}).`);
     }
