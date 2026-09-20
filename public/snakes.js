@@ -1064,8 +1064,6 @@ function renderCoop(g) {
   }
   el.style.display = '';
   if (rulesItem) rulesItem.style.display = '';
-  slRenderBossRules(c);
-  slRenderBossNotice(c);
 
   const b = c.boss;
   const timerHtml = b.deadline_at
@@ -1127,6 +1125,18 @@ function renderCoop(g) {
     }
   }
   updateCoopDeadline();
+
+  // Regulamin i baner lecą NA KOŃCU i w try/catch — to dodatki do panelu, a nie panel.
+  // Wcześniej szły przed `el.innerHTML` i wystarczyło, że serwer przyśle payload bez
+  // któregoś z nowych pól (np. gdy front pojedzie przed backendem), żeby wyjątek zabił
+  // CAŁY blok bossa: gracz nie widział ani paska HP, ani pola wpłaty, i nic mu nie
+  // mówiło dlaczego.
+  try {
+    slRenderBossRules(c);
+    slRenderBossNotice(c);
+  } catch (e) {
+    console.error('Snakes: nie udało się złożyć opisu bossa —', e);
+  }
 }
 
 // Cienki pasek pod paskiem wypełnienia w bloku bossa: ile czasu bossa już MINĘŁO.
@@ -1172,9 +1182,15 @@ document.getElementById('coop-panel').addEventListener('click', e => {
 
 // Delegacja, bo baner jest przerysowywany co 10 s razem z panelem — listener wpięty
 // wprost w przycisk ✕ zniknąłby przy pierwszym odświeżeniu.
-document.getElementById('boss-notice').addEventListener('click', e => {
-  if (e.target.closest('#boss-notice-close')) dismissBossNotice();
-});
+// Sprawdzenie na null jest KONIECZNE: przy starym, zacache'owanym snakes.html tego
+// elementu jeszcze nie ma, a `null.addEventListener` wywaliłoby cały skrypt w połowie —
+// czyli zepsułoby CAŁĄ grę, a nie tylko baner.
+const bossNoticeEl = document.getElementById('boss-notice');
+if (bossNoticeEl) {
+  bossNoticeEl.addEventListener('click', e => {
+    if (e.target.closest('#boss-notice-close')) dismissBossNotice();
+  });
+}
 
 async function contributeToBoss() {
   if (state.busy) return;

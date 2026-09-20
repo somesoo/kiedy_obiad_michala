@@ -4,6 +4,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto'); // skrót zawartości plików frontu (patrz ASSET_VERSION)
 
 const app = express();
 const PORT = process.env.PORT || 31535;
@@ -307,6 +308,55 @@ function setSummary(set) {
 }
 
 app.use(express.json());
+
+// ══ WERSJONOWANIE ZASOBÓW FRONTU ══
+// Nie ma bundlera, więc `<script src="snakes.js">` to dla przeglądarki ciągle ten sam
+// adres — po wdrożeniu potrafi grać starym, zacache'owanym kodem na nowym API i wygląda
+// to jak „zmiany nie weszły". Doklejamy więc `?v=<skrót zawartości>`: zmiana pliku zmienia
+// adres, więc przeglądarka MUSI pobrać go na nowo, a gdy plik się nie zmienił, adres
+// zostaje ten sam i cache nadal działa (skrót treści, nie czas startu — inaczej każdy
+// restart pm2 kasowałby cache wszystkim bez powodu).
+const VERSIONED_ASSETS = ['style.css', 'snakes.css', 'snakes.js', 'app.js'];
+const ASSET_VERSION = (() => {
+  const hash = crypto.createHash('sha1');
+  for (const name of VERSIONED_ASSETS) {
+    try {
+      hash.update(fs.readFileSync(path.join(__dirname, 'public', name)));
+    } catch {
+      // Brak pliku nie może wywrócić startu serwera — po prostu nie wchodzi do skrótu.
+    }
+  }
+  return hash.digest('hex').slice(0, 8);
+})();
+
+// Strony czytamy raz przy starcie i trzymamy gotowe w pamięci — to kilka kilobajtów,
+// a pm2 i tak restartuje proces przy każdym wdrożeniu.
+const versionedPages = new Map();
+function versionedHtml(file) {
+  if (versionedPages.has(file)) return versionedPages.get(file);
+  let html = null;
+  try {
+    html = fs.readFileSync(path.join(__dirname, 'public', file), 'utf8')
+      .replace(
+        new RegExp(`(href|src)="(/?)(${VERSIONED_ASSETS.join('|').replace(/\./g, '\\.')})"`, 'g'),
+        (_, attr, slash, name) => `${attr}="${slash}${name}?v=${ASSET_VERSION}"`
+      );
+  } catch {
+    html = null; // trasa zrobi wtedy zwykłe sendFile
+  }
+  versionedPages.set(file, html);
+  return html;
+}
+
+// Musi stać PRZED express.static, inaczej statyczny handler odda surowy plik bez wersji.
+function sendPage(res, file) {
+  const html = versionedHtml(file);
+  if (html == null) return res.sendFile(path.join(__dirname, 'public', file));
+  res.type('html').send(html);
+}
+app.get(['/snakes', '/snakes.html'], (req, res) => sendPage(res, 'snakes.html'));
+app.get(['/snakes/admin', '/snakes-admin.html'], (req, res) => sendPage(res, 'snakes-admin.html'));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── STREFA CZASOWA (Europe/Warsaw) ──
@@ -3952,15 +4002,8 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
   res.json({ success: true, nickname: player.nickname, ...out });
 });
 
-// Strona gry
-app.get('/snakes', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'snakes.html'));
-});
-
-// Panel admina trybu Snakes (przełączniki zdarzeń Discorda, co-op)
-app.get('/snakes/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'snakes-admin.html'));
-});
+// Strona gry i panel admina trybu Snakes są rejestrowane WYŻEJ, przed express.static —
+// muszą tam być, żeby doklejać wersję do adresów snakes.js/snakes.css (patrz sendPage).
 
 app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
