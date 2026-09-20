@@ -571,6 +571,70 @@
 .coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 .coop-chip .coop-amt { margin-left: 3px; }
 
+/* ── LICZBY ZAMIAST HASEŁ ──
+   Trzy linijki, które odpowiadają na jedyne trzy pytania, jakie gracz ma przy bossie:
+   ile mi wpadnie, jak nam idzie i ile brakuje do najbliższego progu. Wcześniej panel
+   mówił tylko „nagroda albo kara" i nie dawało się tego z niczym porównać. */
+.coop-mine { color: var(--accent); }
+.coop-pace { color: var(--text-muted); }
+.coop-ms-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 3px;
+  font-size: 9px;
+  line-height: 1.3;
+}
+.coop-ms {
+  font-size: 9px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 20px;
+  padding: 1px 7px;
+  color: var(--text-muted);
+}
+.coop-ms.is-done { border-color: var(--accent); color: var(--accent); }
+
+/* ── OGŁOSZENIE O PRZEBUDOWIE BOSSA ──
+   Nad planszą, na całą szerokość siatki, żeby dało się je przeczytać ZANIM ktoś wpłaci.
+   Złota ramka (nie czerwona) — to informacja o zmianie zasad, a nie błąd. */
+.boss-notice {
+  grid-column: 1 / -1;
+  position: relative;
+  background: var(--surface-alt);
+  border: 1px solid var(--gold);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 34px 10px 12px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.boss-notice-title {
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.boss-notice-body p { margin: 0 0 5px; }
+.boss-notice-body p:last-child { margin-bottom: 0; }
+.boss-notice-warn { color: var(--danger); }
+.boss-notice-foot { color: var(--text-muted); font-size: 10px; }
+.boss-notice-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.boss-notice-close:hover { color: var(--text-primary); }
+
 @media (max-width: 700px) {
   .coop-row-main { flex-wrap: wrap; }
   .coop-bar-flex { flex-basis: 100%; order: 5; }
