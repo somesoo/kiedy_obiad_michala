@@ -2463,7 +2463,7 @@ const boss = require('./lib/boss')({
   slMetaGet, slMetaSet,
   slLogActivity, slLogPoints,
   slEnsureState,
-  slEmit,
+  slEmit, postDiscord: slPostDiscord,
   snakesUrl: () => SNAKES_URL,
   todayWaw, addBusinessDaysMs
 });

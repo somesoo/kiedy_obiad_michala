@@ -101,6 +101,12 @@
   <!-- MAIN — wąski lewy panel + plansza na całą resztę ekranu -->
   <main class="main-grid-snakes" id="main-content" style="display:none">
 
+    <!-- OGŁOSZENIE O PRZEBUDOWIE BOSSA — treść składa slRenderBossNotice() ze stawek
+         przysłanych przez serwer, żeby nie powtórzyć błędu regulaminu, który miał liczby
+         wpisane na sztywno i kłamał po każdej zmianie .env. Znika po zamknięciu
+         (zapamiętane w localStorage) i wraca, gdy podbijemy wersję mechaniki. -->
+    <div class="boss-notice" id="boss-notice" style="display:none"></div>
+
     <!-- LEWY PANEL (jedyny) — staty, sklep, ranking; wszystko w kompakcie -->
     <aside class="col-side">
 

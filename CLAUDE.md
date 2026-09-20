@@ -141,11 +141,23 @@ logika, nie migracja.
 
 **Usunięta:** `shutDownBossAndRevertRewards` — awaryjny hamulec, który gasił bossa i cofał
 rozdane przez niego punkty. Zniknął razem z przebudową mechaniki, bo gasił bossa także na
-**każdej świeżej instalacji**. Na produkcji jego flaga jest już ustawiona i `boss_enabled`
-stoi na `'0'`, więc usunięcie niczego samo nie włącza — **bossa trzeba zapalić ręcznie**
-z panelu admina (`POST /api/snakes/admin/coop/toggle` z `{enabled: true}`). Cofanie nagród
-nie zniknęło: przeniosło się do trasy `POST /api/snakes/admin/coop/revert-rewards`, czyli
-da się je uruchomić kiedykolwiek, a nie raz w życiu przy starcie.
+**każdej świeżej instalacji**. Cofanie nagród nie zniknęło: przeniosło się do trasy
+`POST /api/snakes/admin/coop/revert-rewards`, czyli da się je uruchomić kiedykolwiek,
+a nie raz w życiu przy starcie.
+
+**W jej miejsce: `relaunchBossOnce`** (flaga `boss_relaunch_v2_done`). Produkcja miała
+`boss_enabled = '0'` po tamtym hamulcu, więc sam deploy by bossa nie zapalił. Ta migracja
+robi to raz: ustawia `coop_threshold_override` **wprost** (w `sl_meta` mógł siedzieć stary
+override, który po cichu przebiłby nowy default z kodu), domyka przeterminowaną walkę
+**bez nagród i bez kar** — inaczej pierwszy tik schedulera rozliczyłby ją jako przegraną
+i zabrał wszystkim po 50 coins za walkę, której nikt nie miał szans rozegrać — i startuje
+świeży cykl. Flaga pilnuje, żeby **świadome wyłączenie bossa z panelu zostało wyłączeniem**:
+kolejny restart go nie wskrzesza.
+
+Nazwa flagi niesie **wersję mechaniki**. Kolejna przebudowa, która ma wystartować bossa od
+nowa = podbicie numeru (`boss_relaunch_v3_done`); stara flaga zostaje i niczego nie blokuje.
+Ten sam wzorzec ma baner w UI (`BOSS_NOTICE_VERSION` w `public/snakes.js`) — podbicie
+wersji sprawia, że ogłoszenie wraca wszystkim, także tym, którzy zamknęli poprzednie.
 
 ## Jak testować
 

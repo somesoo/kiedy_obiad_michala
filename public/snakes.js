@@ -960,6 +960,61 @@ function slCoopMilestonesHtml(c) {
   return `<div class="coop-ms-row"><span class="text-muted">🎯 Kamienie milowe (+${c.milestones[0].points} pkt dla wpłacających):</span>${items}</div>`;
 }
 
+// ── OGŁOSZENIE: NOWA MECHANIKA BOSSA, FAZA TESTÓW ──
+// Ludzie wracają do gry, w której nagrody liczą się inaczej niż wczoraj, a przegrana
+// potrafi zbić saldo pod kreskę — muszą się o tym dowiedzieć ZANIM wpłacą, a nie
+// z dziennika po fakcie. Baner siedzi nad planszą, znika po kliknięciu ✕ i wraca, gdy
+// podbijemy BOSS_NOTICE_VERSION (kolejna zmiana stawek = kolejne ogłoszenie).
+//
+// Stan „zamknięte" trzymamy w localStorage: to wygoda konkretnej przeglądarki, a nie
+// dane gry — nie ma czego trzymać na serwerze. Dostęp opakowany w try/catch, bo
+// w trybie prywatnym albo przy zablokowanych danych stron samo sięgnięcie rzuca
+// wyjątkiem i wywróciłoby cały render panelu.
+const BOSS_NOTICE_VERSION = 'v2-2026-09';
+const BOSS_NOTICE_KEY = 'snakes-boss-notice-' + BOSS_NOTICE_VERSION;
+
+function bossNoticeDismissed() {
+  try { return localStorage.getItem(BOSS_NOTICE_KEY) === '1'; } catch { return false; }
+}
+function dismissBossNotice() {
+  try { localStorage.setItem(BOSS_NOTICE_KEY, '1'); } catch { /* tryb prywatny — trudno */ }
+  const el = document.getElementById('boss-notice');
+  if (el) el.style.display = 'none';
+}
+
+function slRenderBossNotice(c) {
+  const el = document.getElementById('boss-notice');
+  if (!el) return;
+  // Boss wyłączony albo baner zamknięty — nie ma o czym ogłaszać.
+  if (!c || !c.boss || bossNoticeDismissed()) {
+    el.style.display = 'none';
+    return;
+  }
+  const b = c.boss;
+  const perCoin = String(b.points_per_coin).replace('.', ',');
+  el.style.display = '';
+  el.innerHTML = `
+    <button class="boss-notice-close" id="boss-notice-close" title="Zamknij">✕</button>
+    <div class="boss-notice-title">🧪 Nowa mechanika bossa — faza testów</div>
+    <div class="boss-notice-body">
+      <p><strong>Nagrody dostają teraz wyłącznie ci, którzy wpłacą coins.</strong>
+      Rzuty kostką nadal ranią bossa za darmo i zdejmują większość HP, ale nic za nie nie ma —
+      bo nic nie ryzykują.</p>
+      <p>Za wpłatę: <strong>${perCoin} pkt</strong> za każdy coin,
+      <strong>${Math.round(b.refund_rate * 100)}% wpłaty z powrotem</strong>,
+      <strong>+${b.fighter_points} pkt</strong> ryczałtu od <strong>${b.fighter_min_coins} coins</strong>
+      i podium wpłat <strong>+${b.podium_points.join(' / +')} pkt</strong>.
+      Do tego <strong>kamienie milowe</strong> przy 75%, 50% i 25% HP:
+      <strong>+${b.milestone_points} pkt od ręki</strong> dla każdego, kto już wpłacił —
+      im wcześniej się dorzucisz, tym więcej progów złapiesz.</p>
+      <p class="boss-notice-warn">⚠️ Jak nie zdążycie na czas, boss zabiera
+      <strong>${c.timeout_penalty} coins KAŻDEMU</strong> — płasko, bez zniżki za wpłatę
+      i bez względu na stan konta. <strong>Saldo może zejść pod kreskę.</strong></p>
+      <p class="boss-notice-foot">To faza testów — stawki i trudność będą jeszcze krążone
+      na podstawie tego, jak pójdzie. Szczegóły w regulaminie niżej; zgłaszajcie, co nie gra.</p>
+    </div>`;
+}
+
 // ── REGULAMIN Z PRAWDZIWYMI LICZBAMI ──
 // Punkt regulaminu o bossie składamy ze stawek przysłanych przez serwer, zamiast trzymać
 // je zaszyte w HTML-u. Wcześniej były wpisane na sztywno i każda zmiana .env sprawiała,
@@ -1004,11 +1059,13 @@ function renderCoop(g) {
     el.innerHTML = '';
     el.style.display = 'none';
     if (rulesItem) rulesItem.style.display = 'none';
+    slRenderBossNotice(null); // zgaszony boss chowa też ogłoszenie o przebudowie
     return;
   }
   el.style.display = '';
   if (rulesItem) rulesItem.style.display = '';
   slRenderBossRules(c);
+  slRenderBossNotice(c);
 
   const b = c.boss;
   const timerHtml = b.deadline_at
@@ -1111,6 +1168,12 @@ document.getElementById('coop-panel').addEventListener('keydown', e => {
 
 document.getElementById('coop-panel').addEventListener('click', e => {
   if (e.target.closest('#btn-coop-give')) contributeToBoss();
+});
+
+// Delegacja, bo baner jest przerysowywany co 10 s razem z panelem — listener wpięty
+// wprost w przycisk ✕ zniknąłby przy pierwszym odświeżeniu.
+document.getElementById('boss-notice').addEventListener('click', e => {
+  if (e.target.closest('#boss-notice-close')) dismissBossNotice();
 });
 
 async function contributeToBoss() {
