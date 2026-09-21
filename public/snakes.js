@@ -946,11 +946,27 @@ function slCoopMyRewardHtml(c) {
 function slCoopPaceHtml(c) {
   const p = c.pace;
   if (!p || !c.boss || !c.boss.active) return '';
-  const last = p.last_day ? `Ostatnio w ciągu dnia: <strong>${p.last_day.amount}</strong>.` : '';
-  const behind = p.last_day && p.last_day.amount < p.needed_per_day ? ' ⚠️' : '';
+  // „Ostatnio w ciągu dnia" było niezrozumiałe: pokazywało NAJŚWIEŻSZY dzień z obrażeniami,
+  // czyli zwykle dzisiejszy, niedokończony — i rano zawsze świeciło ⚠️. Teraz dwie nazwane
+  // liczby: dziś (w toku) i poprzedni dzień roboczy (zamknięty, tylko on idzie do normy).
+  // Stary serwer nie przysyła today/prev_day — wtedy po prostu nie ma tej części.
+  const dd = day => day ? `${day.slice(8, 10)}.${day.slice(5, 7)}` : '';
+  // prev_day === null: boss wystartował dopiero dziś, więc nie ma z czym porównywać.
+  let days = '';
+  if (p.today) {
+    let prev = '';
+    if (p.prev_day) {
+      const behind = p.prev_day.amount < p.needed_per_day
+        ? ` <span class="coop-kara" title="Poprzedni dzień roboczy wypadł poniżej dziennej normy">⚠️ poniżej normy</span>`
+        : ' ✓';
+      prev = ` · ostatni dzień roboczy (${dd(p.prev_day.day)}): <strong>${p.prev_day.amount}</strong> obr.${behind}`;
+    }
+    days = `<br>Dziś: <strong>${p.today.amount}</strong> obr.${prev} ` +
+      `<span class="text-muted" title="Obrażenia z rzutów kostką (oczka × ${c.boss.dice_damage_mult}) i z wpłat coins (1 coin = 1 obrażenie), wszystkich graczy razem">— wszyscy razem, kostka + wpłaty</span>`;
+  }
   return `<span class="coop-pace">📉 Zdjęliście <strong>${p.dealt}</strong>/${c.boss.max_hp} HP. ` +
     `Zostało <strong>${p.days_left}</strong> ${p.days_left === 1 ? 'dzień roboczy' : 'dni roboczych'} → ` +
-    `trzeba ~<strong>${p.needed_per_day}</strong> obrażeń dziennie. ${last}${behind}</span>`;
+    `trzeba ~<strong>${p.needed_per_day}</strong> obrażeń dziennie.${days}</span>`;
 }
 
 // Pasek kamieni milowych — trzy progi, po których wpłacający dostają punkty OD RAZU,
@@ -1051,6 +1067,52 @@ function slRenderBossRules(c) {
     `Tak czy inaczej kolejny boss staje od razu — po wygranej mocniejszy, po przegranej łagodniejszy.`;
 }
 
+// ── POPRZEDNI BOSS ── prawa kolumna panelu (30% szerokości).
+// Jedna linijka „pokonany — dostałeś +X pkt" nie odpowiadała na pytanie, które gracze
+// faktycznie zadają: CO DOKŁADNIE dostałem albo ile mi zabrał. Tu jest pełna rozpiska
+// z rejestru wypłat, łącznie z kamieniami milowymi, które wpadły jeszcze w trakcie walki.
+// Trzy różne zakończenia, nie dwa. „Nie pokonany" nie znaczy automatycznie „zaatakował":
+// walkę domkniętą administracyjnie (wyłącznik bossa, wdrożenie) nikt nie przypłacił,
+// więc ogłaszanie przy niej straty 50 coins byłoby zwykłym kłamstwem.
+function slCoopPrevBossHtml(pr) {
+  if (!pr) return '';
+  const m = pr.mine; // brak przy starym serwerze — wtedy tylko nagłówek wyniku
+  const head = pr.defeated ? `🏆 Pokonany`
+    : !pr.settled ? `⚪ Domknięty bez rozliczenia`
+    : `💥 Wygrał — zabrał ${pr.timeout_penalty} coins każdemu`;
+
+  const lines = [];
+  if (m) {
+    // Przy przegranej wpłata przepada — gracz ma to zobaczyć obok kary, bo razem to jego strata.
+    const lost = pr.settled && !pr.defeated ? ' <span class="coop-bad">(przepadły)</span>' : '';
+    if (m.paid_coins > 0) lines.push(`Wpłaciłeś <strong>${m.paid_coins}</strong> coins${lost}`);
+    else if (m.damage > 0) lines.push(`Biłeś tylko kostką (${m.damage} obr.) — bez wpłaty nie ma nagrody`);
+    else lines.push('Nie brałeś udziału');
+
+    const pts = [];
+    if (m.contrib_points) pts.push(`+${m.contrib_points} za wpłatę`);
+    if (m.fighter_points) pts.push(`+${m.fighter_points} za udział`);
+    if (m.podium_points) pts.push(`+${m.podium_points} za podium`);
+    if (m.milestone_points) pts.push(`+${m.milestone_points} z kamieni milowych`);
+    const totalPts = m.contrib_points + m.fighter_points + m.podium_points + m.milestone_points;
+    if (totalPts > 0) lines.push(`<span class="coop-mine">Dostałeś <strong>+${totalPts} pkt</strong></span> <span class="text-muted">(${pts.join(', ')})</span>`);
+    if (m.refund > 0) lines.push(`<span class="coop-mine">Zwrot: <strong>${m.refund} coins</strong></span>`);
+    if (m.penalty > 0) lines.push(`<span class="coop-bad">Kara: <strong>-${m.penalty} coins</strong></span>`);
+    if (pr.defeated && totalPts === 0 && m.refund === 0) lines.push('Nic nie dostałeś');
+    if (!pr.settled && !pr.defeated) lines.push('Nikt nic nie stracił');
+  } else if (pr.defeated && (pr.my_points > 0 || pr.my_refund > 0)) {
+    lines.push(`Dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem`);
+  } else if (pr.my_penalty > 0) {
+    lines.push(`Kara: <strong>-${pr.my_penalty} coins</strong>`);
+  }
+
+  return `<div class="coop-prev-col">
+      <div class="coop-prev-title">Poprzedni boss · #${pr.cycle} ${esc(pr.boss_name)}</div>
+      <div class="coop-prev-head">${head}</div>
+      ${lines.map(l => `<div>${l}</div>`).join('')}
+    </div>`;
+}
+
 // Jeden zwarty pasek pod planszą (nie karta z sekcjami) — plansza ma dostać jak
 // najwięcej miejsca w pionie. Wszystko (ikona, pasek HP/czasu, staty, timer, akcja)
 // w JEDNYM rzędzie; pod spodem linijki „co dostanę ja" i „jak nam idzie".
@@ -1090,24 +1152,7 @@ function renderCoop(g) {
     `<input type="number" id="coop-amount" min="1" step="1" max="${g.me.balance}" placeholder="coins" />
      <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Wpłać</button>`;
 
-  // Po wygranej dopisujemy MOJĄ wypłatę. Wcześniej karta mówiła tylko „pokonany", więc
-  // nagroda pojawiała się na koncie bez słowa wyjaśnienia — to była jedyna zmiana salda
-  // i punktów, o której gracz nie dostawał żadnej informacji.
-  const pr = c.previous_result;
-  const myPrevTxt = pr && pr.defeated && (pr.my_points > 0 || pr.my_refund > 0)
-    ? ` — dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem`
-    : '';
-  // Trzy różne zakończenia, nie dwa. „Nie pokonany" nie znaczy automatycznie „zaatakował":
-  // walkę domkniętą administracyjnie (wyłącznik bossa, wdrożenie) nikt nie przypłacił,
-  // więc ogłaszanie przy niej straty 50 coins byłoby zwykłym kłamstwem.
-  const prevTxt = pr
-    ? `<span class="coop-prev">${
-        pr.defeated ? `🏆 #${pr.cycle} ${esc(pr.boss_name)} pokonany${myPrevTxt}`
-      : !pr.settled ? `⚪ #${pr.cycle} ${esc(pr.boss_name)} — walka domknięta bez rozliczenia, nikt nic nie stracił`
-      : `💥 #${pr.cycle} ${esc(pr.boss_name)} zaatakował — ${pr.timeout_penalty} coins każdemu${
-          pr.my_penalty > 0 ? ` (Tobie zabrał ${pr.my_penalty})` : ''}`
-      }</span>`
-    : '';
+  const prevHtml = slCoopPrevBossHtml(c.previous_result);
 
   el.innerHTML = `
     <div class="coop-row-main">
@@ -1121,14 +1166,18 @@ function renderCoop(g) {
       ${timerHtml}
       <div class="coop-actions">${actionHtml}</div>
     </div>
-    <div class="coop-row-sub text-muted">
-      ${slCoopMyRewardHtml(c)}
-      <span class="coop-kara">💥 Nie zdążycie — boss zabiera <strong>${c.my_timeout_penalty} coins</strong> KAŻDEMU (także tym, którzy wpłacili; saldo może zejść pod kreskę).</span>
-      ${prevTxt}
-    </div>
-    <div class="coop-row-sub text-muted">${slCoopPaceHtml(c)}</div>
-    ${slCoopMilestonesHtml(c)}
-    ${slCoopChipsHtml(c)}`;
+    <div class="coop-split${prevHtml ? '' : ' no-prev'}">
+      <div class="coop-now">
+        <div class="coop-row-sub text-muted">
+          ${slCoopMyRewardHtml(c)}
+          <span class="coop-kara">💥 Nie zdążycie — boss zabiera <strong>${c.my_timeout_penalty} coins</strong> KAŻDEMU (także tym, którzy wpłacili; saldo może zejść pod kreskę).</span>
+        </div>
+        <div class="coop-row-sub text-muted">${slCoopPaceHtml(c)}</div>
+        ${slCoopMilestonesHtml(c)}
+        ${slCoopChipsHtml(c)}
+      </div>
+      ${prevHtml}
+    </div>`;
 
   if (keepAmount || keepFocus) {
     const fresh = document.getElementById('coop-amount');
@@ -1152,9 +1201,11 @@ function renderCoop(g) {
   }
 }
 
-// Cienki pasek pod paskiem wypełnienia w bloku bossa: ile czasu bossa już MINĘŁO.
-// Narasta od zera do pełna — pełny pasek znaczy, że czas się skończył. Element powstaje
-// na nowo przy każdym renderCoop, więc dane niesie w atrybutach, a nie w domknięciu.
+// Cienki pasek pod paskiem HP w bloku bossa: ile czasu bossa jeszcze ZOSTAŁO.
+// MALEJE od pełna do zera, tak samo jak HP — oba paski czyta się tak samo („ile jeszcze"),
+// a wyścig widać od razu: czas nie może skończyć się przed HP. Wcześniej narastał i dwa
+// paski obok siebie szły w przeciwne strony. Element powstaje na nowo przy każdym
+// renderCoop, więc dane niesie w atrybutach, a nie w domknięciu.
 function updateBossTimeBar() {
   const bar = document.getElementById('boss-time-bar');
   if (!bar) return; // nie ma walki — nie ma paska
@@ -1165,8 +1216,8 @@ function updateBossTimeBar() {
   // Bez wiarygodnego początku walki nie ma z czego liczyć proporcji — zostawiamy pasek
   // pusty zamiast zgadywać skalę (sam licznik obok i tak pokazuje, ile zostało).
   const total = Number.isFinite(from) && until > from ? until - from : 0;
-  const elapsed = total > 0 ? Math.max(0, Math.min(total, now - from)) : 0;
-  bar.querySelector('.boss-time-fill').style.width = (total > 0 ? (elapsed / total) * 100 : 0) + '%';
+  const left = total > 0 ? Math.max(0, Math.min(total, until - now)) : 0;
+  bar.querySelector('.boss-time-fill').style.width = (total > 0 ? (left / total) * 100 : 0) + '%';
   bar.classList.toggle('is-urgent', until - now <= 86400000); // ostatnia doba
 }
 
