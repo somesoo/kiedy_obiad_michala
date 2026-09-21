@@ -11,7 +11,7 @@ let state = {
 
 const POWERUP_META = {
   freeze:      { icon: '❄️', name: 'Freeze',      desc: 'Zatrzymuje wybranego gracza w jego następnej turze. Cel nic nie widzi — reszta stołu wie tylko, że użyłeś Freeze, nie na kim.', targeted: true },
-  curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 8 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież coins, droższe zakupy i inne). Cel dowie się, jaka, dopiero gdy odpali.', targeted: true },
+  curse:       { icon: '💀', name: 'Curse',       desc: 'Klątwa — 1 z 8 losowych wariantów (odwrotny ruch, rozdwojona kostka, kradzież coins, droższe zakupy i inne). Jaka — nie wie nikt, także Ty, dopóki nie odpali. Najwyżej 2 klątwy naraz na jednym graczu.', targeted: true },
   double_move: { icon: '⏩', name: 'Extra Move',  desc: 'Dokłada Ci jeden ruch ponad dzienny limit — do wykonania od razu po użyciu.', targeted: false },
   shield:      { icon: '🛡️', name: 'Shield',       desc: 'Obrona: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika.', targeted: false },
 };
@@ -327,7 +327,7 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 });
 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', curse_fired: '💀', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆' };
 
 async function loadActivity(date) {
   try {
@@ -385,8 +385,12 @@ function renderActivity(data) {
     // (patrz loadAuth), a liczbą dopiero po loginSuccess — gołe === dałoby false przy
     // pierwszym renderze po odświeżeniu strony.
     const mine = Number(e.player_id) === Number(state.playerId);
+    // Odpalona klątwa świeci na zielono OBU stronom: serwer zapisuje osobny wpis ofierze
+    // i rzucającemu, więc każdy z nich ma „swój" (po player_id). Typ wpisu, nie jego
+    // treść — z tego samego powodu co wyżej.
+    const curseFired = mine && e.type === 'curse_fired';
     html += `
-      <div class="activity-entry${mine ? ' is-me' : ''}"${mine ? ' title="Twoja akcja"' : ''}>
+      <div class="activity-entry${mine ? ' is-me' : ''}${curseFired ? ' is-curse-fired' : ''}"${curseFired ? ' title="Klątwa odpaliła"' : mine ? ' title="Twoja akcja"' : ''}>
         <span class="activity-time mono">${time}</span>
         <span class="activity-icon">${icon}</span>
         <span class="activity-body"><strong>${esc(e.nickname)}</strong> ${esc(e.detail)}</span>
@@ -823,7 +827,8 @@ async function doUse(type, targetId) {
       // przycisk „Rzuć" jest w tym momencie odblokowany.
       showToast(`⏩ Dodatkowy ruch gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`);
     } else if (type === 'curse') {
-      showToast(`💀 Klątwa (wariant ${res.curse_variant}) rzucona!`);
+      // Bez wariantu — serwer go nie wysyła. Rzucający dowie się, co wylosował, gdy klątwa odpali.
+      showToast('💀 Klątwa rzucona! Jaka — okaże się, gdy odpali.');
     } else {
       showToast(`${meta.icon} ${meta.name} użyty!`);
     }

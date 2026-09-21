@@ -1343,6 +1343,18 @@ const SL_CURSE_COIN_STEAL = 50; // ile coins zabiera Kieszonkowiec (wariant 3)
 // zakupie w sklepie — podbija jego cenę o ten mnożnik i dopiero wtedy się zużywa.
 const SL_CURSE_PRICE_VARIANT = 8;
 const SL_CURSE_PRICE_MARKUP = 1.5;
+// KOLEJKA KLĄTW. Klątwy na jednym graczu NIE odpalają naraz — każdy ruch zdejmuje
+// najstarszą (FIFO), a Drożyzna czeka na zakup. Naraz się nie da: warianty się ze sobą
+// gryzą (Odwrotny Ruch + Rozdwojona Kostka, podwójna Chciwość = ćwierć zdobyczy), a jeden
+// ruch zamieniałby się w nokaut. Za to kolejka ma sufit, bo przy cenie 15 coins dwie
+// osoby mogłyby zakopać kogoś na kilka dni. Dwa limity, oba liczą wszystkie oczekujące
+// klątwy (także Drożyznę):
+//  • na cel — tyle może na nim wisieć naraz, od wszystkich rzucających razem,
+//  • od jednego rzucającego na ten sam cel — żeby jeden bogacz nie zajął całej kolejki.
+// Odmowa przy limicie celu mówi rzucającemu, że ktoś już tego gracza przeklął. To świadomy
+// koszt: wie o tym tylko rzucający, nie ofiara, i nie wie, jaka to klątwa ani od kogo.
+const SL_CURSE_MAX_PENDING_PER_TARGET = 2;
+const SL_CURSE_MAX_PENDING_PER_CASTER = 1;
 const SL_CURSE_LABELS = {
   1: '↩️ Odwrotny Ruch',
   2: '➗ Rozdwojona Kostka',
@@ -1731,6 +1743,9 @@ const SL_ACTIVITY_TYPES = {
   roll:      'Rzuty kostką',
   shop_buy:  'Zakupy w sklepie',
   shop_use:  'Użycie power-upów',
+  // Osobny typ, a nie 'roll'/'shop_use', bo front podświetla te wpisy obu stronom klątwy
+  // (ofierze i rzucającemu) — a wolno mu to robić tylko po polach wpisu, nigdy po treści.
+  curse_fired: 'Odpalone klątwy',
   knockback: 'Wypychanie z pola',
   boss_hit:  'Walka z bossem',
   avatar:    'Zmiana zdjęcia profilowego',
@@ -2390,7 +2405,7 @@ const SL_EVENT_LABELS = {
   roll_result:        'Wynik dziennego rzutu',
   tile_landing:       'Wejście na węża / drabinę',
   powerup_freeze:     'Użycie Freeze (kto na kogo)',
-  powerup_curse:      'Użycie Curse (kto na kogo)',
+  powerup_curse:      'Klątwy (rzucenie — bez celu i wariantu; odpalenie)',
   shield_block:       'Shield zablokował atak',
   double_move:        'Użycie Extra Move',
   knockback:          'Wypchnięcie z zajętego pola (i efekt domina)',
@@ -2853,8 +2868,14 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     slLogActivity(playerId, 'roll',
       `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`);
     if (curseVariant) {
-      slLogActivity(playerId, 'roll',
+      slLogActivity(playerId, 'curse_fired',
         `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} coins)` : ''}`);
+      // Rzucający przy rzuceniu nie dostał wariantu — dowiaduje się TERAZ, razem z ofiarą,
+      // tak jak Freeze i Drożyzna. Nazwanie celu jest już bezpieczne: klątwa odpaliła.
+      if (curse.source_player_id) {
+        slLogActivity(curse.source_player_id, 'curse_fired',
+          `💀 Twoja klątwa na ${nickname} odpaliła: ${SL_CURSE_LABELS[curseVariant]}${curseCoinSteal > 0 ? ` (+${curseCoinSteal} coins dla Ciebie)` : ''}`);
+      }
     }
 
     // ── SZTURM NA BOSSA: jeśli trwa walka, KAŻDY rzut zadaje bossowi obrażenia —
@@ -3001,7 +3022,9 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     // Saldo innych graczy nie jest publiczne (patrz slLeaderboard), więc brak wpisu
     // naprawdę niczego nie zdradza.
     if (type !== 'shield') {
-      slLogActivity(playerId, 'shop_buy',
+      // Zakup, na którym odpaliła Drożyzna, jest zarazem odpaleniem klątwy — dostaje typ
+      // 'curse_fired', żeby kupujący widział go podświetlonego jak każdą inną klątwę.
+      slLogActivity(playerId, priceCurse ? 'curse_fired' : 'shop_buy',
         `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} coins)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
     }
     // Ten wpis jest publiczny, a przy zakupie tarczy zdradziłby ją okrężną drogą: „ktoś
@@ -3009,7 +3032,7 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     // rzucający klątwę traci powiadomienie w tym jednym przypadku, ale tarcza zostaje
     // szczelna. Kupujący i tak widzi klątwę u siebie w toaście.
     if (priceCurse && priceCurse.source_player_id && type !== 'shield') {
-      slLogActivity(priceCurse.source_player_id, 'shop_use',
+      slLogActivity(priceCurse.source_player_id, 'curse_fired',
         `🧾 Twoja klątwa ${priceCurseLabel} odpaliła — ${nickname} przepłacił o ${cost - baseCost} coins!`);
     }
     return { poor: false, cost, cursed: !!priceCurse, extra: cost - baseCost };
@@ -3103,6 +3126,20 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
       return { capped: true, max_extra: SL_MAX_EXTRA_ROLLS, daily_max: SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS };
     }
 
+    // LIMIT KOLEJKI KLĄTW (patrz SL_CURSE_MAX_PENDING_*) — sprawdzany PRZED zużyciem
+    // sztuki, tak jak sufit Extra Move. Najpierw limit własny, bo jego odmowa nie zdradza
+    // niczego, czego rzucający sam nie wie; limit celu dopiero, gdy własny przeszedł.
+    // Tarcza celu ma tu pierwszeństwo: z tarczą klątwa i tak by się nie zakolejkowała,
+    // więc nie odmawiamy, tylko pozwalamy jej się odbić (gałąź TARCZA CELU niżej).
+    if (type === 'curse' && !slActiveShield(targetId)) {
+      const q = db.prepare(`
+        SELECT COUNT(*) AS total, COALESCE(SUM(source_player_id = ?), 0) AS mine
+        FROM sl_effects WHERE target_player_id = ? AND type = 'curse' AND status = 'pending'
+      `).get(playerId, targetId);
+      if (Number(q.mine) >= SL_CURSE_MAX_PENDING_PER_CASTER) return { curse_cap: 'mine' };
+      if (Number(q.total) >= SL_CURSE_MAX_PENDING_PER_TARGET) return { curse_cap: 'target' };
+    }
+
     slAddPowerup(playerId, type, -1);
 
     // EXTRA MOVE: nie czeka na następną turę — od razu dokłada JEDEN ruch ponad
@@ -3130,8 +3167,10 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     }
 
     // Curse: losujemy wariant (patrz SL_CURSE_LABELS) już TERAZ, w momencie rzucenia —
-    // ale celowo NIE zdradzamy go celowi. Efekt (i jego opis) ujawnia się dopiero, gdy
-    // klątwa faktycznie odpali na następnym ruchu ofiary (patrz POST /api/snakes/roll).
+    // ale NIE zdradzamy go NIKOMU, także rzucającemu (nie ma go w odpowiedzi ani w toaście).
+    // Rzucający kupuje loterię, więc i on dowiaduje się, co wylosował, dopiero gdy klątwa
+    // odpali (patrz POST /api/snakes/roll i /shop/buy — tam dostaje własny wpis).
+    // Wariant losujemy teraz tylko dlatego, że Drożyzna czeka na zakup, a nie na ruch.
     const variant = type === 'curse' ? (1 + Math.floor(Math.random() * SL_CURSE_VARIANTS)) : null;
 
     db.prepare(`
@@ -3139,11 +3178,21 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
       VALUES (?, ?, ?, ?)
     `).run(targetId, playerId, type, variant);
 
-    return { none: false, blocked: false, variant };
+    return { none: false, blocked: false };
   });
 
   if (out.none) {
     return res.status(400).json({ error: 'Nie masz tego power-upa w ekwipunku.' });
+  }
+  if (out.curse_cap === 'mine') {
+    return res.status(400).json({
+      error: `Twoja klątwa na ${targetNick} jeszcze nie odpaliła — kolejną rzucisz, gdy ta zadziała. Sztuka zostaje w ekwipunku.`
+    });
+  }
+  if (out.curse_cap === 'target') {
+    return res.status(400).json({
+      error: `Nad ${targetNick} wisi już komplet klątw (${SL_CURSE_MAX_PENDING_PER_TARGET}) — poczekaj, aż któraś odpali. Sztuka zostaje w ekwipunku.`
+    });
   }
   if (out.already) {
     return res.status(400).json({ error: 'Masz już aktywną tarczę — poczekaj, aż coś zablokuje.' });
@@ -3202,7 +3251,7 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
     applied_to: targetId,
     blocked: !!out.blocked,
     extra_roll: !!out.extra_roll, // Extra Move: ruch dołożony do dzisiejszej puli, do wykonania od ręki
-    curse_variant: out.variant, // wylosowany wariant (patrz SL_CURSE_LABELS) — efekt ujawnia się dopiero, gdy odpali
+    // Celowo BEZ wariantu klątwy — nie zna go nawet rzucający, dopóki klątwa nie odpali.
     state: slBuildState(playerId)
   });
 });

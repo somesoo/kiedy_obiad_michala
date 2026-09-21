@@ -82,7 +82,16 @@ Cel nie dostaje własnego wpisu i nie widzi nic w swoim stanie gry. Wyjątek: bl
 
 Konsekwencja przy pisaniu kodu: **nigdy nie podświetlaj ani nie filtruj po treści wpisu**.
 Predykat „to mój wpis" to zawsze `entry.player_id`. Dopasowanie po nicku w tekście
-natychmiast wysypałoby sekret Freeze'a.
+natychmiast wysypałoby sekret Freeze'a. Z tego powodu odpalona klątwa ma własny typ wpisu
+`curse_fired` (ofiara i rzucający dostają osobne wpisy, front świeci je na zielono po
+`player_id` + typie).
+
+**Wariantu klątwy nie zna nikt, także rzucający**, dopóki nie odpali — nie ma go
+w odpowiedzi `/shop/use` ani w toaście. Klątwy na jednym graczu odpalają **po jednej na
+ruch** (FIFO), nigdy naraz, a kolejka ma sufit: `SL_CURSE_MAX_PENDING_PER_TARGET` (2)
+i `SL_CURSE_MAX_PENDING_PER_CASTER` (1). Limit sprawdzany jest **przed** zużyciem sztuki,
+więc odbita klątwa zostaje w ekwipunku. Odmowa przy pełnym celu świadomie mówi
+rzucającemu (tylko jemu, toastem), że ktoś już tego gracza przeklął.
 
 ## Pięć ścieżek cofania — muszą zostać spójne
 
