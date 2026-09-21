@@ -624,27 +624,28 @@
   transition: width 1s linear;
   width: 0%;
 }
-.boss-time-bar .boss-bar-label { font-size: 9px; }
+.boss-time-bar .boss-bar-label { font-size: 9px; gap: 5px; overflow: hidden; }
+.boss-bar-penalty { color: #FF9C8F; text-overflow: ellipsis; overflow: hidden; }
 /* Ostatnia doba — pasek robi się alarmowy. */
 .boss-time-bar.is-urgent .boss-time-fill {
   background: linear-gradient(90deg, rgba(232,93,74,0.35), var(--danger));
 }
 
-/* Dół panelu: 70% obecny boss, 30% poprzedni. Bez poprzedniego (pierwszy cykl) obecny
-   bierze całą szerokość. min-width: 0 — inaczej długie linijki rozpychałyby kolumnę. */
-.coop-split {
+/* Dół panelu: trzy sekcje obok siebie — łup, tempo ekipy, poprzedni boss — rozdzielone
+   pionową kreską. Bez poprzedniego (pierwszy cykl) zostają dwie. min-width: 0 — inaczej
+   rząd kafelków rozpychałby kolumnę zamiast się zawinąć. */
+.hud-sections {
   display: grid;
-  grid-template-columns: 7fr 3fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
-  margin-top: 5px;
+  margin-top: 6px;
 }
-.coop-split.no-prev { grid-template-columns: 1fr; }
-.coop-now { min-width: 0; }
+.hud-sections.no-prev { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hud-section { min-width: 0; }
+.hud-section + .hud-section { border-left: 1px solid var(--muted); padding-left: 12px; }
 
 /* ── HUD: KAFELKI ── */
-.hud-row { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-.hud-group { min-width: 0; }
 .hud-caption {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 9px;
@@ -658,22 +659,31 @@
   text-overflow: ellipsis;
 }
 .hud-tiles { display: flex; flex-wrap: wrap; gap: 4px; }
+/* STAŁY rozmiar kafelka — wszystkie w równej siatce, niezależnie od długości liczby.
+   Etykieta może zająć dwie linijki (stąd wysokość), liczba zawsze jedną. */
 .hud-tile {
   display: flex;
   flex-direction: column;
-  min-width: 48px;
-  padding: 2px 6px 3px;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: 96px;
+  height: 48px;
+  padding: 3px 6px 4px;
   background: var(--surface-alt);
   border: 1px solid var(--muted);
   border-radius: 6px;
   cursor: default;
 }
 .hud-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.2;
   font-size: 8px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
-  white-space: nowrap;
 }
 .hud-value {
   font-size: 13px;
@@ -681,6 +691,8 @@
   line-height: 1.2;
   color: var(--text-primary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hud-tile.is-good { border-color: rgba(200, 241, 53, 0.45); }
 .hud-tile.is-good .hud-value { color: var(--accent); }
@@ -702,14 +714,15 @@
 }
 .hud-quest-fill { height: 100%; background: var(--accent); box-shadow: 0 0 4px var(--accent); }
 
-/* Stopka: odznaka kary + lista wpłacających w jednym zawijanym rzędzie. */
+/* Stopka: lista wpłacających, wyśrodkowana na całą szerokość panelu. */
 .hud-foot {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  margin-top: 5px;
+  justify-content: center;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid var(--muted);
 }
+.hud-foot .coop-chips { justify-content: center; }
 .hud-badge {
   display: inline-flex;
   align-items: center;
@@ -745,14 +758,8 @@
 .coop-chip.is-p3 { border-color: #CD7F32; box-shadow: 0 0 6px rgba(205, 127, 50, 0.4); }
 .coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 
-/* ── POPRZEDNI BOSS ── (prawa kolumna) */
-.coop-prev-col {
-  min-width: 0;
-  padding-left: 12px;
-  border-left: 1px solid var(--muted);
-}
+/* ── POPRZEDNI BOSS ── (trzecia sekcja) */
 .coop-prev-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
-.coop-prev-col.is-compact .coop-prev-head { margin-bottom: 0; }
 .coop-prev-note { font-size: 9px; color: var(--text-muted); }
 
 /* ── OGŁOSZENIE O PRZEBUDOWIE BOSSA ──
@@ -798,8 +805,9 @@
   .coop-row-main { flex-wrap: wrap; }
   .coop-bar-flex { flex-basis: 100%; order: 5; }
   /* Na telefonie 30% to za wąsko na rozpiskę — poprzedni boss schodzi pod obecnego. */
-  .coop-split { grid-template-columns: 1fr; gap: 4px; }
-  .coop-prev-col { border-left: 0; border-top: 1px solid var(--muted); padding: 4px 0 0; }
+  /* Na telefonie sekcje idą jedna pod drugą — trzy kolumny kafelków by się nie zmieściły. */
+  .hud-sections, .hud-sections.no-prev { grid-template-columns: 1fr; gap: 6px; }
+  .hud-section + .hud-section { border-left: 0; padding-left: 0; border-top: 1px solid var(--muted); padding-top: 6px; }
 }
 
 /* ── KNOCKBACK — pulsujące podświetlenie wypchniętych pionków ── */
