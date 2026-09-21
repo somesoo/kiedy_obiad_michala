@@ -443,6 +443,14 @@
   background: rgba(200, 241, 53, 0.07);
 }
 .activity-entry.is-me .activity-body strong { color: var(--accent); }
+/* Odpalona klątwa, w której brałem udział (jako ofiara albo rzucający) — zielona, żeby
+   odróżniała się od zwykłego limonkowego „to ja". Stoi PO .is-me, więc je nadpisuje. */
+.activity-entry.is-curse-fired {
+  border-left-color: #53D06B;
+  background: rgba(83, 208, 107, 0.14);
+}
+.activity-entry.is-curse-fired .activity-body,
+.activity-entry.is-curse-fired .activity-body strong { color: #53D06B; }
 .activity-time { color: var(--text-muted); font-size: 9px; flex: 0 0 auto; }
 .activity-icon { flex: 0 0 auto; }
 .activity-body { min-width: 0; word-break: break-word; }
