@@ -631,19 +631,22 @@
   background: linear-gradient(90deg, rgba(232,93,74,0.35), var(--danger));
 }
 
-/* Dół panelu: trzy sekcje obok siebie — łup, tempo ekipy, poprzedni boss — rozdzielone
-   pionową kreską. Bez poprzedniego (pierwszy cykl) zostają dwie. min-width: 0 — inaczej
-   rząd kafelków rozpychałby kolumnę zamiast się zawinąć. */
+/* Dół panelu: trzy sekcje w JEDNYM rzędzie — łup, tempo ekipy, poprzedni boss. Nie po
+   równo: łup i tempo mają szerokość swoich kafelków (bez zawijania), poprzedni boss
+   bierze resztę i jako jedyny zawija kafelki w sobie. Gdy kafelków jest wyjątkowo dużo
+   (podium + progi + zadanie + oba dni), całe sekcje przechodzą do drugiego rzędu,
+   zamiast ściskać kafelki. */
 .hud-sections {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 0;
   margin-top: 6px;
 }
-.hud-sections.no-prev { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.hud-section { min-width: 0; }
+.hud-section { flex: 0 0 auto; min-width: 0; padding-right: 12px; }
 .hud-section + .hud-section { border-left: 1px solid var(--muted); padding-left: 12px; }
+.hud-section .hud-tiles { flex-wrap: nowrap; }
+.hud-section.hud-prev { flex: 1 1 150px; padding-right: 0; }
 
 /* ── HUD: KAFELKI ── */
 .hud-caption {
@@ -666,7 +669,7 @@
   flex-direction: column;
   justify-content: space-between;
   box-sizing: border-box;
-  width: 96px;
+  width: 78px;
   height: 48px;
   padding: 3px 6px 4px;
   background: var(--surface-alt);
@@ -681,7 +684,7 @@
   overflow: hidden;
   line-height: 1.2;
   font-size: 8px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -761,6 +764,12 @@
 /* ── POPRZEDNI BOSS ── (trzecia sekcja) */
 .coop-prev-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
 .coop-prev-note { font-size: 9px; color: var(--text-muted); }
+/* Zwięzłe liczby poprzedniego bossa — jedna (zawijalna) linijka pod odznaką. */
+.prev-stats { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 12px; font-weight: 700; }
+.prev-stat { white-space: nowrap; color: var(--text-primary); }
+.prev-stat.is-good { color: var(--accent); }
+.prev-stat.is-bad { color: var(--danger); }
+.prev-sep { color: var(--muted); }
 
 /* ── OGŁOSZENIE O PRZEBUDOWIE BOSSA ──
    Nad planszą, na całą szerokość siatki, żeby dało się je przeczytać ZANIM ktoś wpłaci.
@@ -806,7 +815,8 @@
   .coop-bar-flex { flex-basis: 100%; order: 5; }
   /* Na telefonie 30% to za wąsko na rozpiskę — poprzedni boss schodzi pod obecnego. */
   /* Na telefonie sekcje idą jedna pod drugą — trzy kolumny kafelków by się nie zmieściły. */
-  .hud-sections, .hud-sections.no-prev { grid-template-columns: 1fr; gap: 6px; }
+  .hud-section, .hud-section.hud-prev { flex: 1 1 100%; padding-right: 0; }
+  .hud-section .hud-tiles { flex-wrap: wrap; }
   .hud-section + .hud-section { border-left: 0; padding-left: 0; border-top: 1px solid var(--muted); padding-top: 6px; }
 }
 
