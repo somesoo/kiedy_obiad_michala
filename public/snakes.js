@@ -930,7 +930,7 @@ function slHudQuest(label, value, have, need, title) {
 }
 
 function slHudSection(caption, tilesHtml, extraCls = '') {
-  return `<div class="hud-section${extraCls}"><div class="hud-caption">${caption}</div><div class="hud-tiles">${tilesHtml}</div></div>`;
+  return `<div class="hud-section${extraCls ? ' ' + extraCls : ''}"><div class="hud-caption">${caption}</div><div class="hud-tiles">${tilesHtml}</div></div>`;
 }
 
 // ── CO DOSTANĘ JA ── („łup")
@@ -959,7 +959,7 @@ function slCoopLootHtml(c) {
     tiles.push(slHudTile('Zwrot coins', r.refund, { tone: 'good', title: `Jeśli boss padnie, wraca Ci ${refundPct}% wpłaty w coins` }));
     if (r.podium_place > 0) {
       const medal = { 1: '🥇', 2: '🥈', 3: '🥉' }[r.podium_place] || '';
-      tiles.push(slHudTile(`${r.podium_place}. miejsce we wpłatach`, `${medal}+${r.podium_points}`, { tone: 'gold', title: 'Premia za podium wpłat, wypłacana przy wygranej' }));
+      tiles.push(slHudTile(`${r.podium_place}. miejsce wpłat`, `${medal}+${r.podium_points}`, { tone: 'gold', title: 'Premia za podium wpłat, wypłacana przy wygranej' }));
     }
   }
   if (r.milestones_earned > 0) {
@@ -969,8 +969,8 @@ function slCoopLootHtml(c) {
   if (!r.qualified) {
     const missing = r.coins_to_qualify;
     tiles.push(slHudQuest(
-      c.my_coins > 0 ? `Wpłać jeszcze ${missing} coins` : `Wpłać ${r.fighter_min} coins`,
-      `→ +${rate} pkt`,
+      c.my_coins > 0 ? `Dorzuć ${missing} coins` : `Wpłać ${r.fighter_min} coins`,
+      `+${rate} pkt`,
       c.my_coins, r.fighter_min,
       `Bonus za udział: kto wpłaci co najmniej ${r.fighter_min} coins, dostaje przy wygranej +${rate} pkt. Masz ${c.my_coins}/${r.fighter_min}.`
     ));
@@ -1009,7 +1009,8 @@ function slCoopPaceHtml(c) {
   tiles.push(slHudTile('Potrzeba dziennie', `~${p.needed_per_day}`, {
     title: `Tyle obrażeń dziennie trzeba zdejmować, żeby zdążyć: zostało ${c.boss.hp} HP na ${p.days_left} ${p.days_left === 1 ? 'dzień roboczy' : 'dni robocze'}`
   }));
-  tiles.push(slHudTile('Dni roboczych do końca', p.days_left));
+  // Bez kafelka „dni do końca" — to samo mówi licznik w pasku czasu, a ten kafelek był
+  // tym, który spychał HUD do drugiego rzędu.
   tiles.push(slCoopNextMilestoneTile(c));
   return slHudSection('⚔️ Tempo ekipy', tiles.join(''));
 }
@@ -1156,7 +1157,11 @@ function slCoopPrevBossHtml(pr) {
       ? `<span class="hud-badge" title="Walka domknięta administracyjnie — bez nagród i bez kar, nikt nic nie stracił">⚪ Remis</span>`
       : `<span class="hud-badge is-bad" title="Nie zdążyliście — boss zabrał ${pr.timeout_penalty} coins każdemu">💀 Porażka</span>`;
 
-  const tiles = [];
+  // Poprzedni boss to zamknięta historia, więc zamiast kafelków dostaje JEDNĄ linijkę liczb
+  // pod odznaką — tylko dzięki temu cały HUD mieści się w jednym rzędzie obok łupu i tempa.
+  const stats = [];
+  const stat = (txt, tone, title) =>
+    stats.push(`<span class="prev-stat${tone ? ' is-' + tone : ''}"${title ? ` title="${esc(title)}"` : ''}>${txt}</span>`);
   let note = '';
   if (m) {
     const totalPts = m.contrib_points + m.fighter_points + m.podium_points + m.milestone_points;
@@ -1167,26 +1172,25 @@ function slCoopPrevBossHtml(pr) {
     if (m.milestone_points) pts.push(`${m.milestone_points} za progi HP`);
     // Przy przegranej wpłata przepada — gracz ma to zobaczyć obok kary, bo razem to jego strata.
     const lost = pr.settled && !pr.defeated;
-    if (m.paid_coins > 0) tiles.push(slHudTile(lost ? 'Wpłata przepadła' : 'Wpłaciłeś', m.paid_coins, lost ? { tone: 'bad' } : {}));
-    if (totalPts > 0) tiles.push(slHudTile('Pkt zdobyte', `+${totalPts}`, { tone: 'good', title: pts.join(' + ') }));
-    if (m.refund > 0) tiles.push(slHudTile('Zwrot coins', m.refund, { tone: 'good', title: 'Coins, które wróciły z wpłaty' }));
-    if (m.penalty > 0) tiles.push(slHudTile('Kara coins', `−${m.penalty}`, { tone: 'bad', title: 'Coins zabrane za przegraną' }));
-    // Nic do pokazania w kafelkach — jedna krótka linijka zamiast pustej kolumny.
-    if (!tiles.length) {
+    if (m.paid_coins > 0) stat(lost ? `${m.paid_coins} coins przepadło` : `${m.paid_coins} wpłacone`, lost ? 'bad' : null);
+    if (totalPts > 0) stat(`+${totalPts} pkt`, 'good', pts.join(' + '));
+    if (m.refund > 0) stat(`+${m.refund} coins zwrotu`, 'good', 'Coins, które wróciły z wpłaty');
+    if (m.penalty > 0) stat(`−${m.penalty} coins kary`, 'bad', 'Coins zabrane za przegraną');
+    if (!stats.length) {
       note = m.damage > 0 ? `Tylko kostka (${m.damage} obr.) — bez wpłaty bez nagrody`
         : pr.settled ? 'Nie brałeś udziału' : 'Nie brałeś udziału · nikt nic nie stracił';
     }
   } else if (pr.defeated && (pr.my_points > 0 || pr.my_refund > 0)) {
-    tiles.push(slHudTile('Pkt zdobyte', `+${pr.my_points}`, { tone: 'good' }));
-    tiles.push(slHudTile('Zwrot coins', pr.my_refund, { tone: 'good' }));
+    stat(`+${pr.my_points} pkt`, 'good');
+    stat(`+${pr.my_refund} coins zwrotu`, 'good');
   } else if (pr.my_penalty > 0) {
-    tiles.push(slHudTile('Kara coins', `−${pr.my_penalty}`, { tone: 'bad' }));
+    stat(`−${pr.my_penalty} coins kary`, 'bad');
   }
 
   return `<div class="hud-section hud-prev">
-      <div class="hud-caption">⏮ Poprzedni boss · #${pr.cycle} ${esc(pr.boss_name)}</div>
+      <div class="hud-caption" title="Poprzedni boss · #${pr.cycle} ${esc(pr.boss_name)}">⏮ Poprzedni boss · #${pr.cycle} ${esc(pr.boss_name)}</div>
       <div class="coop-prev-head">${badge}${note ? `<span class="coop-prev-note">${note}</span>` : ''}</div>
-      ${tiles.length ? `<div class="hud-tiles">${tiles.join('')}</div>` : ''}
+      ${stats.length ? `<div class="prev-stats mono">${stats.join('<span class="prev-sep">·</span>')}</div>` : ''}
     </div>`;
 }
 
@@ -1252,7 +1256,7 @@ function renderCoop(g) {
       </div>
       <div class="coop-actions">${actionHtml}</div>
     </div>
-    <div class="hud-sections${prevHtml ? '' : ' no-prev'}">
+    <div class="hud-sections">
       ${slCoopLootHtml(c)}
       ${slCoopPaceHtml(c)}
       ${prevHtml}
