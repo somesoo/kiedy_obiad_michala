@@ -900,17 +900,38 @@ function slCoopChipsHtml(c) {
   }
   const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
   return `<div class="coop-chips">` + plan.map(x =>
-    `<span class="coop-chip${x.player_id === state.playerId ? ' is-me' : ''}" ` +
+    `<span class="coop-chip${Number(x.player_id) === Number(state.playerId) ? ' is-me' : ''}${x.podium_place ? ` is-p${x.podium_place}` : ''}" ` +
     `title="wpłacone coins → ${x.points} pkt przy zwycięstwie">` +
     `${medals[x.podium_place] || ''}${esc(x.nickname)}<span class="coop-amt mono">${x.coins}</span></span>`
   ).join('') + `</div>`;
 }
 
-// ── CO DOSTANĘ JA ──
-// Najważniejsza linijka panelu. Wcześniej stało tu wyłącznie „Pokonacie bossa — nagroda.
-// Nie zdążycie — kara.", bez ani jednej liczby, więc największe wydarzenie w grze nie
-// dawało się z niczym porównać i nikt nie wiedział, czy warto się dorzucać.
-function slCoopMyRewardHtml(c) {
+// ── HUD BOSSA: LICZBY ZAMIAST ZDAŃ ──
+// Panel mówił wszystko pełnymi zdaniami jedną drobną czcionką, więc liczby, które coś
+// znaczą (+18 pkt, 24 coins do bonusu, 982 wobec normy 504), tonęły w tekście. Teraz
+// każda z nich jest kafelkiem: mała etykieta nad dużą liczbą, kolor mówi „dobrze/źle".
+// Pełne wyjaśnienia siedzą w title (dymek po najechaniu) i w regulaminie.
+function slHudTile(label, value, opts = {}) {
+  const cls = opts.tone ? ` is-${opts.tone}` : '';
+  const title = opts.title ? ` title="${esc(opts.title)}"` : '';
+  return `<div class="hud-tile${cls}"${title}><span class="hud-label">${label}</span><span class="hud-value mono">${value}</span></div>`;
+}
+
+// Kafelek „zadania" — ile brakuje do kolejnej nagrody, z mini paskiem postępu w środku.
+// Ułamek na pasku czyta się szybciej niż „dorzuć jeszcze 24 coins, żeby złapać…", a jako
+// kafelek (nie osobna linijka) nie dokłada panelowi wysokości.
+function slHudQuest(label, have, need, reward) {
+  const pct = need > 0 ? Math.max(0, Math.min(100, (have / need) * 100)) : 0;
+  return `<div class="hud-tile hud-quest" title="${esc(`${label}: masz ${have}/${need} coins — dobij do ${need}, a dostaniesz ${reward}`)}">` +
+    `<span class="hud-label">🎯 ${label} ${have}/${need}</span>` +
+    `<span class="hud-value mono">${reward}</span>` +
+    `<div class="hud-quest-bar"><div class="hud-quest-fill" style="width:${pct}%"></div></div></div>`;
+}
+
+// ── CO DOSTANĘ JA ── („łup")
+// Wcześniej stało tu wyłącznie „Pokonacie bossa — nagroda. Nie zdążycie — kara.", bez
+// ani jednej liczby, więc największe wydarzenie w grze nie dawało się z niczym porównać.
+function slCoopLootHtml(c) {
   const r = c.my_reward;
   if (!r || !c.boss) return '';
   // UWAGA na różnicę: `r.fighter_points` to ile ryczałtu MAM (czyli 0, dopóki nie przekroczę
@@ -918,69 +939,108 @@ function slCoopMyRewardHtml(c) {
   // gracz poniżej progu czyta „dorzuć, żeby złapać +0 pkt" i zachęta działa odwrotnie.
   const rate = c.boss.fighter_points;
   const perCoin = String(c.boss.points_per_coin).replace('.', ',');
-  const earned = r.milestones_earned > 0
-    ? ` Z kamieni milowych masz już <strong>+${r.milestones_earned} pkt</strong>.`
-    : '';
+  const refundPct = Math.round(c.boss.refund_rate * 100);
 
+  const tiles = [];
   if (c.my_coins <= 0) {
-    return `<span class="coop-mine">💸 Nie wpłaciłeś jeszcze nic. Wpłać ` +
-      `<strong>${r.fighter_min} coins</strong>, żeby złapać <strong>+${rate} pkt</strong> ` +
-      `ryczałtu za udział — plus ${perCoin} pkt za każdy coin i połowa wpłaty z powrotem.</span>`;
+    tiles.push(slHudTile('Wpłacone', '0', { title: 'Nagrody dostają wyłącznie ci, którzy wpłacą coins — rzuty kostką są darmowe.' }));
+    tiles.push(slHudTile('Za coin', `+${perCoin} pkt`, { title: `Przy wygranej: ${perCoin} pkt za każdy wpłacony coin i ${refundPct}% wpłaty z powrotem.` }));
+  } else {
+    const parts = [`${r.contrib_points} za wpłatę`];
+    if (r.fighter_points > 0) parts.push(`${r.fighter_points} za udział`);
+    if (r.podium_points > 0) parts.push(`${r.podium_points} za ${r.podium_place}. miejsce`);
+    tiles.push(slHudTile('Wpłacone', c.my_coins));
+    tiles.push(slHudTile('Pkt · wygrana', `+${r.points}`, { tone: 'good', title: `Tyle punktów dostaniesz, jeśli boss padnie: ${parts.join(' + ')}` }));
+    tiles.push(slHudTile('Zwrot', r.refund, { tone: 'good', title: `${refundPct}% wpłaty wraca w coins, jeśli boss padnie` }));
+    if (r.podium_place > 0) {
+      const medal = { 1: '🥇', 2: '🥈', 3: '🥉' }[r.podium_place] || '';
+      tiles.push(slHudTile('Podium', `${medal}+${r.podium_points}`, { tone: 'gold', title: `${r.podium_place}. miejsce we wpłatach` }));
+    }
+  }
+  if (r.milestones_earned > 0) {
+    tiles.push(slHudTile('Kamienie', `+${r.milestones_earned}`, { tone: 'good', title: 'Punkty z kamieni milowych — już na koncie, niezależnie od wyniku walki' }));
   }
 
-  const bits = [`<strong>+${r.contrib_points} pkt</strong> za wpłatę`];
-  if (r.fighter_points > 0) bits.push(`<strong>+${r.fighter_points}</strong> za udział`);
-  if (r.podium_points > 0) bits.push(`<strong>+${r.podium_points}</strong> za ${r.podium_place}. miejsce`);
-  const todo = r.qualified
-    ? ''
-    : ` <span class="coop-kara">Dorzuć jeszcze ${r.coins_to_qualify} coins, żeby złapać +${rate} pkt za udział.</span>`;
+  if (!r.qualified) tiles.push(slHudQuest('Bonus', c.my_coins, r.fighter_min, `+${rate} pkt`));
 
-  return `<span class="coop-mine">💰 Wpłaciłeś <strong>${c.my_coins}</strong> coins → jeśli boss padnie: ` +
-    `${bits.join(', ')} i <strong>${r.refund} coins</strong> z powrotem ` +
-    `(razem <strong>+${r.points} pkt</strong>).${todo}${earned}</span>`;
+  return `<div class="hud-group"><div class="hud-caption">💰 Twój łup</div><div class="hud-tiles">${tiles.join('')}</div></div>`;
 }
 
 // ── JAK NAM IDZIE ──
-// Jedna linijka, która mówi, czy idziecie na wygraną: ile trzeba zdejmować dziennie
-// i ile realnie zdjęliście ostatnio. To jedyny mechanizm koordynacji, jaki ta gra ma.
-function slCoopPaceHtml(c) {
+// Czy idziecie na wygraną: ile trzeba zdejmować dziennie i ile realnie zdjęliście.
+// To jedyny mechanizm koordynacji, jaki ta gra ma.
+// „Ostatnio w ciągu dnia" było niezrozumiałe: pokazywało NAJŚWIEŻSZY dzień z obrażeniami,
+// czyli zwykle dzisiejszy, niedokończony. Stąd dwa nazwane dni: dziś (w toku) i poprzedni
+// dzień roboczy (zamknięty — tylko on jest oceniany wobec normy na czerwono/zielono).
+// `extraTile` — kafelek najbliższego kamienia milowego, doklejany na końcu tej samej grupy.
+function slCoopPaceHtml(c, extraTile = '') {
   const p = c.pace;
   if (!p || !c.boss || !c.boss.active) return '';
-  // „Ostatnio w ciągu dnia" było niezrozumiałe: pokazywało NAJŚWIEŻSZY dzień z obrażeniami,
-  // czyli zwykle dzisiejszy, niedokończony — i rano zawsze świeciło ⚠️. Teraz dwie nazwane
-  // liczby: dziś (w toku) i poprzedni dzień roboczy (zamknięty, tylko on idzie do normy).
-  // Stary serwer nie przysyła today/prev_day — wtedy po prostu nie ma tej części.
   const dd = day => day ? `${day.slice(8, 10)}.${day.slice(5, 7)}` : '';
-  // prev_day === null: boss wystartował dopiero dziś, więc nie ma z czym porównywać.
-  let days = '';
+  const how = `Obrażenia wszystkich graczy razem: rzuty kostką (oczka × ${c.boss.dice_damage_mult}) i wpłaty coins (1 coin = 1 obrażenie).`;
+  const tiles = [];
+  // Stary serwer nie przysyła today/prev_day — wtedy zostaje sama norma i dni.
   if (p.today) {
-    let prev = '';
-    if (p.prev_day) {
-      const behind = p.prev_day.amount < p.needed_per_day
-        ? ` <span class="coop-kara" title="Poprzedni dzień roboczy wypadł poniżej dziennej normy">⚠️ poniżej normy</span>`
-        : ' ✓';
-      prev = ` · ostatni dzień roboczy (${dd(p.prev_day.day)}): <strong>${p.prev_day.amount}</strong> obr.${behind}`;
-    }
-    days = `<br>Dziś: <strong>${p.today.amount}</strong> obr.${prev} ` +
-      `<span class="text-muted" title="Obrażenia z rzutów kostką (oczka × ${c.boss.dice_damage_mult}) i z wpłat coins (1 coin = 1 obrażenie), wszystkich graczy razem">— wszyscy razem, kostka + wpłaty</span>`;
+    // Dzisiejszy dzień trwa, więc „za mało" nie jest jeszcze porażką — zielony dopiero,
+    // gdy norma już pękła, a poza tym neutralny.
+    tiles.push(slHudTile('Dziś', p.today.amount, {
+      tone: p.today.amount >= p.needed_per_day ? 'good' : null,
+      title: `Dzisiaj, dzień w toku. ${how}`
+    }));
   }
-  return `<span class="coop-pace">📉 Zdjęliście <strong>${p.dealt}</strong>/${c.boss.max_hp} HP. ` +
-    `Zostało <strong>${p.days_left}</strong> ${p.days_left === 1 ? 'dzień roboczy' : 'dni roboczych'} → ` +
-    `trzeba ~<strong>${p.needed_per_day}</strong> obrażeń dziennie.${days}</span>`;
+  if (p.prev_day) {
+    const ok = p.prev_day.amount >= p.needed_per_day;
+    tiles.push(slHudTile(`Ost. ${dd(p.prev_day.day)}`, `${p.prev_day.amount}${ok ? ' ✓' : ' ⚠️'}`, {
+      tone: ok ? 'good' : 'bad',
+      title: `Poprzedni dzień roboczy — ${ok ? 'norma zrobiona' : 'poniżej normy'}. ${how}`
+    }));
+  }
+  // Norma i liczba dni w jednym kafelku — jedno bez drugiego i tak nic nie mówi.
+  tiles.push(slHudTile(`Norma · ${p.days_left} ${p.days_left === 1 ? 'dzień' : 'dni'}`, `~${p.needed_per_day}`, {
+    title: `Tyle obrażeń dziennie trzeba zdejmować, żeby zdążyć: zostało ${c.boss.hp} HP na ${p.days_left} ${p.days_left === 1 ? 'dzień roboczy' : 'dni robocze'}`
+  }));
+  if (extraTile) tiles.push(extraTile);
+
+  return `<div class="hud-group"><div class="hud-caption">⚔️ Tempo ekipy</div><div class="hud-tiles">${tiles.join('')}</div></div>`;
 }
 
-// Pasek kamieni milowych — trzy progi, po których wpłacający dostają punkty OD RAZU,
-// nie czekając na zabicie bossa.
-function slCoopMilestonesHtml(c) {
-  if (!c.milestones || !c.milestones.length || !c.boss) return '';
-  const hp = c.boss.hp;
-  // Etykieta musi powiedzieć, CZEGO brakuje. „75% (za 747)" czytało się jak cena albo
-  // jakieś punkty — a to jest liczba OBRAŻEŃ, które dzielą ekipę od progu.
-  const items = c.milestones.map(m => m.reached
-    ? `<span class="coop-ms is-done" title="Ten próg już padł — wpłacający dostali +${m.points} pkt">✓ ${m.percent}% zaliczone</span>`
-    : `<span class="coop-ms" title="Gdy HP bossa spadnie do ${m.hp_at}, każdy kto już wpłacił dostaje +${m.points} pkt">${m.percent}% — jeszcze <span class="mono">${hp - m.hp_at}</span> obrażeń</span>`
-  ).join('');
-  return `<div class="coop-ms-row"><span class="text-muted">🎯 Gdy zbijecie HP bossa do progu, każdy kto już wpłacił dostaje <strong>+${c.milestones[0].points} pkt</strong> od ręki:</span>${items}</div>`;
+// Kamienie milowe siedzą NA PASKU HP jako znaczniki — to te same progi, które gracz
+// widzi, patrząc na HP, więc osobny wiersz tylko je powtarzał i zabierał wysokość.
+// Etykieta w dymku mówi, CZEGO brakuje: „75% (za 747)" czytało się jak cena albo punkty,
+// a to jest liczba OBRAŻEŃ, które dzielą ekipę od progu.
+function slCoopMilestoneMarks(c) {
+  if (!c.milestones || !c.boss) return '';
+  const max = Math.max(1, c.boss.max_hp);
+  return c.milestones.map(m => {
+    const title = m.reached
+      ? `${m.percent}% zaliczone — każdy, kto wtedy już wpłacił, dostał +${m.points} pkt`
+      : `${m.percent}%: jeszcze ${c.boss.hp - m.hp_at} obrażeń → +${m.points} pkt od ręki dla każdego, kto już wpłacił`;
+    return `<span class="boss-ms${m.reached ? ' is-done' : ''}" style="left:${(m.hp_at / max) * 100}%" title="${esc(title)}">` +
+      `<span class="boss-ms-tag">${m.reached ? '✓' : `${m.percent}%`}</span></span>`;
+  }).join('');
+}
+
+// Najbliższy niezaliczony próg jako kafelek — pasek pokazuje GDZIE, kafelek ILE.
+function slCoopNextMilestoneTile(c) {
+  if (!c.milestones || !c.boss) return '';
+  const next = c.milestones.find(m => !m.reached);
+  if (!next) return slHudTile('Kamienie', 'wszystkie ✓', { tone: 'good' });
+  return slHudTile(`Próg ${next.percent}%`, `${c.boss.hp - next.hp_at} obr.`, {
+    tone: 'gold',
+    title: `Do progu ${next.percent}% brakuje ${c.boss.hp - next.hp_at} obrażeń — wtedy +${next.points} pkt od ręki dla każdego, kto już wpłacił`
+  });
+}
+
+// ── REAKCJA NA TRAFIENIE ──
+// Panel przerysowuje się co 10 s. Jeśli od ostatniego razu HP spadło, pasek miga
+// i wyskakuje „−N" — boss przestaje wyglądać jak statyczna tabelka. Pamiętamy HP per
+// cykl: nowy boss (inny cykl) albo pierwszy render po wczytaniu strony nie migają.
+let slLastBossHp = null;
+function slBossHitDelta(c) {
+  const key = `${c.cycle}`;
+  const prev = slLastBossHp && slLastBossHp.key === key ? slLastBossHp.hp : null;
+  slLastBossHp = { key, hp: c.boss.hp };
+  return prev !== null && c.boss.hp < prev ? prev - c.boss.hp : 0;
 }
 
 // ── OGŁOSZENIE: NOWA MECHANIKA BOSSA, FAZA TESTÓW ──
@@ -1076,46 +1136,52 @@ function slRenderBossRules(c) {
 // więc ogłaszanie przy niej straty 50 coins byłoby zwykłym kłamstwem.
 function slCoopPrevBossHtml(pr) {
   if (!pr) return '';
-  const m = pr.mine; // brak przy starym serwerze — wtedy tylko nagłówek wyniku
-  const head = pr.defeated ? `🏆 Pokonany`
-    : !pr.settled ? `⚪ Domknięty bez rozliczenia`
-    : `💥 Wygrał — zabrał ${pr.timeout_penalty} coins każdemu`;
+  const m = pr.mine; // brak przy starym serwerze — wtedy tylko wynik i suma
+  // Wynik jako odznaka, jak ekran końca rundy. „Remis" to walka domknięta bez rozliczenia.
+  const badge = pr.defeated
+    ? `<span class="hud-badge is-good" title="Boss pokonany przed terminem">🏆 Zwycięstwo</span>`
+    : !pr.settled
+      ? `<span class="hud-badge" title="Walka domknięta administracyjnie — bez nagród i bez kar, nikt nic nie stracił">⚪ Remis</span>`
+      : `<span class="hud-badge is-bad" title="Nie zdążyliście — boss zabrał ${pr.timeout_penalty} coins każdemu">💀 Porażka</span>`;
 
-  const lines = [];
+  const tiles = [];
+  let note = '';
   if (m) {
-    // Przy przegranej wpłata przepada — gracz ma to zobaczyć obok kary, bo razem to jego strata.
-    const lost = pr.settled && !pr.defeated ? ' <span class="coop-bad">(przepadły)</span>' : '';
-    if (m.paid_coins > 0) lines.push(`Wpłaciłeś <strong>${m.paid_coins}</strong> coins${lost}`);
-    else if (m.damage > 0) lines.push(`Biłeś tylko kostką (${m.damage} obr.) — bez wpłaty nie ma nagrody`);
-    else lines.push('Nie brałeś udziału');
-
-    const pts = [];
-    if (m.contrib_points) pts.push(`+${m.contrib_points} za wpłatę`);
-    if (m.fighter_points) pts.push(`+${m.fighter_points} za udział`);
-    if (m.podium_points) pts.push(`+${m.podium_points} za podium`);
-    if (m.milestone_points) pts.push(`+${m.milestone_points} z kamieni milowych`);
     const totalPts = m.contrib_points + m.fighter_points + m.podium_points + m.milestone_points;
-    if (totalPts > 0) lines.push(`<span class="coop-mine">Dostałeś <strong>+${totalPts} pkt</strong></span> <span class="text-muted">(${pts.join(', ')})</span>`);
-    if (m.refund > 0) lines.push(`<span class="coop-mine">Zwrot: <strong>${m.refund} coins</strong></span>`);
-    if (m.penalty > 0) lines.push(`<span class="coop-bad">Kara: <strong>-${m.penalty} coins</strong></span>`);
-    if (pr.defeated && totalPts === 0 && m.refund === 0) lines.push('Nic nie dostałeś');
-    if (!pr.settled && !pr.defeated) lines.push('Nikt nic nie stracił');
+    const pts = [];
+    if (m.contrib_points) pts.push(`${m.contrib_points} za wpłatę`);
+    if (m.fighter_points) pts.push(`${m.fighter_points} za udział`);
+    if (m.podium_points) pts.push(`${m.podium_points} za podium`);
+    if (m.milestone_points) pts.push(`${m.milestone_points} z kamieni milowych`);
+    // Przy przegranej wpłata przepada — gracz ma to zobaczyć obok kary, bo razem to jego strata.
+    const lost = pr.settled && !pr.defeated;
+    if (m.paid_coins > 0) tiles.push(slHudTile(lost ? 'Wpłata przepadła' : 'Wpłacone', m.paid_coins, lost ? { tone: 'bad' } : {}));
+    if (totalPts > 0) tiles.push(slHudTile('Pkt', `+${totalPts}`, { tone: 'good', title: pts.join(' + ') }));
+    if (m.refund > 0) tiles.push(slHudTile('Zwrot', m.refund, { tone: 'good', title: 'Coins, które wróciły z wpłaty' }));
+    if (m.penalty > 0) tiles.push(slHudTile('Kara', `−${m.penalty}`, { tone: 'bad', title: 'Coins zabrane za przegraną' }));
+    // Nic do pokazania w kafelkach — jedna krótka linijka zamiast pustej kolumny.
+    if (!tiles.length) {
+      note = m.damage > 0 ? `Tylko kostka (${m.damage} obr.) — bez wpłaty bez nagrody`
+        : pr.settled ? 'Nie brałeś udziału' : 'Nie brałeś udziału · nikt nic nie stracił';
+    }
   } else if (pr.defeated && (pr.my_points > 0 || pr.my_refund > 0)) {
-    lines.push(`Dostałeś <strong>+${pr.my_points} pkt</strong> i <strong>${pr.my_refund} coins</strong> z powrotem`);
+    tiles.push(slHudTile('Pkt', `+${pr.my_points}`, { tone: 'good' }));
+    tiles.push(slHudTile('Zwrot', pr.my_refund, { tone: 'good' }));
   } else if (pr.my_penalty > 0) {
-    lines.push(`Kara: <strong>-${pr.my_penalty} coins</strong>`);
+    tiles.push(slHudTile('Kara', `−${pr.my_penalty}`, { tone: 'bad' }));
   }
 
-  return `<div class="coop-prev-col">
-      <div class="coop-prev-title">Poprzedni boss · #${pr.cycle} ${esc(pr.boss_name)}</div>
-      <div class="coop-prev-head">${head}</div>
-      ${lines.map(l => `<div>${l}</div>`).join('')}
+  return `<div class="coop-prev-col${tiles.length ? '' : ' is-compact'}">
+      <div class="hud-caption">⏮ Poprzedni boss · #${pr.cycle} ${esc(pr.boss_name)}</div>
+      <div class="coop-prev-head">${badge}${note ? `<span class="coop-prev-note">${note}</span>` : ''}</div>
+      ${tiles.length ? `<div class="hud-tiles">${tiles.join('')}</div>` : ''}
     </div>`;
 }
 
 // Jeden zwarty pasek pod planszą (nie karta z sekcjami) — plansza ma dostać jak
-// najwięcej miejsca w pionie. Wszystko (ikona, pasek HP/czasu, staty, timer, akcja)
-// w JEDNYM rzędzie; pod spodem linijki „co dostanę ja" i „jak nam idzie".
+// najwięcej miejsca w pionie. Górny rząd: boss, pasek HP (z kamieniami milowymi i HP
+// w środku), pasek czasu (z licznikiem w środku), wpłata. Pod spodem HUD z kafelkami
+// „łup" i „tempo" (70%) oraz poprzedni boss (30%).
 function renderCoop(g) {
   const c = g.coop;
   const el = document.getElementById('coop-panel');
@@ -1135,12 +1201,12 @@ function renderCoop(g) {
   if (rulesItem) rulesItem.style.display = '';
 
   const b = c.boss;
-  const timerHtml = b.deadline_at
-    ? `<span class="boss-timer mono" id="coop-deadline" data-until="${esc(b.deadline_at)}">⏳ –</span>`
-    : `<span class="coop-stat">${c.time_limit_days}d na pokonanie</span>`;
+  // Licznik czasu siedzi W ŚRODKU paska czasu — pasek pokazuje proporcję, liczba dokładkę.
+  // #coop-deadline zostaje tym samym elementem, który co sekundę przepisuje updateCoopDeadline.
   const timeBarHtml = b.deadline_at
-    ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(b.started_at || '')}" data-until="${esc(b.deadline_at)}" title="Czas na pokonanie bossa"><div class="boss-time-fill"></div></div>`
-    : '';
+    ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(b.started_at || '')}" data-until="${esc(b.deadline_at)}" title="Czas na pokonanie bossa"><div class="boss-time-fill"></div><span class="boss-bar-label mono" id="coop-deadline" data-until="${esc(b.deadline_at)}">⏳ –</span></div>`
+    : `<div class="boss-time-bar"><span class="boss-bar-label">${c.time_limit_days}d na pokonanie</span></div>`;
+  const hit = slBossHitDelta(c);
 
   // Wpłata jest dowolnej wysokości (1 coin = 1 obrażenie), więc zamiast przycisku
   // z ryczałtem mamy pole kwoty. Przy przerysowaniu panelu (co 10 s) trzeba zachować to,
@@ -1159,22 +1225,26 @@ function renderCoop(g) {
       <span class="coop-emoji">👹</span>
       <span class="coop-name">${esc(b.name)}</span>
       <div class="coop-bar-flex">
-        <div class="coop-bar"><div class="coop-bar-fill boss-hp-fill" style="width:${b.percent}%"></div></div>
+        <div class="boss-hp${hit ? ' is-hit' : ''}" title="HP bossa — znaczniki to kamienie milowe">
+          <div class="boss-hp-fill" style="width:${b.percent}%"></div>
+          ${slCoopMilestoneMarks(c)}
+          <span class="boss-bar-label mono">${b.hp} / ${b.max_hp} HP</span>
+          ${hit ? `<span class="boss-hit-float mono">−${hit}</span>` : ''}
+        </div>
         ${timeBarHtml}
       </div>
-      <span class="coop-stat mono">${b.hp}/${b.max_hp} HP</span>
-      ${timerHtml}
       <div class="coop-actions">${actionHtml}</div>
     </div>
     <div class="coop-split${prevHtml ? '' : ' no-prev'}">
       <div class="coop-now">
-        <div class="coop-row-sub text-muted">
-          ${slCoopMyRewardHtml(c)}
-          <span class="coop-kara">💥 Nie zdążycie — boss zabiera <strong>${c.my_timeout_penalty} coins</strong> KAŻDEMU (także tym, którzy wpłacili; saldo może zejść pod kreskę).</span>
+        <div class="hud-row">
+          ${slCoopLootHtml(c)}
+          ${slCoopPaceHtml(c, slCoopNextMilestoneTile(c))}
         </div>
-        <div class="coop-row-sub text-muted">${slCoopPaceHtml(c)}</div>
-        ${slCoopMilestonesHtml(c)}
-        ${slCoopChipsHtml(c)}
+        <div class="hud-foot">
+          <span class="hud-badge is-bad" title="Nie zdążycie do terminu — boss zabiera ${c.my_timeout_penalty} coins KAŻDEMU graczowi, także tym, którzy wpłacili. Bez zniżki i bez względu na saldo: można zejść pod kreskę.">💀 Porażka = −${c.my_timeout_penalty} coins każdemu</span>
+          ${slCoopChipsHtml(c)}
+        </div>
       </div>
       ${prevHtml}
     </div>`;
