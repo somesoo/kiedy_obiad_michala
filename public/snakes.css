@@ -469,41 +469,36 @@
 .col-side .lb-unit { font-size: 9px; }
 .col-side .lb-stats { font-size: 9px; gap: 7px; }
 
-/* ── PASEK WSPÓLNEJ PULI POD PLANSZĄ ──
-   Świadomie SPŁASZCZONY do jednego-dwóch wąskich rzędów (nie karty z sekcjami) —
-   to pasek stanu pod planszą, nie osobny panel, więc ma zostawiać planszy jak
-   najwięcej miejsca w pionie. Wszystko (ikona, pasek postępu/HP, staty, timer,
-   akcja) leży w jednym rzędzie; zasady/kara to jedna cienka linijka pod spodem. */
+/* ── PANEL BOSSA POD PLANSZĄ ──
+   Zwarty pasek stanu, nie osobna karta z sekcjami — plansza ma dostać jak najwięcej
+   miejsca w pionie. Górny rząd: boss, paski HP i czasu, wpłata. Dół: HUD z kafelkami
+   (70%) i poprzedni boss (30%). Liczby jako kafelki zamiast zdań: te, które coś znaczą,
+   mają być widoczne od razu, a wyjaśnienia siedzą w dymkach (title) i w regulaminie. */
 .coop-card {
   flex: 0 0 auto;
   margin: 6px 0 0;
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(232, 93, 74, 0.06), transparent 60%), var(--surface);
   border: 1px solid var(--muted);
   border-radius: 8px;
-  padding: 5px 10px;
+  padding: 6px 10px 7px;
 }
 .coop-row-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-.coop-emoji { font-size: 15px; line-height: 1; flex: 0 0 auto; }
+.coop-emoji { font-size: 18px; line-height: 1; flex: 0 0 auto; }
 .coop-name {
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
-  font-size: 11px;
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-.coop-bar-flex { flex: 1 1 auto; min-width: 40px; }
-.coop-stat { font-size: 10px; color: var(--text-muted); flex: 0 0 auto; white-space: nowrap; }
-.boss-timer {
   font-size: 12px;
-  font-weight: 700;
-  color: var(--gold);
-  flex: 0 0 auto;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
+/* padding-top: miejsce na metki kamieni milowych nad paskiem HP. */
+.coop-bar-flex { flex: 1 1 auto; min-width: 40px; padding-top: 8px; }
 .coop-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .coop-actions input {
   width: 64px;
@@ -517,85 +512,225 @@
 }
 .coop-actions button { padding: 4px 10px; font-size: 11px; }
 .coop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-.coop-row-sub {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 3px;
-  font-size: 9px;
-  line-height: 1.3;
+
+/* ── PASEK HP ──
+   Gruby, z liczbą w środku i kamieniami milowymi jako znacznikami na samym pasku.
+   overflow: visible, bo znaczniki i „−N" wystają ponad pasek; wypełnienie przycina się
+   samo przez border-radius na .boss-hp-fill. */
+.boss-hp {
+  position: relative;
+  height: 16px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 5px;
 }
-.coop-kara { color: var(--gold); }
-.coop-bad { color: var(--danger); }
+.boss-hp-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--gold), var(--danger));
+  box-shadow: 0 0 10px rgba(232, 93, 74, 0.35);
+  transition: width 0.6s ease;
+}
+/* Etykieta w środku paska — cień, żeby była czytelna i na wypełnieniu, i na tle. */
+.boss-bar-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-shadow: 0 0 3px #000, 0 0 2px #000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+/* Kamień milowy: pionowa kreska przez pasek + mała metka nad nim. */
+.boss-ms {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(240, 240, 240, 0.55);
+  cursor: help;
+  z-index: 1;
+}
+.boss-ms-tag {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  line-height: 1;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.boss-ms.is-done { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+.boss-ms.is-done .boss-ms-tag { color: var(--accent); }
+
+/* ── TRAFIENIE ── HP spadło od ostatniego odświeżenia: pasek miga, „−N" odlatuje w górę. */
+.boss-hp.is-hit { animation: boss-hit-shake 0.45s ease; }
+.boss-hp.is-hit .boss-hp-fill { animation: boss-hit-flash 0.6s ease; }
+.boss-hit-float {
+  position: absolute;
+  right: 6px;
+  top: -2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--danger);
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+  animation: boss-hit-float 1.4s ease-out forwards;
+  z-index: 2;
+}
+@keyframes boss-hit-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(1px); }
+}
+@keyframes boss-hit-flash {
+  0% { filter: brightness(2.2); }
+  100% { filter: brightness(1); }
+}
+@keyframes boss-hit-float {
+  0% { opacity: 0; transform: translateY(4px); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-14px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boss-hp.is-hit, .boss-hp.is-hit .boss-hp-fill { animation: none; }
+  .boss-hit-float { animation-duration: 0.01s; }
+}
+
+/* ── CZAS BOSSA ──
+   Niebieski, żeby nie mylił się ze złoto-czerwonym HP. MALEJE jak HP: pokazuje, ile
+   czasu zostało, więc pusty pasek = koniec czasu. Licznik jest w środku paska. */
+.boss-time-bar {
+  position: relative;
+  height: 12px;
+  margin-top: 3px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.boss-time-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(74,163,255,0.35), var(--boss-blue));
+  transition: width 1s linear;
+  width: 0%;
+}
+.boss-time-bar .boss-bar-label { font-size: 9px; }
+/* Ostatnia doba — pasek robi się alarmowy. */
+.boss-time-bar.is-urgent .boss-time-fill {
+  background: linear-gradient(90deg, rgba(232,93,74,0.35), var(--danger));
+}
 
 /* Dół panelu: 70% obecny boss, 30% poprzedni. Bez poprzedniego (pierwszy cykl) obecny
    bierze całą szerokość. min-width: 0 — inaczej długie linijki rozpychałyby kolumnę. */
 .coop-split {
   display: grid;
   grid-template-columns: 7fr 3fr;
-  gap: 10px;
+  gap: 12px;
   align-items: start;
+  margin-top: 5px;
 }
 .coop-split.no-prev { grid-template-columns: 1fr; }
 .coop-now { min-width: 0; }
-.coop-prev-col {
-  min-width: 0;
-  margin-top: 3px;
-  padding: 3px 0 3px 10px;
-  border-left: 1px solid var(--muted);
-  font-size: 9px;
-  line-height: 1.4;
-  color: var(--text-muted);
-}
-.coop-prev-title {
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 10px;
-  color: var(--text-primary);
-}
-.coop-prev-head { margin-bottom: 2px; }
-.coop-bar {
-  height: 8px;
-  background: var(--surface-alt);
-  border: 1px solid var(--muted);
-  border-radius: 20px;
-  overflow: hidden;
-}
-.coop-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
-  transition: width 0.5s ease;
-}
-.boss-hp-fill { background: linear-gradient(90deg, var(--gold), var(--danger)); }
 
-/* ── CZAS BOSSA ──
-   Drugi, cieńszy pasek pod paskiem wypełnienia w bloku bossa. Niebieski, żeby nie mylił
-   się ani z limonkową zbiórką, ani ze złoto-czerwonym HP. MALEJE jak HP: pokazuje, ile
-   czasu zostało, więc pusty pasek = koniec czasu. Widoczny tylko w trakcie walki. */
-.boss-time-bar {
-  height: 4px;
-  margin-top: 3px;
+/* ── HUD: KAFELKI ── */
+.hud-row { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.hud-group { min-width: 0; }
+.hud-caption {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-tiles { display: flex; flex-wrap: wrap; gap: 4px; }
+.hud-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 48px;
+  padding: 2px 6px 3px;
   background: var(--surface-alt);
   border: 1px solid var(--muted);
-  border-radius: 20px;
+  border-radius: 6px;
+  cursor: default;
+}
+.hud-label {
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.hud-value {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.hud-tile.is-good { border-color: rgba(200, 241, 53, 0.45); }
+.hud-tile.is-good .hud-value { color: var(--accent); }
+.hud-tile.is-bad { border-color: rgba(232, 93, 74, 0.55); }
+.hud-tile.is-bad .hud-value { color: var(--danger); }
+.hud-tile.is-gold { border-color: rgba(245, 200, 66, 0.5); }
+.hud-tile.is-gold .hud-value { color: var(--gold); }
+
+/* Kafelek „zadania" — ile brakuje do bonusu za udział; mini pasek na dole kafelka.
+   Wartość (nagroda) wyszarzona, bo jeszcze jej nie masz — limonka dopiero w pasku. */
+.hud-quest { border-style: dashed; }
+.hud-quest .hud-value { color: var(--text-muted); }
+.hud-quest-bar {
+  height: 3px;
+  margin-top: 2px;
+  background: var(--muted);
+  border-radius: 2px;
   overflow: hidden;
 }
-.boss-time-fill {
-  height: 100%;
-  background: linear-gradient(90deg, rgba(74,163,255,0.45), var(--boss-blue));
-  transition: width 1s linear;
-  width: 0%;
-}
-/* Ostatnia doba — pasek robi się alarmowy. */
-.boss-time-bar.is-urgent .boss-time-fill {
-  background: linear-gradient(90deg, rgba(232,93,74,0.45), var(--danger));
-}
-.coop-chips {
+.hud-quest-fill { height: 100%; background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+
+/* Stopka: odznaka kary + lista wpłacających w jednym zawijanym rzędzie. */
+.hud-foot {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 5px;
 }
+.hud-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--muted);
+  color: var(--text-muted);
+  background: var(--surface-alt);
+  white-space: nowrap;
+  cursor: help;
+}
+.hud-badge.is-bad { color: var(--danger); border-color: rgba(232, 93, 74, 0.6); background: rgba(232, 93, 74, 0.1); }
+.hud-badge.is-good { color: var(--accent); border-color: rgba(200, 241, 53, 0.5); background: rgba(200, 241, 53, 0.08); }
+
+.coop-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .coop-chip {
   font-size: 10px;
   background: var(--surface-alt);
@@ -603,33 +738,22 @@
   border-radius: 20px;
   padding: 1px 7px;
 }
-.coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 .coop-chip .coop-amt { margin-left: 3px; }
+/* Podium z poświatą w kolorze medalu. „To ja" (limonka) wygrywa z kolorem podium. */
+.coop-chip.is-p1 { border-color: #F5C842; box-shadow: 0 0 6px rgba(245, 200, 66, 0.45); }
+.coop-chip.is-p2 { border-color: #C9D1D9; box-shadow: 0 0 6px rgba(201, 209, 217, 0.35); }
+.coop-chip.is-p3 { border-color: #CD7F32; box-shadow: 0 0 6px rgba(205, 127, 50, 0.4); }
+.coop-chip.is-me { border-color: var(--accent); color: var(--accent); }
 
-/* ── LICZBY ZAMIAST HASEŁ ──
-   Trzy linijki, które odpowiadają na jedyne trzy pytania, jakie gracz ma przy bossie:
-   ile mi wpadnie, jak nam idzie i ile brakuje do najbliższego progu. Wcześniej panel
-   mówił tylko „nagroda albo kara" i nie dawało się tego z niczym porównać. */
-.coop-mine { color: var(--accent); }
-.coop-pace { color: var(--text-muted); }
-.coop-ms-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  margin-top: 3px;
-  font-size: 9px;
-  line-height: 1.3;
+/* ── POPRZEDNI BOSS ── (prawa kolumna) */
+.coop-prev-col {
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--muted);
 }
-.coop-ms {
-  font-size: 9px;
-  background: var(--surface-alt);
-  border: 1px solid var(--muted);
-  border-radius: 20px;
-  padding: 1px 7px;
-  color: var(--text-muted);
-}
-.coop-ms.is-done { border-color: var(--accent); color: var(--accent); }
+.coop-prev-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+.coop-prev-col.is-compact .coop-prev-head { margin-bottom: 0; }
+.coop-prev-note { font-size: 9px; color: var(--text-muted); }
 
 /* ── OGŁOSZENIE O PRZEBUDOWIE BOSSA ──
    Nad planszą, na całą szerokość siatki, żeby dało się je przeczytać ZANIM ktoś wpłaci.
