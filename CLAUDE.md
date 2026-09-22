@@ -19,33 +19,12 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 | Obszar | Gdzie | Stan |
 |---|---|---|
 | **Snakes & Ladders** (prefiks `sl*`) | większość `server.js`, `public/snakes*` | **aktywna gra, tu idzie cała praca** |
-| **Sezony planszy** | `boards/*.js`, `lib/seasons.js`, `public/themes/` | plansza = plik; admin przełącza sezon |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
 | **Wordle po polsku** | ~20% `server.js`, `public/app.js`, `index.html` | **zakończony 2026-08-31** przez `GAME_END_AT`; `gameHasEnded()` zwraca `true`, gra jest trwale zablokowana. Nie inwestuj tu czasu bez wyraźnej prośby. |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
 
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
 jest w `.gitignore` — baza produkcyjna żyje tylko na serwerze.
-
-## Sezony planszy — plansza to plik, nie kod
-
-Kształt planszy, drabiny, węże, bonusy i motyw żyją w `boards/<id>.js` (format i walidacja:
-`lib/seasons.js`, wzorzec: `boards/default.js`). Każdy sezon zostaje w repo, żeby dało się
-go odpalić ponownie. Admin przełącza sezon w panelu (`POST /api/snakes/admin/season`),
-a aktywny siedzi w `sl_meta.active_board`.
-
-- **Liczba pól jest zmienna** — rozmiar zawsze przez `slBoardSize()`, nigdy ze stałej.
-- `sl_board` to **lustro** aktywnego pliku, reseedowane przy każdym starcie. Poprawka w pliku
-  wchodzi po restarcie. Plik z błędem nie trafia na listę, powód jest w logu.
-- **Zmiana sezonu = wszyscy na polu 0** (`abs_pos = laps × nowy rozmiar`; okrążenia, punkty,
-  coins i ekwipunek zostają). `season_move_floor` zapamiętuje ostatni ruch starej planszy
-  i cofanie ruchu oraz dnia **odmawia** dla starszych ruchów, bo ich `from_abs` wskazuje pole
-  na innej planszy.
-- Front rysuje pola z `board.path` w gridzie **bez gapów**. Odstęp robi symetryczny `margin`
-  na `.sl-cell`. Gap rozjechałby drogę i łączniki z kafelkami (`slGridPoint`).
-- Motyw: `public/themes/<theme>.css` doładowywany z payloadu, a efekty to klasy `fx-<nazwa>`
-  na `<body>`. Warstwy efektów muszą żyć **poza** `#board-area`, bo `renderBoard` podmienia
-  jej `innerHTML`.
 
 ## Dwie waluty — to jest fundament, nie szczegół
 
@@ -205,7 +184,7 @@ rm -rf db   # na koniec
   więc do testów wystarczy sztuczny plik z poprawnym nagłówkiem.
 - Boss bywa domyślnie wyłączony — włącz przez `POST /api/snakes/admin/coop/toggle`.
 - Admin: GET/DELETE biorą `?password=`, POST bierze `{password}` w ciele.
-- Zawsze `node --check server.js`, `node --check lib/boss.js`, `node --check lib/seasons.js` i `node --check public/snakes.js`.
+- Zawsze `node --check server.js`, `node --check lib/boss.js` i `node --check public/snakes.js`.
   Skrypt panelu admina siedzi inline w `snakes-admin.html` — trzeba go wyciąć, żeby
   sprawdzić składnię.
 - **Rzuty działają tylko w oknie gry** (pon–pt, 8:00–16:00). Testując w weekend, podnieś

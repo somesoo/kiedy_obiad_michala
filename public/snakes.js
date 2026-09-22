@@ -178,7 +178,6 @@ let pollInFlight = false;
 // gubilibyśmy kwotę wpisaną w zbiórce, focus i pozycję scrolla w dzienniku.
 function stateSignature(g) {
   return JSON.stringify([
-    g.board.id,
     g.players.map(p => [p.player_id, p.abs_pos, p.total_points]),
     g.me.abs_pos, g.me.balance, g.me.total_points, g.me.rolls_remaining_today,
     // has_shield wystarczy: to jedyny efekt, o którym gracz ma prawo wiedzieć, zanim
@@ -455,48 +454,12 @@ async function loadState() {
 function renderAll() {
   const g = state.game;
   if (!g) return;
-  applySeason(g.board);
   renderStats(g);
   renderBoard(g);
   renderShop(g);
   renderLeaderboard(g);
   renderRollButton(g);
   renderCoop(g);
-}
-
-// ── SEZON PLANSZY ──
-// Motyw sezonu (public/themes/<theme>.css) i efekty doklejamy DOPIERO tutaj, z payloadu,
-// a nie na sztywno w snakes.html — zmiana sezonu w panelu admina przełącza wygląd
-// otwartych kart przy najbliższym odświeżeniu, bez przeładowania strony.
-// Efekty (np. liście) to klasy fx-<nazwa> na <body>; warstwy efektów muszą żyć POZA
-// #board-area, bo renderBoard podmienia jej innerHTML i zresetowałby animacje.
-let slSeasonKey = null;
-function applySeason(board) {
-  const key = [board.id, board.theme || '', (board.effects || []).join(',')].join('|');
-  if (key === slSeasonKey) return;
-  slSeasonKey = key;
-
-  const body = document.body;
-  [...body.classList].filter(c => c.startsWith('season-') || c.startsWith('fx-'))
-    .forEach(c => body.classList.remove(c));
-  body.classList.add(`season-${board.id}`);
-  (board.effects || []).forEach(e => body.classList.add(`fx-${e}`));
-
-  let link = document.getElementById('season-theme');
-  if (board.theme) {
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.id = 'season-theme';
-      document.head.appendChild(link);
-    }
-    link.href = `/themes/${board.theme}.css`;
-  } else if (link) {
-    link.remove();
-  }
-
-  const sub = document.getElementById('board-season-name');
-  if (sub) sub.textContent = `${board.name} · ${board.size} pól · wszystkie pionki na jednej pętli`;
 }
 
 // ── STATY ──
@@ -516,137 +479,115 @@ function renderStats(g) {
   }
 }
 
-// ── PLANSZA (kształt z pliku sezonu, pętla) ──
-// Front nie zna żadnego kształtu na sztywno: serwer przysyła `board.path` — współrzędne
-// [kolumna, wiersz od góry] każdego pola w kolejności ruchu (plik boards/<sezon>.js).
-// Kafelki stoją w CSS gridzie cols×rows dokładnie tam, gdzie każe path, a pod nimi SVG
-// rysuje drogę przez ich środki — to ona pokazuje zakręty, start, metę i pętlę.
-//
-// Środek kratki liczymy jako (c + 0.5) / cols. To jest DOKŁADNIE środek kafelka tylko
-// dlatego, że grid nie ma gapów, a odstęp między kafelkami robi `margin` na .sl-cell
-// (symetryczny, więc środek elementu zostaje w środku kratki). Dodanie column-gap albo
-// row-gap rozjechałoby łączniki z kafelkami.
-function slGridPoint(board, c, r) {
-  return { x: ((c + 0.5) / board.cols) * 100, y: ((r + 0.5) / board.rows) * 100 };
+// ── PLANSZA (serpentyna 7×7, pętla) ──
+// Wymiary bierzemy z serwera (board.cols/rows), więc zmiana rozmiaru planszy
+// po stronie backendu nie wymaga ruszania frontu.
+// Wysokość „szczeliny” między wierszami (sumarycznie), jako ułamek wysokości
+// standardowego wiersza. Każda szczelina dzieli się na DWIE połówki — po jednej dla
+// każdego z dwóch kafelków zakrętu, które się w niej stykają (kafelek KOŃCZĄCY wiersz
+// poniżej i kafelek ZACZYNAJĄCY wiersz powyżej), więc oba rosną symetrycznie i spotykają
+// się pośrodku szczeliny. Pozostałe kafelki (bez zakrętu) mają standardową wysokość,
+// a cała szczelina między nimi zostaje pusta — to tworzy wizualną przerwę między wierszami.
+const SL_ROW_GAP_FR = 0.35;
+const SL_ROW_HALF_GAP_FR = SL_ROW_GAP_FR / 2;
+
+// Geometria pola: który to wiersz/kolumna (licząc od góry planszy) i czy to kafelek
+// "na zakręcie" — a jeśli tak, to której strony: EXIT (ostatni odwiedzany w wierszu,
+// stąd ścieżka skacze do wiersza NAD nim) czy ENTRY (pierwszy odwiedzany w wierszu,
+// TU ścieżka weszła z wiersza POD nim). To ta sama para kolumn co w klasycznym
+// boustrophedon — EXIT wiersza r i ENTRY wiersza r+1 leżą w tej samej kolumnie.
+function slTileGeometry(idx, cols, rows) {
+  const boardRow = Math.floor(idx / cols);
+  const posInRow = idx % cols;
+  const leftToRight = boardRow % 2 === 0;
+  const col = leftToRight ? posInRow : (cols - 1 - posInRow);
+  const rowFromTop = rows - 1 - boardRow;
+  const exitCol = leftToRight ? cols - 1 : 0;
+  const entryCol = leftToRight ? 0 : cols - 1;
+  const isExit = boardRow < rows - 1 && col === exitCol;
+  const isEntry = boardRow > 0 && col === entryCol;
+  return { boardRow, col, rowFromTop, isExit, isEntry, isTurn: isExit || isEntry };
 }
 
-function tileCenter(idx, board) {
-  const [c, r] = board.path[idx];
-  return slGridPoint(board, c, r);
-}
-
-// Łamana przez punkty (w %) z zaokrąglonymi narożnikami: w każdym załamaniu linia kończy
-// się `radius` przed wierzchołkiem i dochodzi do następnego odcinka łukiem (Q). Promień
-// przycinamy do połowy krótszego odcinka, więc dwa zakręty jeden nad drugim (koniec
-// wiersza serpentyny) składają się w równe „U", a nie zachodzą na siebie.
-function slRoundedPath(pts, radius) {
-  if (!pts.length) return '';
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const a = pts[i - 1], p = pts[i], b = pts[i + 1];
-    const la = Math.hypot(a.x - p.x, a.y - p.y), lb = Math.hypot(b.x - p.x, b.y - p.y);
-    // Punkt w środku prostej (albo zdublowany) nie jest zakrętem — idziemy dalej.
-    const cross = (p.x - a.x) * (b.y - p.y) - (p.y - a.y) * (b.x - p.x);
-    if (!la || !lb || Math.abs(cross) < 1e-6) { d += ` L ${p.x} ${p.y}`; continue; }
-    const r = Math.min(radius, la / 2, lb / 2);
-    const p1 = { x: p.x + (a.x - p.x) / la * r, y: p.y + (a.y - p.y) / la * r };
-    const p2 = { x: p.x + (b.x - p.x) / lb * r, y: p.y + (b.y - p.y) / lb * r };
-    d += ` L ${p1.x} ${p1.y} Q ${p.x} ${p.y} ${p2.x} ${p2.y}`;
-  }
-  const last = pts[pts.length - 1];
-  return d + ` L ${last.x} ${last.y}`;
-}
-
-// Punkty strzałki pętli meta → start. Plik sezonu może podać `loop` (punkty pośrednie
-// w jednostkach kratek, także lekko POZA siatką), żeby strzałka obiegła planszę zamiast
-// przecinać pola. Bez `loop` — prosto z mety na start.
-function slLoopPoints(board) {
-  const pts = [tileCenter(board.size - 1, board)];
-  for (const [c, r] of board.loop || []) pts.push(slGridPoint(board, c, r));
-  pts.push(tileCenter(0, board));
-  return pts;
-}
-
-// Ile miejsca zostawić wokół siatki na strzałkę pętli, która wychodzi poza kratki.
-// Liczymy w kratkach, a potem jako ułamek CAŁEJ szerokości (siatka + zapas), bo procenty
-// w `inset` odnoszą się do kontenera, nie do samej siatki.
-function slBoardInsets(board) {
-  let l = 0, r = 0, t = 0, b = 0;
-  for (const [c, rr] of board.loop || []) {
-    l = Math.max(l, -0.5 - c);
-    r = Math.max(r, c - (board.cols - 0.5));
-    t = Math.max(t, -0.5 - rr);
-    b = Math.max(b, rr - (board.rows - 0.5));
-  }
-  const w = board.cols + l + r, h = board.rows + t + b;
-  // + kilka pikseli na grubość linii i etykietę pętli, która siedzi na linii.
-  const pct = (v, total) => v > 0 ? `calc(${(v / total) * 100}% + 14px)` : '0px';
-  return `top:${pct(t, h)};right:${pct(r, w)};bottom:${pct(b, h)};left:${pct(l, w)}`;
+// CSS grid-row dla danego pola. Tory idą w trójkach: standard, pół-szczelina-A,
+// pół-szczelina-B, standard, ... (patrz grid-template-rows w renderBoard) —
+// standardowy tor dla rowFromTop=m zaczyna się na linii 3m+1. Kafelek EXIT dokłada
+// do siebie pół-szczelinę B tuż NAD sobą (w stronę wiersza, do którego skręca);
+// kafelek ENTRY dokłada pół-szczelinę A tuż POD sobą (w stronę wiersza, z którego
+// przyszedł) — oba rosną o tyle samo, każdy w swoją stronę, spotykając się pośrodku.
+function slGridRowStyle(rowFromTop, isExit, isEntry) {
+  const m = rowFromTop;
+  if (isExit) return `${3 * m} / ${3 * m + 2}`;
+  if (isEntry) return `${3 * m + 1} / ${3 * m + 3}`;
+  return `${3 * m + 1} / ${3 * m + 2}`;
 }
 
 function renderBoard(g) {
   const area = document.getElementById('board-area');
-  const board = g.board;
+  const size = g.board.size;
+  const cols = g.board.cols || 7;
+  const rows = g.board.rows || Math.ceil(size / cols);
 
   // mapy: pole -> kafel specjalny, pole -> gracze
   const special = {};
-  board.tiles.forEach(t => { special[t.position] = t; });
+  g.board.tiles.forEach(t => { special[t.position] = t; });
   const pawns = {};
   g.players.forEach(p => { (pawns[p.tile] = pawns[p.tile] || []).push(p); });
 
   let cells = '';
-  board.path.forEach(([c, r], idx) => {
-    cells += renderCell(idx, special[idx], pawns[idx], `grid-column:${c + 1};grid-row:${r + 1}`, board.size);
-  });
+  // Wiersze od góry: najwyższy indeks u góry, serpentyna jak w klasycznej planszy.
+  for (let rowFromTop = 0; rowFromTop < rows; rowFromTop++) {
+    const boardRow = rows - 1 - rowFromTop;
+    const leftToRight = boardRow % 2 === 0;
+    for (let c = 0; c < cols; c++) {
+      const col = leftToRight ? c : (cols - 1 - c);
+      const idx = boardRow * cols + col;
+      const { isExit, isEntry, isTurn } = slTileGeometry(idx, cols, rows);
+      const rowStyle = slGridRowStyle(rowFromTop, isExit, isEntry);
+      if (idx >= size) { cells += `<div class="sl-cell sl-cell-empty" style="grid-row:${rowStyle}"></div>`; continue; }
+      cells += renderCell(idx, special[idx], pawns[idx], rowStyle, isTurn);
+    }
+  }
+
+  // grid-template-rows liczony w JS (nie w statycznym CSS): powtarza [standard, pół-szczelina,
+  // pół-szczelina] dla każdej pary wierszy poza ostatnim, kończąc samym standardowym torem u góry.
+  const rowTemplate = `repeat(${rows - 1}, 1fr ${SL_ROW_HALF_GAP_FR}fr ${SL_ROW_HALF_GAP_FR}fr) 1fr`;
 
   area.innerHTML = `
     <div class="sl-board-wrap">
-      <div class="sl-board-stage" style="${slBoardInsets(board)}">
-        ${renderTrack(board)}
-        <div class="sl-board" style="--cols:${board.cols};--rows:${board.rows}">${cells}</div>
-        ${renderConnectors(board)}
-      </div>
+      <div class="sl-board" style="--cols:${cols};grid-template-rows:${rowTemplate}">${cells}</div>
+      ${renderConnectors(g, cols, rows)}
     </div>
-    ${renderLegend(board)}`;
+    ${renderLegend()}`;
 }
 
-// Droga pod kafelkami + przerywana strzałka pętli meta → start z podpisem.
-function renderTrack(board) {
-  const pts = board.path.map((_, i) => tileCenter(i, board));
-  const radius = 0.5 * Math.min(100 / board.cols, 100 / board.rows);
-  const loopPts = slLoopPoints(board);
-
-  // Podpis pętli: na środku najdłuższego POZIOMEGO odcinka (tam jest miejsce na tekst),
-  // a gdy takiego nie ma — na środku najdłuższego w ogóle.
-  let best = null;
-  for (let i = 0; i < loopPts.length - 1; i++) {
-    const a = loopPts[i], b = loopPts[i + 1];
-    const horiz = Math.abs(a.y - b.y) < 1e-6;
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    const score = (horiz ? 1000 : 0) + len;
-    if (!best || score > best.score) best = { score, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  }
-  const lapTxt = board.lap_points ? ` +${board.lap_points} pkt` : '';
-
-  return `
-    <svg class="sl-track" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      <path class="sl-track-road" d="${slRoundedPath(pts, radius)}" />
-      <path class="sl-track-loop" d="${slRoundedPath(loopPts, radius)}" />
-    </svg>
-    <span class="sl-loop-label" style="left:${best.x}%;top:${best.y}%">↻ nowe okrążenie${lapTxt}</span>`;
+// Środek pola w procentach szerokości/wysokości planszy — uwzględnia wydłużenie
+// kafelków na zakręcie, żeby linie łączników (drabiny/węże) i tak trafiały w środek
+// realnie wyrenderowanego kafelka, a nie w środek "standardowej" wysokości wiersza.
+function tileCenter(idx, cols, rows) {
+  const { col, rowFromTop, isExit, isEntry } = slTileGeometry(idx, cols, rows);
+  const totalWeight = rows + (rows - 1) * SL_ROW_GAP_FR; // suma wag = bez zmian (szczelina tylko podzielona na pół)
+  const stdStart = rowFromTop * (1 + SL_ROW_GAP_FR); // suma wag torów przed tym wierszem
+  let centerWeight = stdStart + 0.5;
+  if (isExit) centerWeight -= SL_ROW_HALF_GAP_FR / 2;
+  else if (isEntry) centerWeight += SL_ROW_HALF_GAP_FR / 2;
+  return {
+    x: ((col + 0.5) / cols) * 100,
+    y: (centerWeight / totalWeight) * 100
+  };
 }
 
 // Widoczne połączenia start→koniec dla KAŻDEGO węża i KAŻDEJ drabiny.
 // Drabina: prosta, jasnozielona linia ze szczeblami (dasharray) i grotem u góry.
 // Wąż: czerwona, wygięta krzywa z „głową" (kółkiem) na polu docelowym.
 // Dzięki temu od razu widać, dokąd prowadzi każde pole — bez najeżdżania myszą.
-function renderConnectors(board) {
-  const links = board.tiles.filter(t => t.kind === 'ladder' || t.kind === 'snake');
+function renderConnectors(g, cols, rows) {
+  const links = g.board.tiles.filter(t => t.kind === 'ladder' || t.kind === 'snake');
   if (!links.length) return '';
 
   const parts = links.map(t => {
-    const a = tileCenter(t.position, board);
-    const b = tileCenter(t.target, board);
+    const a = tileCenter(t.position, cols, rows);
+    const b = tileCenter(t.target, cols, rows);
     const cls = t.kind === 'ladder' ? 'sl-link-ladder' : 'sl-link-snake';
     const title = t.kind === 'ladder'
       ? `Drabina: ${t.position} → ${t.target}`
@@ -671,16 +612,16 @@ function renderConnectors(board) {
   }).join('');
 
   return `<svg class="sl-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${parts}</svg>`
-    + renderLinkDots(links, board);
+    + renderLinkDots(links, cols, rows);
 }
 
 // Kropki na początku i końcu każdego połączenia. Świadomie w HTML, nie w SVG:
 // warstwa SVG jest rozciągana (preserveAspectRatio="none"), więc <circle> zrobiłby się
 // elipsą, gdy kafelki są prostokątne. Element HTML pozycjonowany procentowo zostaje kołem.
-function renderLinkDots(links, board) {
+function renderLinkDots(links, cols, rows) {
   const dots = links.map(t => {
-    const a = tileCenter(t.position, board);
-    const b = tileCenter(t.target, board);
+    const a = tileCenter(t.position, cols, rows);
+    const b = tileCenter(t.target, cols, rows);
     const kind = t.kind === 'ladder' ? 'ladder' : 'snake';
     return `
       <span class="sl-dot sl-dot-start sl-dot-${kind}" style="left:${a.x}%;top:${a.y}%"></span>
@@ -689,13 +630,9 @@ function renderLinkDots(links, board) {
   return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
 
-function renderCell(idx, sp, players, posStyle, size) {
+function renderCell(idx, sp, players, rowStyle, isTurn) {
   let cls = 'sl-cell';
-  // Start ma własny kolor: niżej nie da się spaść (serwer przycina ruch do pola 0).
-  // Ostatnie pole to meta okrążenia — stąd pętla wraca na start.
-  let idxLabel = String(idx);
-  if (idx === 0) { cls += ' sl-cell-start'; idxLabel = '0 · START'; }
-  else if (idx === size - 1) { cls += ' sl-cell-finish'; idxLabel = `${idx} 🏁`; }
+  if (isTurn) cls += ' sl-cell-turn';
   let mark = '';
   if (sp) {
     cls += ` sl-${sp.kind}`;
@@ -720,18 +657,16 @@ function renderCell(idx, sp, players, posStyle, size) {
       </span>`;
   }).join('');
   return `
-    <div class="${cls}" style="${posStyle}">
-      <span class="sl-idx">${idxLabel}</span>
+    <div class="${cls}" style="grid-row:${rowStyle}">
+      <span class="sl-idx">${idx}</span>
       ${mark}
       <div class="sl-pawns">${pawnsHtml}</div>
     </div>`;
 }
 
-function renderLegend(board) {
+function renderLegend() {
   return `
     <div class="sl-legend">
-      <span class="sl-legend-start">■ start — niżej nie spadniesz</span>
-      <span>🏁 meta — potem pętla na start (+${board.lap_points} pkt)</span>
       <span class="sl-legend-ladder">━ 🪜 drabina — w górę</span>
       <span class="sl-legend-snake">〜 🐍 wąż — w dół</span>
       <span>⭐ bonus — punkty</span>
