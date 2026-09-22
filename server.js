@@ -351,9 +351,24 @@ function versionedHtml(file) {
 // Musi stać PRZED express.static, inaczej statyczny handler odda surowy plik bez wersji.
 function sendPage(res, file) {
   const html = versionedHtml(file);
+  // no-cache = „zawsze zapytaj serwer" (przy braku zmian i tak leci szybkie 304 po ETagu).
+  // Bez tego przeładowanie po wdrożeniu mogłoby wziąć z cache STARY HTML ze starym ?v=,
+  // czyli dokładnie ten kod, od którego uciekamy (patrz X-App-Version niżej).
+  res.set('Cache-Control', 'no-cache');
   if (html == null) return res.sendFile(path.join(__dirname, 'public', file));
   res.type('html').send(html);
 }
+
+// ── WYMUSZONE ODŚWIEŻENIE PO WDROŻENIU ──
+// Otwarta karta gra kodem, który wczytała rano — wdrożenie niczego jej nie podmienia, więc
+// nowy panel docierał do ludzi dopiero, gdy sami nacisnęli F5. Każda odpowiedź API niesie
+// więc wersję frontu, a snakes.js porównuje ją ze swoją i przy różnicy sam przeładowuje
+// stronę (w bezpiecznym momencie — patrz slCheckAppVersion). Wersja to skrót PLIKÓW frontu,
+// więc restart pm2 bez zmian we froncie nikogo nie przeładowuje.
+app.use('/api', (req, res, next) => {
+  res.set('X-App-Version', ASSET_VERSION);
+  next();
+});
 app.get(['/snakes', '/snakes.html'], (req, res) => sendPage(res, 'snakes.html'));
 app.get(['/snakes/admin', '/snakes-admin.html'], (req, res) => sendPage(res, 'snakes-admin.html'));
 

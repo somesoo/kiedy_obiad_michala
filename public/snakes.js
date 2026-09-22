@@ -34,12 +34,52 @@ function clearAuth() {
   state.playerId = state.token = state.nickname = null;
 }
 
+// ── WYMUSZONE ODŚWIEŻENIE PO WDROŻENIU ──
+// Otwarta karta gra kodem, który wczytała rano — wdrożenie niczego jej nie podmienia.
+// Serwer dokleja do każdej odpowiedzi API nagłówek X-App-Version (skrót plików frontu),
+// a my znamy własną wersję z adresu, pod którym ten skrypt został wczytany (?v=…, patrz
+// ASSET_VERSION w server.js). Różnica = na serwerze jest nowszy front → przeładowujemy.
+// document.currentScript działa tylko podczas pierwszego wykonania skryptu, stąd stała.
+const SL_CLIENT_VERSION = (() => {
+  try { return new URL(document.currentScript.src).searchParams.get('v'); } catch { return null; }
+})();
+let slReloadScheduled = false;
+
+// Przeładowanie nie może zabrać graczowi tego, co właśnie robi: trwającego rzutu/zakupu,
+// otwartego wyboru celu, okna zdjęcia ani kwoty wpisywanej w polu wpłaty. Wtedy tylko
+// odkładamy — kolejna odpowiedź API (polling co 10 s) sprawdzi jeszcze raz.
+function slSafeToReload() {
+  if (state.busy || state.pendingUse) return false;
+  const overlay = document.getElementById('avatar-overlay');
+  if (overlay && overlay.style.display !== 'none' && overlay.style.display !== '') return false;
+  const amount = document.getElementById('coop-amount');
+  if (amount && (amount.value || document.activeElement === amount)) return false;
+  return true;
+}
+
+function slCheckAppVersion(serverVersion) {
+  // Bez wersji po którejś stronie (stary serwer, strona bez ?v=) nie ma czego porównywać.
+  if (!serverVersion || !SL_CLIENT_VERSION || serverVersion === SL_CLIENT_VERSION) return;
+  if (slReloadScheduled || !slSafeToReload()) return;
+  // Bezpiecznik na pętlę: jeśli po przeładowaniu dalej dostajemy stary kod (np. jakiś
+  // pośrednik trzyma stary HTML), nie przeładowujemy w kółko — raz na wersję serwera.
+  const key = 'snakes-reloaded-for';
+  try {
+    if (sessionStorage.getItem(key) === serverVersion) return;
+    sessionStorage.setItem(key, serverVersion);
+  } catch { /* tryb prywatny — trudno, bez bezpiecznika */ }
+  slReloadScheduled = true;
+  showToast('🔄 Wgrano nową wersję gry — odświeżam stronę…');
+  setTimeout(() => location.reload(), 1500);
+}
+
 // ── API ──
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (state.token) opts.headers['X-Token'] = state.token;
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
+  slCheckAppVersion(r.headers.get('X-App-Version'));
   const data = await r.json();
   if (!r.ok) {
     // Doklejamy pełną odpowiedź do błędu — niektóre odmowy niosą dane, na których
