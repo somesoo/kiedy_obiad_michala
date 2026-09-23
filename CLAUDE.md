@@ -89,6 +89,14 @@ Front zakłada, że wpisy jednej tury **sąsiadują ze sobą** na liście (są, 
 po `id`), i **nie sortuje podlinijek rosnąco** — kolejność z serwera już czyta się
 chronologicznie, bo kaskada zbić jest zapisywana odwrotnie (patrz `slApplyKnockback`).
 
+Historię sprzed tej zmiany dogrywa jednorazowa migracja `backfillActivityTurnRefs`
+(flaga `activity_turn_ref_backfill_done`). Odtwarza klucz z CIĄGŁOŚCI `id`: cały rzut leci
+w jednej transakcji, więc wpisy jednej tury nie mogą się przepleść z cudzym rzutem, a układ
+jest stały — `[zbicia] 🎲 rzut [klątwa] [boss]`. Kotwicę rozpoznaje po emoji na początku
+treści i to **jedyny** dozwolony wyjątek od „nie filtruj po treści": starsze klątwy miały typ
+`roll` zamiast `curse_fired`, więc po samym typie nie dało się ich odróżnić od rzutu, a samo
+rysowanie ramek wokół publicznych wierszy niczego nie zdradza.
+
 Konsekwencja przy pisaniu kodu: **nigdy nie podświetlaj ani nie filtruj po treści wpisu**.
 Predykat „to mój wpis" to zawsze `entry.player_id`. Dopasowanie po nicku w tekście
 natychmiast wysypałoby sekret Freeze'a. Z tego powodu odpalona klątwa ma własny typ wpisu
