@@ -2320,6 +2320,7 @@ function slResolveTileEffect(landedAbs, board, invertBoard = false) {
   const reverse = invertBoard ? slReverseLink(board, landed) : null;
 
   let forkRoll = null;
+  let forkAt = null; // pole rozwidlenia — front stawia tam pionek na czas animacji rzutu
   if (reverse) {
     abs = base + Number(reverse.position);
     note = reverse.kind === 'snake' ? 'ladder' : 'snake'; // drabina od góry to zjazd, i odwrotnie
@@ -2329,6 +2330,7 @@ function slResolveTileEffect(landedAbs, board, invertBoard = false) {
     // i front pokazały, co wypadło. Rzut rozwidlenia nie daje punktów za oczka: to tylko
     // wybór odnogi, a postęp po planszy i tak policzy się z dystansu.
     forkRoll = d6();
+    forkAt = landed;
     const win = (tile.faces || []).includes(forkRoll);
     abs = base + Number(win ? tile.target : tile.alt_target);
     note = win ? 'fork_win' : 'fork_lose';
@@ -2343,14 +2345,14 @@ function slResolveTileEffect(landedAbs, board, invertBoard = false) {
     tilePoints += tile.value;
     note = 'bonus';
   }
-  return { abs, tilePoints, note, forkRoll };
+  return { abs, tilePoints, note, forkRoll, forkAt };
 }
 
 // Wykonuje pojedynczy krok ruchu o `roll` pól, uwzględniając węże/drabiny/bonusy.
 // Zwraca { absAfter, tilePoints, note } dla tego kroku.
 function slStepMove(absBefore, roll, board, invertBoard = false) {
   const resolved = slResolveTileEffect(absBefore + roll, board, invertBoard);
-  return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note, forkRoll: resolved.forkRoll };
+  return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note, forkRoll: resolved.forkRoll, forkAt: resolved.forkAt };
 }
 
 // ── KNOCKBACK ──
@@ -3091,7 +3093,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     let fork = null; // { roll, win, to_tile } gdy ruch wszedł na rozwidloną drabinę
     const noteFork = (r) => {
       if (r.forkRoll == null) return;
-      fork = { roll: r.forkRoll, win: r.note === 'fork_win', to_tile: slTileOf(r.abs != null ? r.abs : r.absAfter) };
+      fork = { roll: r.forkRoll, win: r.note === 'fork_win', at_tile: r.forkAt, to_tile: slTileOf(r.abs != null ? r.abs : r.absAfter) };
     };
     for (const roll of effectiveRolls) {
       const step = slStepMove(abs, roll, board, invertBoard);

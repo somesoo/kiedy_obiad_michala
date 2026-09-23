@@ -1383,6 +1383,14 @@ async function roll() {
     // `known_abs_pos` = pole, na którym mamy narysowany swój pionek. Serwer porówna je
     // ze stanem w bazie i odmówi rzutu, jeśli patrzymy na nieaktualną planszę.
     const res = await api('POST', '/api/snakes/roll', { known_abs_pos: g.me.abs_pos });
+    // Rozwidlona drabina: zanim pokażemy końcowy stan, stawiamy pionek na polu rozwidlenia
+    // i dajemy graczowi „rzucić" o odnogę. Wynik rozstrzygnął już serwer (tak jak każdy
+    // rzut) — przycisk tylko go odsłania, więc nie da się niczego podejrzeć ani przerzucić.
+    // `state.busy` trzyma odświeżanie w tle z dala, dopóki okno jest otwarte.
+    if (res.move.fork && res.move.fork.at_tile != null) {
+      renderBoard(slBoardWithMeAt(g, res.move.fork.at_tile));
+      await slForkDiceModal(res.move.fork, g.board);
+    }
     state.game = res.state;
     renderAll();
     showRollResult(res.move);
@@ -1404,6 +1412,80 @@ async function roll() {
   } finally {
     state.busy = false;
   }
+}
+
+// Kopia stanu sprzed rzutu z moim pionkiem przestawionym na `tile` — do narysowania
+// planszy „w połowie ruchu" (stoję na rozwidleniu, jeszcze przed rzutem o odnogę).
+function slBoardWithMeAt(g, tile) {
+  const copy = JSON.parse(JSON.stringify(g));
+  copy.players.forEach(p => { if (p.is_me) p.tile = tile; });
+  copy.me.tile = tile;
+  return copy;
+}
+
+// Oczka kostki jako siatka 3×3: które z dziewięciu miejsc świecą dla danej wartości.
+const SL_DIE_PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+function slDieFace(v) {
+  return Array.from({ length: 9 }, (_, i) => `<span class="die-pip${SL_DIE_PIPS[v].includes(i) ? ' is-on' : ''}"></span>`).join('');
+}
+
+// Okno rozwidlonej drabiny: duża kostka i przycisk „Rzuć". Po kliknięciu kostka przez
+// chwilę losuje (szybko zmienia ścianki i się trzęsie), zatrzymuje się na wyniku
+// z serwera, pokazuje werdykt i zamyka się sama. Zwraca Promise — rzut czeka na nią,
+// zanim narysuje końcową pozycję.
+function slForkDiceModal(fork, board) {
+  const tile = board.tiles.find(t => t.kind === 'fork' && t.position === fork.at_tile);
+  const faces = tile ? tile.faces : [];
+  const win = tile ? tile.target : fork.to_tile;
+  const lose = tile ? tile.alt_target : fork.to_tile;
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'overlay fork-modal';
+    el.innerHTML = `
+      <div class="fork-card" role="dialog" aria-modal="true" aria-labelledby="fork-title">
+        <div class="fork-title" id="fork-title">🪜 Rozwidlona drabina!</div>
+        <div class="fork-rule">Wyrzuć <strong>${faces.join(' albo ')}</strong> → idziesz górą na pole <strong>${win}</strong><br>
+          cokolwiek innego → krótsza odnoga na pole <strong>${lose}</strong></div>
+        <div class="fork-die" aria-live="polite">${slDieFace(1 + Math.floor(Math.random() * 6))}</div>
+        <div class="fork-verdict"></div>
+        <button class="btn-primary fork-roll">🎲 Rzuć</button>
+      </div>`;
+    document.body.appendChild(el);
+    const die = el.querySelector('.fork-die');
+    const btn = el.querySelector('.fork-roll');
+    const verdict = el.querySelector('.fork-verdict');
+    btn.focus();
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      btn.textContent = 'Losuję…';
+      die.classList.add('is-rolling');
+      // Ścianki zwalniają jak prawdziwa kostka: najpierw szybko, potem coraz wolniej.
+      const delays = [60, 60, 60, 70, 70, 80, 90, 110, 130, 160, 200, 250];
+      let last = 0;
+      const step = i => {
+        if (i >= delays.length) {
+          die.classList.remove('is-rolling');
+          die.innerHTML = slDieFace(fork.roll);
+          die.classList.add(fork.win ? 'is-win' : 'is-lose');
+          verdict.innerHTML = fork.win
+            ? `Wypadło <strong>${fork.roll}</strong> — idziesz górą na pole <strong>${fork.to_tile}</strong>! 🎉`
+            : `Wypadło <strong>${fork.roll}</strong> — krótsza odnoga, pole <strong>${fork.to_tile}</strong>.`;
+          btn.textContent = 'Idę dalej';
+          btn.disabled = false;
+          const close = () => { el.remove(); resolve(); };
+          btn.onclick = close;
+          setTimeout(close, 2600);
+          return;
+        }
+        let v;
+        do { v = 1 + Math.floor(Math.random() * 6); } while (v === last);
+        last = v;
+        die.innerHTML = slDieFace(v);
+        setTimeout(() => step(i + 1), delays[i]);
+      };
+      step(0);
+    }, { once: true });
+  });
 }
 
 // Krótkie podświetlenie pionków, które zostały wypchnięte tym rzutem — pulsują

@@ -1475,3 +1475,49 @@
 .sl-tip-val { flex: 0 0 auto; color: var(--text-primary); }
 .sl-tip-pct { flex: 0 0 34px; text-align: right; color: var(--text-muted); font-size: 10px; }
 .sl-tip-empty { color: var(--text-muted); }
+
+/* ── OKNO ROZWIDLONEJ DRABINY: duża kostka + przycisk rzutu ── */
+/* Tło lżejsze niż zwykła nakładka i bez rozmycia — pod spodem ma być widać planszę
+   z pionkiem stojącym na rozwidleniu. */
+.fork-modal { display: flex; z-index: 250; background: rgba(0, 0, 0, 0.45); backdrop-filter: none; }
+.fork-card {
+  background: var(--surface);
+  border: 1px solid var(--accent-dim);
+  border-radius: 16px;
+  padding: 22px 26px;
+  width: min(360px, 92vw);
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 24px rgba(200, 241, 53, 0.15);
+}
+.fork-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 20px; margin-bottom: 6px; }
+.fork-rule { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px; }
+.fork-rule strong { color: var(--text-primary); }
+.fork-die {
+  width: 110px;
+  height: 110px;
+  margin: 0 auto 14px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 6px;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #FFFFFF, #DADADA);
+  box-shadow: inset 0 -6px 0 rgba(0, 0, 0, 0.12), 0 8px 18px rgba(0, 0, 0, 0.5);
+  transition: box-shadow 0.3s;
+}
+.die-pip { border-radius: 50%; }
+.die-pip.is-on { background: #1A1A1A; box-shadow: inset 0 2px 2px rgba(0, 0, 0, 0.6); }
+.fork-die.is-rolling { animation: fork-shake 0.18s linear infinite; }
+.fork-die.is-win { box-shadow: inset 0 -6px 0 rgba(0, 0, 0, 0.12), 0 0 0 4px var(--accent), 0 0 30px rgba(200, 241, 53, 0.7); }
+.fork-die.is-lose { box-shadow: inset 0 -6px 0 rgba(0, 0, 0, 0.12), 0 0 0 4px var(--gold), 0 0 22px rgba(245, 200, 66, 0.5); }
+.fork-verdict { min-height: 20px; font-size: 13px; margin-bottom: 12px; }
+.fork-roll { min-width: 150px; font-size: 15px; padding: 9px 18px; }
+@keyframes fork-shake {
+  0% { transform: rotate(0deg) translate(0, 0); }
+  25% { transform: rotate(-12deg) translate(-3px, 2px); }
+  50% { transform: rotate(8deg) translate(3px, -2px); }
+  75% { transform: rotate(-6deg) translate(-2px, -1px); }
+  100% { transform: rotate(0deg) translate(0, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .fork-die.is-rolling { animation: none; } }
