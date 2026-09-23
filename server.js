@@ -1370,6 +1370,45 @@ const SL_CURSE_PRICE_MARKUP = 1.5;
 // koszt: wie o tym tylko rzucający, nie ofiara, i nie wie, jaka to klątwa ani od kogo.
 const SL_CURSE_MAX_PENDING_PER_TARGET = 2;
 const SL_CURSE_MAX_PENDING_PER_CASTER = 1;
+
+// Oczekująca Drożyzna na tym graczu (albo null). JEDNO miejsce, z którego korzysta
+// i cennik w sklepie, i sam zakup — inaczej sklep pokazywałby jedną cenę, a kasa brała
+// inną. Dokładnie tak było: witryna rysowała cenę bazową, serwer ściągał 1,5×, a przycisk
+// „Kup" odblokowywał się przy cenie bazowej, więc gracz z 80 coins klikał Shielda „za 70"
+// i dostawał „za mało — koszt 105".
+function slPendingPriceCurse(playerId) {
+  return db.prepare(`
+    SELECT id, source_player_id FROM sl_effects
+    WHERE target_player_id = ? AND type = 'curse' AND status = 'pending' AND variant = ?
+    ORDER BY id LIMIT 1
+  `).get(playerId, SL_CURSE_PRICE_VARIANT) || null;
+}
+
+function slShopPriceOf(type, cursed) {
+  const base = SL_POWERUP_COSTS[type];
+  return cursed ? Math.ceil(base * SL_CURSE_PRICE_MARKUP) : base;
+}
+
+// Cennik DLA KONKRETNEGO GRACZA — z doliczoną Drożyzną, jeśli na nim wisi.
+// To ujawnia klątwę jej ofierze w chwili wejścia do sklepu, czyli minimalnie wcześniej
+// niż przy kliknięciu „Kup" — i tak ma być: UI, które pokazuje inną cenę, niż pobiera,
+// jest po prostu zepsute. Zasada ukrytej informacji nie jest tym naruszona, bo mówi
+// o NIEZDRADZANIU CELU osobom trzecim; tutaj ofiara widzi wyłącznie własną cenę, a kto
+// rzucił klątwę, nie wychodzi z tego payloadu w ogóle.
+function slShopPayload(playerId) {
+  const cursed = !!slPendingPriceCurse(playerId);
+  return {
+    items: SL_POWERUP_TYPES.map(type => ({
+      type,
+      cost: slShopPriceOf(type, cursed), // cena, którą gracz REALNIE zapłaci
+      base_cost: SL_POWERUP_COSTS[type]
+    })),
+    price_curse: cursed ? {
+      label: SL_CURSE_LABELS[SL_CURSE_PRICE_VARIANT],
+      markup_percent: Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)
+    } : null
+  };
+}
 const SL_CURSE_LABELS = {
   1: '↩️ Odwrotny Ruch',
   2: '➗ Rozdwojona Kostka',
@@ -2598,6 +2637,7 @@ const SL_BANK_ERROR_GRANT = 100;
 // Pełny stan gry dla gracza (wszystko, czego potrzebuje UI w jednym zapytaniu).
 function slBuildState(playerId) {
   const st = slEnsureState(playerId);
+  const shop = slShopPayload(playerId); // raz — sięga do bazy po oczekującą Drożyznę
   const today = todayWaw();
   const isWeekend = isWeekendStr(today);
   const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
@@ -2632,7 +2672,9 @@ function slBuildState(playerId) {
     },
     inventory: slInventory(playerId),
     leaderboard: slLeaderboard(playerId),
-    shop: SL_POWERUP_TYPES.map(type => ({ type, cost: SL_POWERUP_COSTS[type] })),
+    // Cennik jest PER GRACZ, bo Drożyzna podbija ceny tylko jemu (patrz slShopPayload).
+    shop: shop.items,
+    shop_price_curse: shop.price_curse,
     coop: boss.slCoopPayload(playerId),
     server_date: today
   };
@@ -3016,12 +3058,8 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     // przy pierwszym zakupie po jej rzuceniu. Podbija cenę i zużywa się WYŁĄCZNIE przy
     // udanym zakupie: gdy graczowi zabraknie punktów, klątwa zostaje na kolejną próbę
     // (inaczej dałoby się ją zdjąć klikaniem „Kup" bez grosza przy duszy).
-    const priceCurse = db.prepare(`
-      SELECT id, source_player_id FROM sl_effects
-      WHERE target_player_id = ? AND type = 'curse' AND status = 'pending' AND variant = ?
-      ORDER BY id LIMIT 1
-    `).get(playerId, SL_CURSE_PRICE_VARIANT);
-    const cost = priceCurse ? Math.ceil(baseCost * SL_CURSE_PRICE_MARKUP) : baseCost;
+    const priceCurse = slPendingPriceCurse(playerId);
+    const cost = slShopPriceOf(type, !!priceCurse);
 
     if (st.balance < cost) return { poor: true, balance: st.balance, cost, cursed: !!priceCurse };
 

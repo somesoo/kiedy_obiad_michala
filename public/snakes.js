@@ -794,18 +794,36 @@ function showRollResult(m) {
 }
 
 // ── SKLEP ──
+// `item.cost` to cena, którą gracz REALNIE zapłaci — serwer dolicza do niej Drożyznę,
+// jeśli na graczu wisi (patrz slShopPayload). Wcześniej witryna rysowała cenę bazową,
+// a kasa brała 1,5×: gracz z 80 coins klikał Shielda „za 70" i dostawał „za mało,
+// koszt 105". Cena przekreślona pokazuje, ile to kosztowało przed klątwą.
 function renderShop(g) {
   const list = document.getElementById('shop-list');
+  const curse = g.shop_price_curse;
+  const note = document.getElementById('shop-curse-note');
+  if (note) {
+    // `curse.label` niesie już własną ikonę (SL_CURSE_LABELS), więc NIE dokładamy drugiej.
+    note.innerHTML = curse
+      ? `<strong>${esc(curse.label)}</strong> — Twój najbliższy zakup jest droższy o ${curse.markup_percent}%. Klątwa znika po nim.`
+      : '';
+    note.style.display = curse ? '' : 'none';
+  }
+
   list.innerHTML = g.shop.map(item => {
     const meta = POWERUP_META[item.type];
     const owned = g.inventory[item.type] || 0;
     const canBuy = g.me.balance >= item.cost;
     const canUse = owned > 0;
+    const bumped = item.base_cost != null && item.cost > item.base_cost;
+    const costHtml = bumped
+      ? `<s class="shop-cost-old">${item.base_cost}</s> <span class="shop-cost-up">${item.cost}</span> coins`
+      : `${item.cost} coins`;
     return `
       <div class="shop-item">
         <div class="shop-top">
           <span class="shop-name">${meta.icon} ${meta.name}</span>
-          <span class="shop-cost mono">${item.cost} coins</span>
+          <span class="shop-cost mono">${costHtml}</span>
         </div>
         <div class="shop-desc text-muted small">${meta.desc}</div>
         <div class="shop-actions">
@@ -953,10 +971,19 @@ function slCoopChipsHtml(c) {
 // Kafelki mają STAŁY rozmiar (patrz .hud-tile), więc etykieta ma być pełnym, krótkim
 // opisem („Zwrot coins", „Pkt za progi HP"), a nie skrótem — skróty typu „Kamienie"
 // czy „Próg 50%" okazały się nieczytelne. Dłuższe wyjaśnienie siedzi w title.
+// `unit` mówi, CZY liczba to punkty czy coins — te same ikony, co w statach pod zdjęciem
+// (⭐ pkt / 💰 coins). Bez nich kafelek w rodzaju „2. miejsce wpłat +25" nie zdradzał,
+// czy chodzi o punkty rankingowe, czy o zwrot do portfela — a to dwie zupełnie różne
+// waluty. Ikona jest częścią WARTOŚCI, nie etykiety, bo to wartość ma jednostkę.
+const HUD_UNITS = { pkt: '⭐', coins: '💰' };
+
 function slHudTile(label, value, opts = {}) {
   const cls = opts.tone ? ` is-${opts.tone}` : '';
   const title = opts.title ? ` title="${esc(opts.title)}"` : '';
-  return `<div class="hud-tile${cls}"${title}><span class="hud-label">${label}</span><span class="hud-value mono">${value}</span></div>`;
+  const unit = HUD_UNITS[opts.unit]
+    ? `<span class="hud-unit" title="${opts.unit === 'pkt' ? 'punkty rankingowe' : 'coins'}">${HUD_UNITS[opts.unit]}</span>`
+    : '';
+  return `<div class="hud-tile${cls}"${title}><span class="hud-label">${label}</span><span class="hud-value mono">${value}${unit}</span></div>`;
 }
 
 // Kafelek „zadania" — CO zrobić i CO za to dostaniesz („Wpłać jeszcze 24 coins → +40 pkt"),
@@ -988,23 +1015,23 @@ function slCoopLootHtml(c) {
 
   const tiles = [];
   if (c.my_coins <= 0) {
-    tiles.push(slHudTile('Wpłaciłeś', '0', { title: 'Nagrody dostają wyłącznie ci, którzy wpłacą coins — rzuty kostką są darmowe.' }));
-    tiles.push(slHudTile('Pkt za każdy coin', `+${perCoin}`, { title: `Przy wygranej: ${perCoin} pkt za każdy wpłacony coin i ${refundPct}% wpłaty z powrotem.` }));
+    tiles.push(slHudTile('Wpłaciłeś', '0', { unit: 'coins', title: 'Nagrody dostają wyłącznie ci, którzy wpłacą coins — rzuty kostką są darmowe.' }));
+    tiles.push(slHudTile('Pkt za każdy coin', `+${perCoin}`, { unit: 'pkt', title: `Przy wygranej: ${perCoin} pkt za każdy wpłacony coin i ${refundPct}% wpłaty z powrotem.` }));
   } else {
     const parts = [`${r.contrib_points} za wpłatę`];
     if (r.fighter_points > 0) parts.push(`${r.fighter_points} za udział`);
     if (r.podium_points > 0) parts.push(`${r.podium_points} za ${r.podium_place}. miejsce`);
-    tiles.push(slHudTile('Wpłaciłeś', c.my_coins, { title: 'Coins wpłacone na tego bossa' }));
-    tiles.push(slHudTile('Pkt za wygraną', `+${r.points}`, { tone: 'good', title: `Tyle punktów dostaniesz, jeśli boss padnie: ${parts.join(' + ')}` }));
-    tiles.push(slHudTile('Zwrot coins', r.refund, { tone: 'good', title: `Jeśli boss padnie, wraca Ci ${refundPct}% wpłaty w coins` }));
+    tiles.push(slHudTile('Wpłaciłeś', c.my_coins, { unit: 'coins', title: 'Coins wpłacone na tego bossa' }));
+    tiles.push(slHudTile('Pkt za wygraną', `+${r.points}`, { tone: 'good', unit: 'pkt', title: `Tyle punktów dostaniesz, jeśli boss padnie: ${parts.join(' + ')}` }));
+    tiles.push(slHudTile('Zwrot coins', r.refund, { tone: 'good', unit: 'coins', title: `Jeśli boss padnie, wraca Ci ${refundPct}% wpłaty w coins` }));
     if (r.podium_place > 0) {
       const medal = { 1: '🥇', 2: '🥈', 3: '🥉' }[r.podium_place] || '';
-      tiles.push(slHudTile(`${r.podium_place}. miejsce wpłat`, `${medal}+${r.podium_points}`, { tone: 'gold', title: 'Premia za podium wpłat, wypłacana przy wygranej' }));
+      tiles.push(slHudTile(`${r.podium_place}. miejsce wpłat`, `${medal}+${r.podium_points}`, { tone: 'gold', unit: 'pkt', title: 'Premia za podium wpłat, wypłacana przy wygranej' }));
     }
   }
   if (r.milestones_earned > 0) {
     // „Kamienie" nic nie mówiło. To punkty za progi HP (75/50/25%) — już wpłynęły na konto.
-    tiles.push(slHudTile('Pkt za progi HP', `+${r.milestones_earned}`, { tone: 'good', title: 'Punkty za zbicie bossa do 75% / 50% / 25% HP — już są na Twoim koncie, niezależnie od wyniku walki' }));
+    tiles.push(slHudTile('Pkt za progi HP', `+${r.milestones_earned}`, { tone: 'good', unit: 'pkt', title: 'Punkty za zbicie bossa do 75% / 50% / 25% HP — już są na Twoim koncie, niezależnie od wyniku walki' }));
   }
   if (!r.qualified) {
     const missing = r.coins_to_qualify;

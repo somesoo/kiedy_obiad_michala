@@ -310,6 +310,23 @@
 }
 .shop-name { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12px; }
 .shop-cost { color: var(--gold); font-size: 11px; white-space: nowrap; }
+
+/* ── DROŻYZNA W SKLEPIE ──
+   Gdy na graczu wisi klątwa Drożyzna, cennik pokazuje cenę PO podwyżce (tę, którą serwer
+   naprawdę pobierze), a obok przekreśloną cenę sprzed klątwy — żeby było widać, że to
+   klątwa, a nie zmiana cennika. Widzi to wyłącznie przeklęty gracz. */
+.shop-cost-old { color: var(--text-muted); opacity: 0.7; margin-right: 2px; }
+.shop-cost-up { color: var(--danger); font-weight: 600; }
+.shop-curse-note {
+  background: rgba(232, 93, 74, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 7px;
+  padding: 4px 7px;
+  margin-bottom: 7px;
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
 .shop-desc { display: none; }  /* opis żyje w „Pełne zasady" — panel ma być wąski */
 .shop-actions { display: flex; gap: 5px; margin-top: 5px; }
 .shop-actions button { flex: 1; padding: 4px 0; font-size: 11px; }
@@ -696,6 +713,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Ikona jednostki przy liczbie — ⭐ punkty / 💰 coins, te same co w statach pod zdjęciem.
+   Mniejsza i przygaszona, żeby nie konkurowała z samą liczbą: ma odpowiadać na pytanie
+   „czego to jest 25?", a nie przyciągać wzrok. */
+.hud-unit {
+  font-size: 9px;
+  margin-left: 3px;
+  opacity: 0.75;
+  vertical-align: 1px;
 }
 .hud-tile.is-good { border-color: rgba(200, 241, 53, 0.45); }
 .hud-tile.is-good .hud-value { color: var(--accent); }
