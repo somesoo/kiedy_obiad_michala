@@ -119,13 +119,11 @@ module.exports = {
     candy: { per_day: 3, max_on_board: 6 },
   },
 
-  // BOSS HALLOWEENOWY: od 12.10 UI go zapowiada, pierwsza nowa edycja bossa po 19.10 to
-  // Dynia Zagłady, a jej termin to zawsze noc Halloween (31.10, 20:00). Silniejsza od
-  // zwykłego bossa (×1.25) i dostaje tyle HP, ile dni roboczych zostaje do ataku.
-  special_boss: {
-    name: 'Dynia Zagłady', emoji: '🎃',
-    announce_from: '10-12', start_from: '10-19', attack_at: '10-31 20', hp_factor: 1.25,
-  },
+  // BOSS SEZONU: Dynia Zagłady jest JEDYNYM bossem całej Nocy Duchów — pojawia się od razu
+  // po włączeniu sezonu i trwa do nocy Halloween (31.10, 20:00). HP = 1100 × dni robocze do
+  // ataku: ekipa robi dziś ~1000 HP dziennie przy sporych wpłatach, więc bez wpłat się nie
+  // da, a z nimi — na styk. Sezon włączony 1.10 → 22 dni robocze → 24 200 HP.
+  special_boss: { name: 'Dynia Zagłady', emoji: '🎃', attack_at: '10-31 20', hp_per_workday: 1100 },
 
   // Garderoba (sklep z kostiumami) jako chatka czarownicy w lewym dolnym rogu.
   shop_at: [1.25, 9.75],

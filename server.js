@@ -2851,8 +2851,8 @@ function slSpecialBossNow() {
   };
   const [attackDay, attackHour] = sb.attack_at.split(' ');
   return {
-    key: `${slBoard.id}-${y}`, name: sb.name, emoji: sb.emoji, hp_factor: sb.hp_factor,
-    announceMs: at(sb.announce_from), startMs: at(sb.start_from), attackMs: at(attackDay, Number(attackHour))
+    key: `${slBoard.id}-${y}`, name: sb.name, emoji: sb.emoji, hp_per_workday: sb.hp_per_workday,
+    attackMs: at(attackDay, Number(attackHour))
   };
 }
 
@@ -3741,6 +3741,8 @@ app.post('/api/snakes/admin/season', (req, res) => {
   const previous = slBoard.id;
   const moved = slInstallBoard(season, true);
   console.log(`Snakes/Admin: sezon ${previous} → ${season.id} (${season.size} pól), ${moved} graczy na polu 0`);
+  // Sezon z własnym bossem (special_boss) wystawia go OD RAZU, a nie przy kolejnej edycji.
+  boss.slEnsureSpecialBoss();
   slPostDiscord({ content: `🗺️ **Nowy sezon planszy: ${season.name}!** Wszyscy startują od pola 0 — punkty i coins zostają.` })
     .catch(err => console.error('Snakes/Discord [season]:', err.message));
 

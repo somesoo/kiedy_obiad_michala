@@ -71,6 +71,16 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
 - Na wąskim ekranie plansza 'free' ma minimalną szerokość i przewija się w bok, zamiast
   ściskać pola do kilkunastu pikseli.
 
+## Boss sezonu (`special_boss` w pliku planszy)
+
+Sezon może mieć **jednego** bossa na cały czas trwania (Noc Duchów: Dynia Zagłady do nocy
+Halloween). `slEnsureSpecialBoss()` (start serwera, przełączenie sezonu, każdy tik
+schedulera) wystawia go OD RAZU: trwającą zwykłą walkę zamyka **bez nagród i bez kar**,
+a wpłacone w nią coins wracają wierszem `season_refund` w `sl_boss_payouts` (cofanie go
+widzi, bo czyta rejestr). HP = `hp_per_workday` × dni robocze do `attack_at`; termin zawsze
+`attack_at`. Daty w pliku są bez roku, a klucz edycji (`sl_coop.special` =
+`'halloween-2026'`) pilnuje, żeby po wygranej/przegranej boss nie wrócił w tym samym roku.
+
 ## Mechaniki sezonowe — kocioł, drzwi, cukierki
 
 `lib/seasonal.js` (fabryka), konfiguracja w `events` pliku planszy. Zdarzenie odpala

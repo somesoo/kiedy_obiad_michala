@@ -66,7 +66,17 @@
 }
 .game-bar-title h2 { font-size: 17px; letter-spacing: 1.5px; line-height: 1.1; }
 .game-bar-sub { font-size: 11px; color: var(--text-muted); }
-.game-bar .roll-result { flex: 1; text-align: left; }
+/* Tytuł ustępuje miejsca przyciskowi rzutu i kafelkowi bossa: długi podtytuł sezonu
+   ucina się wielokropkiem, zamiast spychać kafelek do drugiego rzędu. */
+/* Baza 150px + wzrost, a nie „auto": przy flex-wrap przeglądarka zawija element do nowego
+   rzędu ZANIM spróbuje go ścisnąć, więc tytuł liczony pełną szerokością spychał kafelek. */
+.game-bar-title { flex: 1 1 150px; min-width: 0; }
+.game-bar-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game-bar { flex-wrap: wrap; row-gap: 6px; }
+/* Opis ostatniego rzutu ma własny wiersz pod paskiem, na całą szerokość. Ściśnięty między
+   przycisk a kafelek bossa łamał się po jednym słowie w wysoki słupek. */
+.game-bar .roll-result { order: 10; flex: 1 0 100%; text-align: left; }
+.game-bar .roll-result:empty { display: none; }
 
 /* ── STATY (lewa kolumna) ── */
 .sl-stats {
