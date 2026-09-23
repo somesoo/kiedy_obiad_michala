@@ -2315,13 +2315,14 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
   const pushedIds = new Set([rollerPlayerId]);
   const chain = [];
   // ── KOLEJNOŚĆ WPISÓW W DZIENNIKU ──
-  // Dziennik jest sortowany `id DESC` (najnowsze u góry), więc kaskada zapisana
-  // chronologicznie czytała się OD KOŃCA: pierwszy na ekranie był ostatni domino.
-  // Dlatego wpisy najpierw zbieramy tutaj, a zapisujemy dopiero po pętli, w odwróconej
-  // kolejności kroków — wtedy DESC ustawia je z powrotem chronologicznie.
-  // NIE „naprawiaj" tego z powrotem na zapis w locie: to nie jest pomyłka, tylko
-  // jedyny sposób, żeby efekt domina dało się przeczytać z góry na dół.
-  const steps = [];
+  // Zapisujemy CHRONOLOGICZNIE, w kolejności, w jakiej chcemy je przeczytać: najpierw
+  // kto zbił, potem dokąd ofiara poleciała, na końcu co ją tam spotkało — i tak krok
+  // po kroku przez całą kaskadę. Front rysuje turę jako blok i sortuje podlinijki
+  // ROSNĄCO po `id` (patrz renderActivity), więc kolejność zapisu JEST kolejnością na
+  // ekranie. Kiedyś było odwrotnie — wpisy szły od ostatniego domina, żeby płaski feed
+  // `id DESC` czytał się chronologicznie. Po wprowadzeniu bloków ta sztuczka zaczęła
+  // działać przeciwko nam, więc jej nie ma. Cena: w płaskim widoku panelu admina
+  // kaskada czyta się od końca — to narzędzie moderacji, nie narracja.
   let targetTile = slTileOf(landingAbsPos);
   let pusherId = rollerPlayerId;
   let pusherNickname = rollerNickname;
@@ -2382,24 +2383,6 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
     };
     chain.push(entry);
 
-    // Jeden krok kaskady = kilka wpisów, zapisywanych w takiej kolejności, żeby feed
-    // (DESC) pokazał je jako: kto zbił → dokąd wypchnięty → co go tam spotkało.
-    const step = [];
-
-    // Drabina i wąż to OSOBNY ruch, więc dostają własny wpis — o to prosił właściciel:
-    // najpierw „zbity na pole 3", potem „drabina z 3 na 17". Bonus zostaje w wierszu
-    // wypchnięcia, bo nie przesuwa pionka, tylko dosypuje punkty.
-    if (resolved.note === 'ladder') {
-      step.push([occ.player_id, `🪜 Z pola ${knockedTile} wjechał drabiną na ${entry.to_tile}`]);
-    } else if (resolved.note === 'snake') {
-      step.push([occ.player_id, `🐍 Z pola ${knockedTile} zjechał wężem na ${entry.to_tile}`]);
-    }
-
-    const bits = [`z pola ${entry.from_tile} → ${knockedTile} (-${tilesBack} ${slTilesWord(tilesBack)})`];
-    if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
-    if (stolen > 0) bits.push(`💰 stracił ${stolen} coins na rzecz ${pusherNickname}`);
-    step.push([occ.player_id, `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`]);
-
     // Wypychający dostaje wpis ZAWSZE, także gdy nie było czego ukraść. Wcześniej ta linia
     // siedziała pod `if (stolen > 0)`, więc zbicie gracza z pustym portfelem nie zostawiało
     // po sobie w dzienniku ŻADNEGO śladu po stronie zbijającego — a to jego akcja i chce ją
@@ -2407,10 +2390,23 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
     // UWAGA: w tym tekście nie może paść słowo „Wypchnięty". Cofanie całego dnia szuka ofiar
     // przez `detail LIKE '%Wypchnięty%'` na wpisach typu knockback (patrz /admin/day/rollback)
     // i policzyłoby zbijającego jako kogoś, kogo trzeba ręcznie przestawić na planszy.
-    step.push([pusherId, stolen > 0
+    slLogActivity(pusherId, 'knockback', stolen > 0
       ? `💰 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} i zgarnąłeś ${stolen} coins!`
-      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} — nie miał ani jednego coina do zabrania.`]);
-    steps.push(step);
+      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} — nie miał ani jednego coina do zabrania.`, turnRef);
+
+    const bits = [`z pola ${entry.from_tile} → ${knockedTile} (-${tilesBack} ${slTilesWord(tilesBack)})`];
+    if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
+    if (stolen > 0) bits.push(`💰 stracił ${stolen} coins na rzecz ${pusherNickname}`);
+    slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`, turnRef);
+
+    // Drabina i wąż to OSOBNY ruch, więc dostają własny wpis — najpierw „zbity na pole 3",
+    // potem „drabina z 3 na 17". Bonus zostaje w wierszu wypchnięcia, bo nie przesuwa
+    // pionka, tylko dosypuje punkty.
+    if (resolved.note === 'ladder') {
+      slLogActivity(occ.player_id, 'knockback', `🪜 Z pola ${knockedTile} wjechał drabiną na ${entry.to_tile}`, turnRef);
+    } else if (resolved.note === 'snake') {
+      slLogActivity(occ.player_id, 'knockback', `🐍 Z pola ${knockedTile} zjechał wężem na ${entry.to_tile}`, turnRef);
+    }
 
     pushedIds.add(occ.player_id);
     pusherId = occ.player_id;
@@ -2419,11 +2415,6 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
     targetTile = slTileOf(toAbs);
   }
 
-  // Kroki zapisujemy od OSTATNIEGO do pierwszego (patrz komentarz przy `steps`), żeby
-  // sortowanie `id DESC` ustawiło kaskadę z powrotem chronologicznie na ekranie.
-  for (let i = steps.length - 1; i >= 0; i--) {
-    for (const [playerId, detail] of steps[i]) slLogActivity(playerId, 'knockback', detail, turnRef);
-  }
   return chain;
 }
 

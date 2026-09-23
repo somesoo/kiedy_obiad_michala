@@ -479,13 +479,14 @@ function renderActivity(data) {
     const headIdx = g.entries.findIndex(e => e.type === 'roll');
     const head = headIdx >= 0 ? g.entries[headIdx] : null;
     // Skutki układamy narracyjnie: najpierw co odmieniło ten rzut (klątwa), potem kogo
-    // zbił, na końcu ile oberwał boss. Sortowanie jest STABILNE, więc wewnątrz każdego
-    // rodzaju zostaje kolejność z serwera — a to właśnie ona czyta się chronologicznie
-    // (kaskada zbić jest tam zapisana odwrotnie, patrz slApplyKnockback).
+    // zbił, na końcu ile oberwał boss. WEWNĄTRZ każdego rodzaju sortujemy ROSNĄCO po `id`,
+    // czyli chronologicznie — blok ma się czytać z góry na dół, odwrotnie niż sama lista
+    // dni (ta zostaje od najnowszych). Dlatego serwer zapisuje kaskadę zbić po kolei,
+    // a nie od końca (patrz slApplyKnockback).
     const order = { curse_fired: 1, knockback: 2, boss_hit: 3 };
     const subs = g.entries
       .filter((_, i) => i !== headIdx)
-      .sort((a, b) => (order[a.type] || 9) - (order[b.type] || 9));
+      .sort((a, b) => ((order[a.type] || 9) - (order[b.type] || 9)) || (a.id - b.id));
     const mineTurn = head && Number(head.player_id) === Number(state.playerId);
     html += `<div class="activity-turn${mineTurn ? ' is-my-turn' : ''}">`;
     if (head) html += renderRow(head, false, false);
