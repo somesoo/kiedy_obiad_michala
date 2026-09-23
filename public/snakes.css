@@ -470,6 +470,30 @@
 .activity-entry.is-curse-fired .activity-body strong { color: #53D06B; }
 .activity-time { color: var(--text-muted); font-size: 9px; flex: 0 0 auto; }
 .activity-icon { flex: 0 0 auto; }
+
+/* ── BLOK TURY ──
+   Wszystkie wpisy z jednego rzutu (rzut, klątwa, zbicia, trafienie bossa) siedzą w jednym
+   pudełku, żeby było widać, gdzie kończy się jedna tura. Wcześniej dziennik był ścianą
+   jednakowych wierszy z tą samą godziną i różnymi nickami. */
+.activity-turn {
+  border-left: 2px solid var(--muted);
+  border-radius: 0 6px 6px 0;
+  margin: 4px 0;
+  padding-left: 2px;
+  background: rgba(255, 255, 255, 0.015);
+}
+/* Moja tura — kreska w kolorze akcentu, tak jak „to ja" w rankingu. */
+.activity-turn.is-my-turn { border-left-color: var(--accent-dim); }
+
+/* Skutki rzutu: wcięte, drobniejsze i bez powtórzonej godziny — jedna tura ma jedną
+   godzinę, na nagłówku. Pusty `.activity-time` zostaje, żeby ikony i treść trzymały
+   ten sam pion co w nagłówku. */
+.activity-entry.is-sub {
+  padding-left: 16px;
+  font-size: 10px;
+  opacity: 0.92;
+}
+.activity-entry.is-sub .activity-time { width: 0; overflow: hidden; }
 .activity-body { min-width: 0; word-break: break-word; }
 .activity-body strong { font-family: 'Space Grotesk', sans-serif; }
 

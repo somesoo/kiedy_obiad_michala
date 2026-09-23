@@ -1693,6 +1693,11 @@ ensureColumn('sl_effects', 'revealed_at', 'DATETIME');
 
 // Kolumny bossa dokłada lib/boss.js (initSchema).
 
+// Klucz TURY: wszystkie wpisy z jednego rzutu (sam rzut, klątwa, zbicia, trafienie bossa)
+// dostają ten sam `ref`, żeby front mógł je narysować jako JEDEN blok. Bez tego dziennik
+// był ścianą jednakowych wierszy z tą samą godziną i różnymi nickami — nie dało się
+// zobaczyć, gdzie kończy się jedna tura, a zaczyna następna.
+ensureColumn('sl_activity', 'ref', 'TEXT');
 ensureColumn('sl_activity', 'visibility', 'TEXT');
 ensureColumn('sl_activity', 'public_detail', 'TEXT');
 
@@ -1788,9 +1793,17 @@ function slPointsBreakdown(totalPoints, raw) {
   return out;
 }
 
-function slLogActivity(playerId, type, detail) {
-  db.prepare('INSERT INTO sl_activity (player_id, type, detail, day) VALUES (?, ?, ?, ?)')
-    .run(playerId, type, detail, todayWaw());
+function slLogActivity(playerId, type, detail, ref = null) {
+  db.prepare('INSERT INTO sl_activity (player_id, type, detail, day, ref) VALUES (?, ?, ?, ?, ?)')
+    .run(playerId, type, detail, todayWaw(), ref);
+}
+
+// Świeży klucz tury. Licznik + znacznik czasu, a nie numer ruchu: po „Cofnij ostatni ruch"
+// gracz rzuca jeszcze raz z tym samym numerem, a stare wpisy w dzienniku zostają — przy
+// kluczu z numeru obie tury skleiłyby się w jeden blok.
+let slTurnSeq = 0;
+function slNewTurnRef(playerId) {
+  return `turn:${playerId}:${Date.now()}:${++slTurnSeq}`;
 }
 
 // ══ MODERACJA WIDOKU DZIENNIKA ══
@@ -1932,7 +1945,7 @@ function slPublicActivity({ date = null, limit = 150 } = {}) {
   if (date) { where.push('a.day = ?'); args.push(date); }
 
   const rows = db.prepare(`
-    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.day, a.created_at
+    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.day, a.created_at, a.ref
     FROM sl_activity a JOIN players p ON p.id = a.player_id
     WHERE ${where.join(' AND ')}
     ORDER BY a.id DESC LIMIT ?
@@ -1952,7 +1965,8 @@ function slPublicActivity({ date = null, limit = 150 } = {}) {
       type: r.type,
       detail: slActivityPublicDetail(r, mod).detail,
       date: r.day,
-      created_at: r.created_at
+      created_at: r.created_at,
+      ref: r.ref
     })),
     dates
   };
@@ -2232,7 +2246,7 @@ function slTilesWord(n) {
   return last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14) ? 'pola' : 'pól';
 }
 
-function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) {
+function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, turnRef = null) {
   const pushedIds = new Set([rollerPlayerId]);
   const chain = [];
   // ── KOLEJNOŚĆ WPISÓW W DZIENNIKU ──
@@ -2343,7 +2357,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
   // Kroki zapisujemy od OSTATNIEGO do pierwszego (patrz komentarz przy `steps`), żeby
   // sortowanie `id DESC` ustawiło kaskadę z powrotem chronologicznie na ekranie.
   for (let i = steps.length - 1; i >= 0; i--) {
-    for (const [playerId, detail] of steps[i]) slLogActivity(playerId, 'knockback', detail);
+    for (const [playerId, detail] of steps[i]) slLogActivity(playerId, 'knockback', detail, turnRef);
   }
   return chain;
 }
@@ -2820,6 +2834,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     });
   }
 
+  // Jeden klucz na CAŁĄ turę — stempluje wszystkie wpisy, które ten rzut wygeneruje
+  // (rzut, klątwa, zbicia z kaskadą, trafienie bossa), żeby front narysował je jako
+  // jeden blok zamiast kilkunastu nierozróżnialnych wierszy. Patrz slNewTurnRef.
+  const turnRef = slNewTurnRef(playerId);
+
   const result = transaction(() => {
     const st = slEnsureState(playerId);
     // rolls_today liczy się dla dnia zapisanego w last_move_date — inny dzień = licznik
@@ -2871,9 +2890,9 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
         ? db.prepare('SELECT nickname FROM players WHERE id = ?').get(freeze.source_player_id)
         : null;
       const freezeSourceNick = freezeSource ? freezeSource.nickname : null;
-      slLogActivity(playerId, 'roll', `❄️ Zamrożony${freezeSourceNick ? ` przez ${freezeSourceNick}` : ''} — ruch ${moveSeq}/${SL_DAILY_ROLLS} dzisiaj przepadł.`);
+      slLogActivity(playerId, 'roll', `❄️ Zamrożony${freezeSourceNick ? ` przez ${freezeSourceNick}` : ''} — ruch ${moveSeq}/${SL_DAILY_ROLLS} dzisiaj przepadł.`, turnRef);
       if (freeze.source_player_id) {
-        slLogActivity(freeze.source_player_id, 'shop_use', `❄️ Twój Freeze na ${nickname} właśnie odpalił!`);
+        slLogActivity(freeze.source_player_id, 'shop_use', `❄️ Twój Freeze na ${nickname} właśnie odpalił!`, turnRef);
       }
       return { frozen: true, source: freeze.source_player_id, source_nickname: freezeSourceNick, rolls_used_today: moveSeq };
     }
@@ -2925,7 +2944,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
     // Sprawdzane na OSTATECZNYM polu lądowania tej tury (po drabinach/wężach/klątwie,
     // po obu rzutach przy Extra Move) — nie na każdym pośrednim kroku.
-    const knockback = slApplyKnockback(playerId, abs, board, nickname);
+    const knockback = slApplyKnockback(playerId, abs, board, nickname, turnRef);
     if (knockback.length) notes.push('knockback');
 
     // ── PUNKTACJA ── (pipPoints liczone od SUROWYCH rzutów, nie od skorygowanych
@@ -2977,15 +2996,15 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     `).run(abs, newLaps, earned - curseCoinSteal, earned, today, moveSeq, playerId);
 
     slLogActivity(playerId, 'roll',
-      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`);
+      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`, turnRef);
     if (curseVariant) {
       slLogActivity(playerId, 'curse_fired',
-        `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} coins)` : ''}`);
+        `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} coins)` : ''}`, turnRef);
       // Rzucający przy rzuceniu nie dostał wariantu — dowiaduje się TERAZ, razem z ofiarą,
       // tak jak Freeze i Drożyzna. Nazwanie celu jest już bezpieczne: klątwa odpaliła.
       if (curse.source_player_id) {
         slLogActivity(curse.source_player_id, 'curse_fired',
-          `💀 Twoja klątwa na ${nickname} odpaliła: ${SL_CURSE_LABELS[curseVariant]}${curseCoinSteal > 0 ? ` (+${curseCoinSteal} coins dla Ciebie)` : ''}`);
+          `💀 Twoja klątwa na ${nickname} odpaliła: ${SL_CURSE_LABELS[curseVariant]}${curseCoinSteal > 0 ? ` (+${curseCoinSteal} coins dla Ciebie)` : ''}`, turnRef);
       }
     }
 
@@ -2994,7 +3013,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     // Obrażenia z kości NIE dają nagrody (te idą wyłącznie z wpłat coins — patrz
     // lib/boss.js), ale zdejmują większość HP. `moveIns.lastInsertRowid` idzie jako `ref`,
     // żeby cofnięcie tego ruchu umiało oddać bossowi dokładnie te obrażenia.
-    const bossHit = boss.slApplyDiceDamage(playerId, rolls, Number(moveIns.lastInsertRowid));
+    const bossHit = boss.slApplyDiceDamage(playerId, rolls, Number(moveIns.lastInsertRowid), turnRef);
 
     return {
       frozen: false,
