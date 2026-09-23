@@ -340,7 +340,10 @@ function versionedHtml(file) {
       .replace(
         new RegExp(`(href|src)="(/?)(${VERSIONED_ASSETS.join('|').replace(/\./g, '\\.')})"`, 'g'),
         (_, attr, slash, name) => `${attr}="${slash}${name}?v=${ASSET_VERSION}"`
-      );
+      )
+      // Tagi podglądu linku (og:image, og:url) muszą mieć adres BEZWZGLĘDNY — komunikatory
+      // nie rozwiązują ścieżek względnych. Domena bierze się z APP_URL, jak linki na Discordzie.
+      .replace(/%SITE_URL%/g, APP_URL.replace(/\/+$/, ''));
   } catch {
     html = null; // trasa zrobi wtedy zwykłe sendFile
   }
