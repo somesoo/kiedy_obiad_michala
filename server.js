@@ -2610,6 +2610,7 @@ function slPlayersPayload(meId) {
   ).all().map(r => r.id));
   // Też jednym zapytaniem na wszystkich — inaczej byłoby N+1 przy kilkunastu pionkach.
   const breakdown = slPointsBreakdownMap();
+  const worn = costumes.slWornMap();
   return rows.map(r => {
     const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
     const dailyRolls = slDailyRollsFor(r, today);
@@ -2618,6 +2619,7 @@ function slPlayersPayload(meId) {
       nickname: r.nickname,
       avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at),
       missed_workdays: slMissedWorkdays(r.last_move_date, today),
+      costume: worn.get(r.player_id) || {},
       tile: slTileOf(r.abs_pos),
       abs_pos: Number(r.abs_pos),
       laps: Number(r.laps),
@@ -2826,6 +2828,12 @@ boss.registerRoutes(app, {
 });
 boss.startDeadlineScheduler();
 
+// ── KOSTIUMY ── czysta kosmetyka pionka za coins (lib/costumes.js). Ta sama fabryka co
+// boss: helpery przychodzą w deps, jeden uchwyt bazy.
+const costumes = require('./lib/costumes')({ db, transaction, slLogActivity, slEnsureState });
+costumes.initSchema();
+costumes.registerRoutes(app, { authPlayer, buildState: playerId => slBuildState(playerId) });
+
 // ── MIGRACJA (jednorazowa): DOŁADOWANIE „bank się pomylił" — każdy gracz dostaje
 // SL_BANK_ERROR_GRANT coins do portfela. Jednorazowy prezent od admina przy okazji
 // przemianowania waluty na coins, nie element mechaniki.
@@ -2907,6 +2915,7 @@ function slBuildState(playerId) {
     // Cennik jest PER GRACZ, bo Drożyzna podbija ceny tylko jemu (patrz slShopPayload).
     shop: shop.items,
     shop_price_curse: shop.price_curse,
+    costumes: costumes.slCostumeShop(playerId),
     coop: boss.slCoopPayload(playerId),
     server_date: today
   };
@@ -3652,6 +3661,7 @@ app.post('/api/snakes/admin/reset', (req, res) => {
     // ŚCIEŻKA COFANIA #4 — wszystko po bossie (cykle, obrażenia, rejestr wypłat) kasuje
     // moduł, żeby lista tabel do wyczyszczenia mieszkała tam, gdzie te tabele powstają.
     boss.slResetBossData();
+    costumes.slResetCostumes(); // reset = zerowe konto, więc i szafa pusta
     // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
     // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).
     return { players_affected: playersAffected, coop: boss.slCoopPayload(null) };
@@ -3736,6 +3746,7 @@ app.delete('/api/snakes/admin/players/:id', (req, res) => {
     db.prepare('DELETE FROM sl_inventory WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
     boss.slClearPlayerBossData(playerId); // ŚCIEŻKA COFANIA #5 — wkłady i wypłaty bossa
+    costumes.slClearPlayerCostumes(playerId);
     db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_points_log WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);

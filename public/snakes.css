@@ -469,6 +469,166 @@
 }
 @media (prefers-reduced-motion: reduce) { .sl-pawn-ghost { animation: none; } }
 
+/* ── KOSTIUMY NA PIONKU (lib/costumes.js + SL_COSTUME_ART) ──
+   Wszystko przyklejone do .sl-pawn-wrap w procentach jego boku, więc skaluje się razem
+   z pionkiem — tak samo na planszy, jak w podglądzie w sklepie. */
+.sl-pawn-wrap .sl-pawn-avatar { position: relative; z-index: 1; }
+
+/* Skrzydła: zgięcie przy zdjęciu (transform-origin po stronie ciała), każde macha. */
+.sl-pawn-wing {
+  position: absolute;
+  top: 0;
+  width: 118%;
+  height: auto;
+  z-index: 0;
+  pointer-events: none;
+  fill: #2A1D3D;
+  stroke: #A58BD6;
+  stroke-width: 1.4;
+  animation: sl-wing 1.6s ease-in-out infinite;
+}
+.sl-pawn-wing.is-left  { right: 68%; transform-origin: 100% 30%; }
+.sl-pawn-wing.is-right { left: 68%; transform-origin: 0% 30%; animation-name: sl-wing-r; }
+.sl-pawn-wing.w-demon_wings { fill: #5A0F16; stroke: #FF5A4A; }
+/* Mój pionek: skrzydła w kolorze „to ja", jak wszystko inne, co moje. */
+.sl-pawn-me .sl-pawn-wing {
+  fill: rgba(200, 241, 53, 0.35);
+  stroke: var(--accent);
+  filter: drop-shadow(0 0 4px rgba(200, 241, 53, 0.7));
+}
+@keyframes sl-wing   { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(-16deg) scaleX(0.72); } }
+@keyframes sl-wing-r { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(16deg) scaleX(0.72); } }
+/* Uszka nietoperza — bez nich to „kółko ze skrzydłami". Czapka je chowa. */
+.sl-pawn-wrap.wings-bat_wings:not(.has-hat)::before,
+.sl-pawn-wrap.wings-bat_wings:not(.has-hat)::after {
+  content: '';
+  position: absolute;
+  top: -12%;
+  width: 26%;
+  height: 30%;
+  background: #1A1128;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  z-index: 0;
+}
+.sl-pawn-wrap.wings-bat_wings::before { left: 14%; transform: rotate(-14deg); }
+.sl-pawn-wrap.wings-bat_wings::after  { right: 14%; transform: rotate(14deg); }
+.sl-pawn-me.wings-bat_wings::before,
+.sl-pawn-me.wings-bat_wings::after { background: var(--accent); }
+
+/* Czapka: stoi na czubku głowy, lekko na zdjęciu. */
+.sl-costume-hat {
+  position: absolute;
+  left: -2%;
+  bottom: 64%;
+  width: 104%;
+  height: auto;
+  z-index: 3;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
+}
+.sl-costume-hat.h-horns { bottom: 58%; }
+.c-hat { fill: #1B1226; stroke: #6D4FA0; stroke-width: 1; }
+.c-band { fill: #7B3FC4; }
+.c-buckle { fill: none; stroke: #FFD36B; stroke-width: 1; }
+.c-pumpkin { fill: #FF8A1F; stroke: #C0540C; stroke-width: 1; }
+.c-rib { stroke: #C0540C; stroke-width: 1.2; fill: none; }
+.c-stem { fill: #3E7A2C; }
+.c-leaf { fill: #5FA83F; }
+.c-horn { fill: #D8322A; stroke: #7A0E0E; stroke-width: 1; }
+.c-tophat { fill: #111; stroke: #444; stroke-width: .8; }
+.c-band-red { fill: #B3122B; }
+
+/* Gadżet: w „ręce", czyli przy prawym dolnym boku. Pająk wisi z góry. */
+.sl-costume-gadget {
+  position: absolute;
+  right: -46%;
+  bottom: -12%;
+  width: 56%;
+  height: auto;
+  z-index: 3;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
+}
+.sl-costume-gadget.g-spider { right: -34%; top: -40%; bottom: auto; animation: sl-spider 2.8s ease-in-out infinite; }
+.c-stick { stroke: #8B5A2B; stroke-width: 2.4; stroke-linecap: round; }
+.c-straw { fill: #D9A441; stroke: #8B6414; stroke-width: .8; }
+.c-handle { stroke: #999; stroke-width: 1.5; fill: none; }
+.c-candy { fill: #FF4FA3; }
+.c-candy-b { fill: #4FD2FF; }
+.c-bucket { fill: #FF8A1F; stroke: #C0540C; stroke-width: 1; }
+.c-carve { fill: #3A1A05; }
+.c-glow { fill: rgba(255, 193, 77, 0.28); }
+.c-lantern { fill: #2A2A2A; stroke: #111; stroke-width: 1; }
+.c-flame-box { fill: #FFE7A3; }
+.c-flame { fill: #FF9A2E; }
+.c-thread { stroke: rgba(230, 230, 240, 0.8); stroke-width: .8; }
+.c-spider { fill: #111; }
+.c-legs { stroke: #111; stroke-width: 1.4; fill: none; stroke-linecap: round; }
+.c-eye { fill: #FF3B3B; }
+@keyframes sl-spider { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(12%); } }
+
+/* Nakładki: filtr na zdjęciu + rysunek na wierzchu (sl-costume-overlay). */
+.sl-costume-overlay {
+  position: absolute;
+  inset: -8%;
+  width: 116%;
+  height: 116%;
+  z-index: 2;
+  pointer-events: none;
+  overflow: visible;
+}
+.ov-zombie .sl-pawn-avatar { filter: sepia(0.6) hue-rotate(55deg) saturate(1.7) brightness(0.92); }
+.ov-vampire .sl-pawn-avatar { filter: saturate(0.35) brightness(1.18) contrast(1.1); }
+.ov-vampire:not(.sl-pawn-me) .sl-pawn-avatar { border-color: #B3122B; box-shadow: 0 0 6px rgba(179, 18, 43, 0.9); }
+.ov-skeleton .sl-pawn-avatar { filter: grayscale(1) contrast(1.8) brightness(1.1); }
+.c-stitch { stroke: #1A1A1A; stroke-width: 1.3; fill: none; stroke-linecap: round; }
+.c-fang { fill: #FFFFFF; stroke: #B3122B; stroke-width: .6; }
+.c-bone-ring { fill: none; stroke: #EDEDED; stroke-width: 2.6; stroke-dasharray: 5 2.5; }
+.c-pumpkin-ring { fill: none; stroke: #FF8A1F; stroke-width: 3.4; }
+@media (prefers-reduced-motion: reduce) {
+  .sl-pawn-wing, .sl-costume-gadget.g-spider { animation: none; }
+}
+
+/* ── SKLEP Z KOSTIUMAMI ── */
+.costume-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 86px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 60%, rgba(255, 255, 255, 0.05), transparent 70%), var(--surface-alt);
+}
+/* W podglądzie pionek jest duży — wszystkie dodatki skalują się z nim (procenty). */
+.costume-preview .sl-pawn-wrap { width: 46px; height: 46px; }
+.costume-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px; }
+.costume-tab {
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 3px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.costume-tab.is-active { border-color: var(--accent); color: var(--text-primary); }
+.costume-list { display: flex; flex-direction: column; gap: 4px; }
+.costume-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.costume-item.is-worn { background: rgba(200, 241, 53, 0.08); }
+.costume-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.costume-item button { font-size: 10px; padding: 2px 7px; flex: 0 0 auto; }
+
 /* ── PIONKI ── */
 .sl-pawns {
   position: relative;

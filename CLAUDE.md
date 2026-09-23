@@ -20,6 +20,7 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 |---|---|---|
 | **Snakes & Ladders** (prefiks `sl*`) | większość `server.js`, `public/snakes*` | **aktywna gra, tu idzie cała praca** |
 | **Sezony planszy** | `boards/*.js`, `lib/seasons.js`, `public/themes/` | plansza = plik; admin przełącza sezon |
+| **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/snakes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
 | **Wordle po polsku** | ~20% `server.js`, `public/app.js`, `index.html` | **zakończony 2026-08-31** przez `GAME_END_AT`; `gameHasEnded()` zwraca `true`, gra jest trwale zablokowana. Nie inwestuj tu czasu bez wyraźnej prośby. |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
@@ -68,6 +69,19 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
   wtedy na starcie.
 - Na wąskim ekranie plansza 'free' ma minimalną szerokość i przewija się w bok, zamiast
   ściskać pola do kilkunastu pikseli.
+
+## Kostiumy — czysta kosmetyka
+
+`lib/costumes.js` (fabryka, jak boss): katalog (id, slot, nazwa, cena) żyje **tylko na
+serwerze**, rysunki SVG **tylko na froncie** (`SL_COSTUME_ART`). Payload niesie wyłącznie
+id — przez bazę nie da się niczego wstrzyknąć, nieznane id front pomija. Cztery sloty:
+czapka, skrzydła, gadżet, nakładka (overlay = filtr na zdjęciu + rysunek na wierzchu).
+Pionek na planszy i podgląd w sklepie składa **jedna** funkcja `slPawnHtml`, więc podgląd
+nie może się rozjechać z tym, co widzą inni.
+
+Kostium to odpływ coins, który **nie rusza równowagi gry**. Zakup nie jest ruchem, więc
+cofanie ruchu i dnia go nie dotyczy (jak zakupów power-upów); reset gry i wyczyszczenie
+gracza kasują szafę (`slResetCostumes`, `slClearPlayerCostumes`).
 
 ## Dwie waluty — to jest fundament, nie szczegół
 

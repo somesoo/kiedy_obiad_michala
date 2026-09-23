@@ -616,6 +616,7 @@ function renderAll() {
   renderStats(g);
   renderBoard(g);
   renderShop(g);
+  renderCostumes(g);
   renderLeaderboard(g);
   renderRollButton(g);
   renderCoop(g);
@@ -689,6 +690,65 @@ function renderSeasonEffects(effects) {
   }
   layer.innerHTML = html;
 }
+
+// ── SKLEP Z KOSTIUMAMI ──
+// Zakładka slotu jest stanem strony (nie serwera) — przeżywa odświeżanie co 10 s, bo
+// renderCostumes czyta ją stąd, zamiast zaczynać zawsze od „Czapki".
+let slCostumeTab = 'hat';
+
+function renderCostumes(g) {
+  const box = document.getElementById('costume-shop');
+  if (!box || !g.costumes) return;
+  const c = g.costumes;
+  // Podgląd = mój pionek złożony TĄ SAMĄ funkcją co na planszy (slPawnHtml).
+  const me = { player_id: g.me.player_id, nickname: 'Ty', avatar_url: g.me.avatar_url, is_me: true, costume: c.worn };
+  const tabs = c.slots.map(sl => {
+    const worn = c.items.find(i => i.slot === sl.id && i.worn);
+    return `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}" title="${esc(sl.label)}">${worn ? worn.icon : '·'} ${esc(sl.label)}</button>`;
+  }).join('');
+  const items = c.items.filter(i => i.slot === slCostumeTab).map(i => {
+    let btn;
+    if (!i.owned) btn = `<button class="btn-ghost costume-buy" data-item="${i.id}" ${g.me.balance >= i.price ? '' : 'disabled'}>Kup · ${i.price}</button>`;
+    else if (i.worn) btn = `<button class="btn-ghost costume-off" data-slot="${i.slot}">Zdejmij</button>`;
+    else btn = `<button class="btn-primary costume-wear" data-slot="${i.slot}" data-item="${i.id}">Załóż</button>`;
+    return `
+      <div class="costume-item${i.worn ? ' is-worn' : ''}">
+        <span class="costume-name">${i.icon} ${esc(i.name)}</span>
+        ${btn}
+      </div>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="costume-preview">${g.me.avatar_url ? slPawnHtml(me, { noTip: true }) : ''}</div>
+    <div class="costume-tabs">${tabs}</div>
+    <div class="costume-list">${items}</div>`;
+}
+
+document.getElementById('costume-shop').addEventListener('click', async e => {
+  const tab = e.target.closest('.costume-tab');
+  if (tab) { slCostumeTab = tab.dataset.slot; if (state.game) renderCostumes(state.game); return; }
+  const buy = e.target.closest('.costume-buy');
+  const wear = e.target.closest('.costume-wear');
+  const off = e.target.closest('.costume-off');
+  if (!buy && !wear && !off) return;
+  if (state.busy) return;
+  state.busy = true;
+  try {
+    const res = buy
+      ? await api('POST', '/api/snakes/costumes/buy', { item: buy.dataset.item })
+      : await api('POST', '/api/snakes/costumes/wear', { slot: (wear || off).dataset.slot, item: wear ? wear.dataset.item : null });
+    state.game = res.state;
+    renderAll();
+    if (buy) {
+      const it = res.state.costumes.items.find(i => i.id === res.item);
+      showToast(`🎭 Kupiono i założono: ${it ? `${it.icon} ${it.name}` : 'kostium'} (-${res.price} coins)`);
+      loadActivity(document.getElementById('activity-date').value || null);
+    }
+  } catch (err) {
+    showToast(err.message);
+  } finally {
+    state.busy = false;
+  }
+});
 
 // ── STATY ──
 function renderStats(g) {
@@ -1133,10 +1193,83 @@ function renderLinkDots(links, board) {
   return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
 
-// Lewe skrzydło nietoperza; prawe to jego lustrzane odbicie zrobione w samym SVG (matrix),
-// a nie w CSS — dzięki temu animacja machania nie musi odbijać elementu i oba skrzydła
-// zginają się przy zdjęciu, a nie przeskakują na drugą stronę.
-const SL_BAT_WING = 'M40 6 C34 2 26 0 18 2 C12 3 5 6 0 4 C3 9 4 13 2 18 C6 15 10 15 12 19 C14 15 18 14 21 18 C23 14 27 13 30 16 C32 12 36 11 40 12 Z';
+// ── PIONEK ──
+// Jedna funkcja składa pionek dla planszy i dla podglądu w sklepie kostiumów, żeby
+// podgląd pokazywał DOKŁADNIE to, co zobaczą inni. Warstwy od spodu: skrzydła, zdjęcie,
+// nakładka (overlay), prześcieradło ducha, czapka, gadżet, tarcza.
+function slPawnHtml(p, opts = {}) {
+  const costume = p.costume || {};
+  const ghost = !!opts.ghost;
+  const cls = ['sl-pawn-wrap'];
+  if (p.is_me) cls.push('sl-pawn-me');
+  if (p.has_shield) cls.push('sl-pawn-shielded');
+  if (opts.pushed) cls.push('sl-pawn-pushed');
+  if (ghost) cls.push('sl-pawn-ghost');
+  // Nakładka zmienia samo zdjęcie (filtr), więc idzie klasą na opakowanie; duch ma
+  // pierwszeństwo — nieaktywny gracz straszy prześcieradłem, a nie kostiumem.
+  if (costume.overlay && !ghost && SL_COSTUME_ART.overlay[costume.overlay]) cls.push(`ov-${costume.overlay}`);
+
+  const wingKind = costume.wings && SL_COSTUME_ART.wings[costume.wings] ? costume.wings : (opts.batDefault ? 'bat_wings' : null);
+  if (wingKind) cls.push('has-wings', `wings-${wingKind}`);
+  if (costume.hat && SL_COSTUME_ART.hat[costume.hat]) cls.push('has-hat'); // czapka chowa uszka nietoperza
+  // Każdy macha w innym rytmie (opóźnienie z player_id), żeby stado nie trzepotało jak jeden.
+  const delay = `animation-delay:-${(Number(p.player_id) % 7) * 0.37}s`;
+  const wingPath = wingKind ? SL_COSTUME_ART.wings[wingKind] : null;
+  const wings = wingPath ? `
+        <svg class="sl-pawn-wing is-left w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path d="${wingPath}"/></svg>
+        <svg class="sl-pawn-wing is-right w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path transform="matrix(-1 0 0 1 40 0)" d="${wingPath}"/></svg>` : '';
+  const overlayArt = costume.overlay && !ghost ? (SL_COSTUME_ART.overlay[costume.overlay] || '') : '';
+  const overlay = overlayArt ? `<svg class="sl-costume-overlay" viewBox="0 0 40 40" aria-hidden="true">${overlayArt}</svg>` : '';
+  const hatArt = costume.hat && SL_COSTUME_ART.hat[costume.hat];
+  const hat = hatArt ? `<svg class="sl-costume-hat h-${costume.hat}" viewBox="0 0 40 32" aria-hidden="true">${hatArt}</svg>` : '';
+  const gadgetArt = costume.gadget && SL_COSTUME_ART.gadget[costume.gadget];
+  const gadget = gadgetArt ? `<svg class="sl-costume-gadget g-${costume.gadget}" viewBox="0 0 30 40" aria-hidden="true">${gadgetArt}</svg>` : '';
+  const sheet = ghost ? `<svg class="sl-pawn-sheet" viewBox="0 0 40 44" aria-hidden="true"><path d="M20 1 C8 1 3 11 3 21 L3 43 L9 38 L14 43 L20 38 L26 43 L31 38 L37 43 L37 21 C37 11 32 1 20 1 Z"/><ellipse cx="14" cy="18" rx="3" ry="4.5"/><ellipse cx="26" cy="18" rx="3" ry="4.5"/></svg>` : '';
+  const shield = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
+  const ghostTitle = ghost
+    ? ` title="${esc(p.nickname)} — nie rzucał od ${p.missed_workdays >= 99 ? 'zawsze' : `${p.missed_workdays} dni roboczych`}"` : '';
+  // Natywny title zniknął (poza duchem): nie da się w nim zrobić wielowierszowej rozpiski
+  // punktów. Dane dla dymka jadą w data-* i są czytane dopiero przy najechaniu (slTipShow).
+  const tip = opts.noTip ? '' : ` data-tip-player="${p.player_id}"`;
+  return `
+      <span class="${cls.join(' ')}"${tip}${ghostTitle}>${wings}
+        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />${overlay}${sheet}${hat}${gadget}
+        ${shield}
+      </span>`;
+}
+
+// ── KOSTIUMY: rysunki ──
+// Serwer (lib/costumes.js) zna tylko id, slot i cenę; tu jest wygląd. Kolory przez klasy
+// c-*, żeby motyw sezonu mógł je podmienić. Nieznane id jest po prostu pomijane.
+const SL_COSTUME_ART = {
+  hat: {
+    witch_hat: '<path class="c-hat" d="M2 28 Q20 22 38 28 Q20 33 2 28 Z"/><path class="c-hat" d="M11 26 L18 5 Q21 -1 29 3 Q23 4 22 9 L29 26 Z"/><path class="c-band" d="M11.6 22 L28.4 22 L29 26 L11 26 Z"/><rect class="c-buckle" x="18" y="22" width="4" height="4" rx=".5"/>',
+    pumpkin_hat: '<ellipse class="c-pumpkin" cx="20" cy="22" rx="13" ry="9"/><path class="c-rib" d="M20 13 L20 31 M13.5 14.5 Q10 22 13.5 29.5 M26.5 14.5 Q30 22 26.5 29.5"/><path class="c-stem" d="M19 14 Q18 8 22 6 L23.5 8 Q21 10 21.5 14 Z"/><path class="c-leaf" d="M22 9 Q28 4 32 9 Q26 12 22 9 Z"/>',
+    horns: '<path class="c-horn" d="M7 31 Q2 17 10 5 Q10 17 16 27 Z"/><path class="c-horn" d="M33 31 Q38 17 30 5 Q30 17 24 27 Z"/>',
+    top_hat: '<rect class="c-tophat" x="11" y="3" width="18" height="22" rx="2"/><rect class="c-band-red" x="11" y="17" width="18" height="4"/><ellipse class="c-tophat" cx="20" cy="26" rx="16" ry="3.5"/>',
+  },
+  // Skrzydła: kształt LEWEGO skrzydła. Prawe to jego lustro zrobione w samym SVG (matrix),
+  // a nie w CSS — dzięki temu animacja machania nie musi odbijać elementu i oba skrzydła
+  // zginają się przy zdjęciu, a nie przeskakują na drugą stronę.
+  wings: {
+    bat_wings: 'M40 6 C34 2 26 0 18 2 C12 3 5 6 0 4 C3 9 4 13 2 18 C6 15 10 15 12 19 C14 15 18 14 21 18 C23 14 27 13 30 16 C32 12 36 11 40 12 Z',
+    demon_wings: 'M40 5 C33 1 22 0 12 3 L0 0 L4 8 L1 14 L8 12.5 L6 21 L14 16 L16 23 L22 15.5 L26 21 L30 14 L40 12 Z',
+  },
+  gadget: {
+    broom: '<path class="c-stick" d="M24 1 L11 29"/><path class="c-straw" d="M10 27 L2 39 L18 39 L15 28 Z"/><path class="c-band" d="M9.4 26 L15.8 27.6 L15 30 L8.6 28.6 Z"/>',
+    candy_bucket: '<path class="c-handle" d="M5 19 Q15 4 25 19"/><circle class="c-candy" cx="11" cy="17" r="3"/><circle class="c-candy c-candy-b" cx="18" cy="16" r="3"/><path class="c-bucket" d="M4 19 L26 19 L22.5 39 L7.5 39 Z"/><path class="c-carve" d="M9 25 L12 22 L13.5 26 Z M21 25 L18 22 L16.5 26 Z M10 31 Q15 36 20 31 L18 31 L17 33 L15 31 L13 33 L12 31 Z"/>',
+    lantern: '<path class="c-handle" d="M15 0 L15 6"/><circle class="c-glow" cx="15" cy="22" r="13"/><path class="c-lantern" d="M9 8 L21 8 L23 12 L23 32 L21 36 L9 36 L7 32 L7 12 Z"/><rect class="c-flame-box" x="10" y="13" width="10" height="18" rx="2"/><path class="c-flame" d="M15 29 Q11 24 15 17 Q19 24 15 29 Z"/>',
+    spider: '<path class="c-thread" d="M15 0 L15 22"/><ellipse class="c-spider" cx="15" cy="28" rx="5" ry="6"/><circle class="c-spider" cx="15" cy="21" r="3.5"/><path class="c-legs" d="M11 25 L4 20 L2 24 M11 29 L3 29 L1 34 M19 25 L26 20 L28 24 M19 29 L27 29 L29 34 M12 32 L6 37 M18 32 L24 37"/><circle class="c-eye" cx="13.6" cy="20.5" r=".9"/><circle class="c-eye" cx="16.4" cy="20.5" r=".9"/>',
+  },
+  // Nakładki: filtr zdjęcia robi CSS (klasa ov-*), a tu jest to, co leży NA zdjęciu.
+  overlay: {
+    zombie: '<path class="c-stitch" d="M7 13 L19 17 M9 11 L8 15 M12 12 L11 16 M15 13 L14 17 M24 27 L33 24 M27 23 L28 28 M30 22 L31 27"/>',
+    vampire: '<path class="c-fang" d="M15 29 L17.2 29 L16.1 34 Z M22.8 29 L25 29 L23.9 34 Z"/>',
+    skeleton: '<circle class="c-bone-ring" cx="20" cy="20" r="18.5"/>',
+    pumpkin_frame: '<circle class="c-pumpkin-ring" cx="20" cy="20" r="18.5"/><path class="c-rib" d="M20 1.5 L20 5 M20 35 L20 38.5 M1.5 20 L5 20 M35 20 L38.5 20 M7 7 L9.5 9.5 M33 7 L30.5 9.5 M7 33 L9.5 30.5 M33 33 L30.5 30.5"/><path class="c-stem" d="M18.5 2 Q18 -2 21.5 -3 L22.5 -1.5 Q20.5 -0.5 21 2 Z"/>',
+  },
+};
+
 
 function renderCell(idx, sp, players, posStyle, board) {
   const size = board.size;
@@ -1179,31 +1312,14 @@ function renderCell(idx, sp, players, posStyle, board) {
     const rest = ordered.slice(1);
     overflow = `<span class="sl-pawn-more" title="${esc(rest.map(p => p.nickname).join(', '))}">+${rest.length}</span>`;
   }
-  const bat = slBoardView(board).pawn === 'bat';
-  const ghostAfter = slBoardView(board).ghost_after_days;
-  const pawnsHtml = shown.map(p => {
-    const meCls = p.is_me ? ' sl-pawn-me' : '';
+  const view = slBoardView(board);
+  const pawnsHtml = shown.map(p => slPawnHtml(p, {
+    batDefault: view.pawn === 'bat',
     // Duch = gracz, który od kilku dni roboczych nie rzucał (liczy serwer). Czysty wygląd:
     // półprzezroczysty pionek w prześcieradle. Dalej da się go zbić i dalej ma swoje pole.
-    const ghost = ghostAfter && p.missed_workdays >= ghostAfter;
-    const ghostCls = ghost ? ' sl-pawn-ghost' : '';
-    const ghostSheet = ghost ? `<svg class="sl-pawn-sheet" viewBox="0 0 40 44" aria-hidden="true"><path d="M20 1 C8 1 3 11 3 21 L3 43 L9 38 L14 43 L20 38 L26 43 L31 38 L37 43 L37 21 C37 11 32 1 20 1 Z"/><ellipse cx="14" cy="18" rx="3" ry="4.5"/><ellipse cx="26" cy="18" rx="3" ry="4.5"/></svg>` : '';
-    // Skrzydła nietoperza doklejone po bokach okrągłego zdjęcia. Każdy macha w innym
-    // rytmie (opóźnienie z player_id), żeby stado na planszy nie trzepotało jak jeden.
-    const wings = bat ? `
-        <svg class="sl-pawn-wing is-left" viewBox="0 0 40 24" aria-hidden="true" style="animation-delay:-${(Number(p.player_id) % 7) * 0.37}s"><path d="${SL_BAT_WING}"/></svg>
-        <svg class="sl-pawn-wing is-right" viewBox="0 0 40 24" aria-hidden="true" style="animation-delay:-${(Number(p.player_id) % 7) * 0.37}s"><path transform="matrix(-1 0 0 1 40 0)" d="${SL_BAT_WING}"/></svg>` : '';
-    const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
-    const pushCls = (state.pushFlash && state.pushFlash.has(p.player_id)) ? ' sl-pawn-pushed' : '';
-    const shieldBadge = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
-    // Natywny title zniknął: nie da się w nim zrobić wielowierszowej rozpiski punktów.
-    // Dane dla dymka jadą w data-* i są czytane dopiero przy najechaniu (patrz slTipShow).
-    return `
-      <span class="sl-pawn-wrap${bat ? ' is-bat' : ''}${meCls}${shieldCls}${pushCls}${ghostCls}" data-tip-player="${p.player_id}"${ghost ? ` title="${esc(p.nickname)} — nie rzucał od ${p.missed_workdays >= 99 ? 'zawsze' : `${p.missed_workdays} dni roboczych`}"` : ''}>${wings}
-        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />${ghostSheet}
-        ${shieldBadge}
-      </span>`;
-  }).join('') + overflow;
+    ghost: !!view.ghost_after_days && p.missed_workdays >= view.ghost_after_days,
+    pushed: !!(state.pushFlash && state.pushFlash.has(p.player_id)),
+  })).join('') + overflow;
   return `
     <div class="${cls}" style="${posStyle}">
       ${flag}
