@@ -63,6 +63,12 @@ body.season-halloween {
   border-color: var(--accent);
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(200, 241, 53, 0.35);
 }
+.season-halloween .sl-board-free .sl-fork {
+  background: linear-gradient(180deg, #3F5A2A, #22301B);
+  border: 1px dashed var(--accent);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(200, 241, 53, 0.35);
+}
+.season-halloween .sl-fork-label { background: var(--night-top); }
 .season-halloween .sl-board-free .sl-snake {
   background: linear-gradient(180deg, #5E2A3A, #2F1520);
   border-color: var(--danger);

@@ -990,22 +990,26 @@ function renderTrack(board) {
 // Wąż: czerwona, wygięta krzywa z „głową" (kółkiem) na polu docelowym.
 // Dzięki temu od razu widać, dokąd prowadzi każde pole — bez najeżdżania myszą.
 function renderConnectors(board) {
-  const links = board.tiles.filter(t => t.kind === 'ladder' || t.kind === 'snake');
+  // Rozwidlona drabina rysuje się jak drabina do celu „wygranej" — krótsza odnoga
+  // (przegrana) prowadzi prawie zawsze wzdłuż samej drogi, więc druga drabina tylko by ją
+  // zasłoniła. Obie odnogi opisuje etykietka na drabinie (renderForkLabels).
+  const links = board.tiles.filter(t => t.kind === 'ladder' || t.kind === 'snake' || t.kind === 'fork');
   if (!links.length) return '';
   const drawn = slBoardView(board).links === 'drawn';
 
   const parts = links.map(t => {
     const a = tileCenter(t.position, board);
     const b = tileCenter(t.target, board);
-    const cls = t.kind === 'ladder' ? 'sl-link-ladder' : 'sl-link-snake';
-    const title = t.kind === 'ladder'
-      ? `Drabina: ${t.position} → ${t.target}`
+    const up = t.kind !== 'snake';
+    const cls = up ? `sl-link-ladder${t.kind === 'fork' ? ' sl-link-fork' : ''}` : 'sl-link-snake';
+    const title = t.kind === 'fork' ? slForkTitle(t)
+      : t.kind === 'ladder' ? `Drabina: ${t.position} → ${t.target}`
       : `Wąż: ${t.position} → ${t.target}`;
 
-    if (drawn) return `<g class="${cls} is-drawn"><title>${title}</title>${t.kind === 'ladder' ? slDrawnLadder(a, b, board) : slDrawnSnake(a, b)}</g>`;
+    if (drawn) return `<g class="${cls} is-drawn"><title>${title}</title>${up ? slDrawnLadder(a, b, board) : slDrawnSnake(a, b)}</g>`;
 
     let path;
-    if (t.kind === 'ladder') {
+    if (up) {
       path = `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
     } else {
       // Wygięcie prostopadłe do odcinka — wąż ma się „wić", a nie iść prosto.
@@ -1023,7 +1027,21 @@ function renderConnectors(board) {
   }).join('');
 
   return `<svg class="sl-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${parts}</svg>`
-    + renderLinkDots(links, board);
+    + renderLinkDots(links, board) + renderForkLabels(board);
+}
+
+function slForkTitle(t) {
+  return `Rozwidlona drabina: rzuć jeszcze raz — ${t.faces.join(' lub ')} → pole ${t.target}, inaczej → pole ${t.alt_target}`;
+}
+
+// Etykietka na środku rozwidlonej drabiny: jakie oczka prowadzą górą i dokąd idzie się
+// przy pozostałych. Bez niej gracz widziałby zwykłą drabinę i czuł się oszukany.
+function renderForkLabels(board) {
+  return board.tiles.filter(t => t.kind === 'fork').map(t => {
+    const a = tileCenter(t.position, board);
+    const b = tileCenter(t.target, board);
+    return `<span class="sl-fork-label" style="left:${(a.x + b.x) / 2}%;top:${(a.y + b.y) / 2}%" title="${esc(slForkTitle(t))}">🎲 ${t.faces.join('/')} → ${t.target} · inaczej → ${t.alt_target}</span>`;
+  }).join('');
 }
 
 // ── ŁĄCZNIKI „RYSOWANE" (links: 'drawn') ──
@@ -1079,7 +1097,7 @@ function renderLinkDots(links, board) {
   const dots = links.map(t => {
     const a = tileCenter(t.position, board);
     const b = tileCenter(t.target, board);
-    const kind = t.kind === 'ladder' ? 'ladder' : 'snake';
+    const kind = t.kind === 'snake' ? 'snake' : 'ladder';
     return `
       <span class="sl-dot sl-dot-start sl-dot-${kind}" style="left:${a.x}%;top:${a.y}%"></span>
       <span class="sl-dot sl-dot-end sl-dot-${kind}" style="left:${b.x}%;top:${b.y}%"></span>`;
@@ -1114,6 +1132,7 @@ function renderCell(idx, sp, players, posStyle, board) {
   if (sp) {
     cls += ` sl-${sp.kind}`;
     if (sp.kind === 'ladder') mark = `<span class="sl-mark" title="Drabina → ${sp.target}">${esc(marks.ladder)}</span>`;
+    else if (sp.kind === 'fork') mark = `<span class="sl-mark" title="${esc(slForkTitle(sp))}">🎲</span>`;
     else if (sp.kind === 'snake') mark = `<span class="sl-mark" title="Wąż → ${sp.target}">${esc(marks.snake)}</span>`;
     else if (sp.kind === 'bonus') mark = `<span class="sl-mark" title="Bonus +${sp.value} pkt">${esc(marks.bonus)}</span>`;
   }
@@ -1171,6 +1190,7 @@ function renderLegend(board) {
       <span class="sl-legend-ladder">━ ${esc(m.ladder)} drabina — ${closed ? 'skrót do przodu' : 'w górę'}</span>
       <span class="sl-legend-snake">〜 ${esc(m.snake)} wąż — ${closed ? 'cofa' : 'w dół'}</span>
       <span>${esc(m.bonus)} bonus — punkty</span>
+      ${board.tiles.some(t => t.kind === 'fork') ? '<span class="sl-legend-ladder">🎲 rozwidlona drabina — rzut decyduje, którą odnogą</span>' : ''}
       <span>🛡️ gracz z tarczą</span>
       <span class="sl-legend-me">■ Twój pionek</span>
     </div>`;
@@ -1267,6 +1287,11 @@ function showRollResult(m) {
   if (m.notes.includes('ladder')) noteTxt.push('🪜 drabina w górę!');
   if (m.notes.includes('snake')) noteTxt.push('🐍 wąż w dół!');
   if (m.notes.includes('bonus')) noteTxt.push('⭐ pole bonusowe!');
+  if (m.fork) {
+    noteTxt.push(m.fork.win
+      ? `🪜🎲 rozwidlona drabina: wypadło ${m.fork.roll} — idziesz górą na pole ${m.fork.to_tile}!`
+      : `🪜🎲 rozwidlona drabina: wypadło ${m.fork.roll} — krótsza odnoga, pole ${m.fork.to_tile}.`);
+  }
   if (m.curse_variant) {
     noteTxt.push(`💀 Klątwa: ${esc(m.curse_label)}!${m.curse_coin_steal ? ` (-${m.curse_coin_steal} 💰)` : ''}`);
   }

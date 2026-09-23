@@ -241,6 +241,24 @@
 .sl-ladder { background: rgba(200, 241, 53, 0.14); border-color: var(--accent-dim); }
 .sl-snake  { background: rgba(232, 93, 74, 0.16); border-color: var(--danger); }
 .sl-bonus  { background: rgba(245, 200, 66, 0.16); border-color: var(--gold); }
+.sl-fork   { background: rgba(200, 241, 53, 0.14); border-color: var(--accent-dim); border-style: dashed; }
+
+/* Etykietka rozwidlonej drabiny — na środku drabiny, nad łącznikami. */
+.sl-fork-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: help;
+}
 
 /* ── LINIE ŁĄCZĄCE WĘŻE I DRABINY ──
    Warstwa SVG leży NAD tłem pól, ale POD pionkami (z-index 1 vs 2), więc linie

@@ -1564,7 +1564,7 @@ db.exec(`
   -- Konfiguracja wspólnej planszy: typ pola i (dla węża/drabiny) cel skoku.
   CREATE TABLE IF NOT EXISTS snakes.sl_board (
     position INTEGER PRIMARY KEY,       -- 0..(liczba pól aktywnego sezonu - 1)
-    kind     TEXT NOT NULL,             -- 'ladder' | 'snake' | 'bonus'
+    kind     TEXT NOT NULL,             -- 'ladder' | 'snake' | 'bonus' | 'fork'
     target   INTEGER,                   -- pole docelowe (ladder/snake), NULL dla bonus
     value    INTEGER DEFAULT 0          -- punkty bonusowe (bonus), 0 dla ladder/snake
   );
@@ -1705,6 +1705,10 @@ ensureColumn('sl_effects', 'revealed_at', 'DATETIME');
 // był ścianą jednakowych wierszy z tą samą godziną i różnymi nickami — nie dało się
 // zobaczyć, gdzie kończy się jedna tura, a zaczyna następna.
 ensureColumn('sl_activity', 'ref', 'TEXT');
+// Rozwidlona drabina (kind 'fork'): `target` to cel przy trafionych oczkach, `alt_target`
+// przy pozostałych, `faces` to lista zwycięskich oczek jako tekst "3,6".
+ensureColumn('sl_board', 'alt_target', 'INTEGER');
+ensureColumn('sl_board', 'faces', 'TEXT');
 ensureColumn('sl_activity', 'visibility', 'TEXT');
 ensureColumn('sl_activity', 'public_detail', 'TEXT');
 
@@ -2125,8 +2129,10 @@ function slMetaSet(key, value) {
 // ze 100 na 49 pól (slMigrateBoard) już się na produkcji wykonały i zostały usunięte.
 function slSeedBoardRows(season) {
   db.exec('DELETE FROM sl_board');
-  const insert = db.prepare('INSERT INTO sl_board (position, kind, target, value) VALUES (?, ?, ?, ?)');
-  for (const t of season.tiles) insert.run(t.position, t.kind, t.target, t.value);
+  const insert = db.prepare('INSERT INTO sl_board (position, kind, target, value, alt_target, faces) VALUES (?, ?, ?, ?, ?, ?)');
+  for (const t of season.tiles) {
+    insert.run(t.position, t.kind, t.target, t.value, t.alt_target == null ? null : t.alt_target, t.faces ? t.faces.join(',') : null);
+  }
 }
 
 // Nowy sezon = wszyscy na polu 0. Licznik okrążeń ZOSTAJE: laps i tak wyliczamy z abs_pos
@@ -2184,10 +2190,20 @@ function slInstallBoard(season, resetPositions) {
     + (changed ? `; plansza się zmieniła, ${moved} graczy wraca na pole 0` : ''));
 })();
 
+// Wiersz sl_board w kształcie dla logiki i frontu: `faces` z tekstu "3,6" na listę liczb.
+function slBoardRow(t) {
+  const out = { position: t.position, kind: t.kind, target: t.target, value: t.value };
+  if (t.kind === 'fork') {
+    out.alt_target = t.alt_target;
+    out.faces = String(t.faces || '').split(',').filter(Boolean).map(Number);
+  }
+  return out;
+}
+
 function slBoardMap() {
   const map = {};
-  for (const t of db.prepare('SELECT position, kind, target, value FROM sl_board').all()) {
-    map[t.position] = t;
+  for (const t of db.prepare('SELECT position, kind, target, value, alt_target, faces FROM sl_board').all()) {
+    map[t.position] = slBoardRow(t);
   }
   return map;
 }
@@ -2279,8 +2295,9 @@ function slReverseLink(board, tile) {
   let found = null;
   for (const key of Object.keys(board)) {
     const t = board[key];
-    if (t.kind !== 'ladder' && t.kind !== 'snake') continue;
-    if (Number(t.target) !== tile) continue;
+    if (t.kind !== 'ladder' && t.kind !== 'snake' && t.kind !== 'fork') continue;
+    // Rozwidlona drabina ma DWA górne końce — z każdego z nich zjeżdża się na jej start.
+    if (Number(t.target) !== tile && !(t.kind === 'fork' && Number(t.alt_target) === tile)) continue;
     if (!found || Number(t.position) < Number(found.position)) found = t;
   }
   return found;
@@ -2302,9 +2319,19 @@ function slResolveTileEffect(landedAbs, board, invertBoard = false) {
   // połączenie po odwróceniu po prostu się tam nie zaczyna.
   const reverse = invertBoard ? slReverseLink(board, landed) : null;
 
+  let forkRoll = null;
   if (reverse) {
     abs = base + Number(reverse.position);
-    note = reverse.kind === 'ladder' ? 'snake' : 'ladder'; // drabina od góry to zjazd, i odwrotnie
+    note = reverse.kind === 'snake' ? 'ladder' : 'snake'; // drabina od góry to zjazd, i odwrotnie
+  } else if (tile && !invertBoard && tile.kind === 'fork') {
+    // ROZWIDLONA DRABINA: dodatkowy rzut rozstrzyga, którą odnogą się idzie. Losujemy tu,
+    // na serwerze — tak jak każdy rzut — a wynik wraca w `forkRoll`, żeby ruch, dziennik
+    // i front pokazały, co wypadło. Rzut rozwidlenia nie daje punktów za oczka: to tylko
+    // wybór odnogi, a postęp po planszy i tak policzy się z dystansu.
+    forkRoll = d6();
+    const win = (tile.faces || []).includes(forkRoll);
+    abs = base + Number(win ? tile.target : tile.alt_target);
+    note = win ? 'fork_win' : 'fork_lose';
   } else if (tile && !invertBoard && (tile.kind === 'ladder' || tile.kind === 'snake')) {
     // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
     // zachowując bieżące okrążenie jako bazę.
@@ -2316,14 +2343,14 @@ function slResolveTileEffect(landedAbs, board, invertBoard = false) {
     tilePoints += tile.value;
     note = 'bonus';
   }
-  return { abs, tilePoints, note };
+  return { abs, tilePoints, note, forkRoll };
 }
 
 // Wykonuje pojedynczy krok ruchu o `roll` pól, uwzględniając węże/drabiny/bonusy.
 // Zwraca { absAfter, tilePoints, note } dla tego kroku.
 function slStepMove(absBefore, roll, board, invertBoard = false) {
   const resolved = slResolveTileEffect(absBefore + roll, board, invertBoard);
-  return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note };
+  return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note, forkRoll: resolved.forkRoll };
 }
 
 // ── KNOCKBACK ──
@@ -2457,6 +2484,9 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
       slLogActivity(occ.player_id, 'knockback', `🪜 Z pola ${knockedTile} wjechał drabiną na ${entry.to_tile}`, turnRef);
     } else if (resolved.note === 'snake') {
       slLogActivity(occ.player_id, 'knockback', `🐍 Z pola ${knockedTile} zjechał wężem na ${entry.to_tile}`, turnRef);
+    } else if (resolved.forkRoll != null) {
+      // Wypchnięty na rozwidloną drabinę też rzuca o odnogę — to ten sam efekt pola.
+      slLogActivity(occ.player_id, 'knockback', `🪜🎲 Z pola ${knockedTile} na rozwidloną drabinę: wypadło ${resolved.forkRoll} → pole ${entry.to_tile}`, turnRef);
     }
 
     pushedIds.add(occ.player_id);
@@ -2532,7 +2562,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
 // Buduje publiczny opis planszy (do rysowania w UI). Front nie zna żadnego kształtu na
 // sztywno: rysuje pola tam, gdzie każe `path`, więc nowy sezon = nowy plik, bez zmian w JS.
 function slBoardPayload() {
-  const tiles = db.prepare('SELECT position, kind, target, value FROM sl_board ORDER BY position').all();
+  const tiles = db.prepare('SELECT position, kind, target, value, alt_target, faces FROM sl_board ORDER BY position').all().map(slBoardRow);
   return {
     id: slBoard.id, name: slBoard.name, theme: slBoard.theme, effects: slBoard.effects,
     size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
@@ -3029,11 +3059,17 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const from_abs = abs;
     let tilePoints = 0;
     const notes = [];
+    let fork = null; // { roll, win, to_tile } gdy ruch wszedł na rozwidloną drabinę
+    const noteFork = (r) => {
+      if (r.forkRoll == null) return;
+      fork = { roll: r.forkRoll, win: r.note === 'fork_win', to_tile: slTileOf(r.abs != null ? r.abs : r.absAfter) };
+    };
     for (const roll of effectiveRolls) {
       const step = slStepMove(abs, roll, board, invertBoard);
       abs = step.absAfter;
       tilePoints += step.tilePoints;
       if (step.note) notes.push(step.note);
+      noteFork(step);
     }
 
     let curseCoinSteal = 0;
@@ -3050,6 +3086,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
         abs = resolved.abs;
         tilePoints += resolved.tilePoints;
         if (resolved.note) notes.push(resolved.note);
+        noteFork(resolved);
       } else if (curseVariant === 7) {
         tilePoints = 0; // BEZ BONUSU: pole bonusowe tego ruchu nie liczy się
       }
@@ -3109,8 +3146,10 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       WHERE player_id = ?
     `).run(abs, newLaps, earned - curseCoinSteal, earned, today, moveSeq, playerId);
 
+    // Rozwidlenie dopisujemy po ludzku — sam znacznik [fork_win] nic by nikomu nie mówił.
+    const forkTxt = fork ? ` 🪜🎲 rozwidlenie: wypadło ${fork.roll} → ${fork.win ? 'górą' : 'krótszą odnogą'} na pole ${fork.to_tile}` : '';
     slLogActivity(playerId, 'roll',
-      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`, turnRef);
+      `🎲 ${rolls.join('+')} → pole ${slTileOf(abs)} (+${earned} pkt)${notes.length ? ' [' + notes.join(', ') + ']' : ''}${forkTxt} (ruch ${moveSeq}/${SL_DAILY_ROLLS})`, turnRef);
     if (curseVariant) {
       slLogActivity(playerId, 'curse_fired',
         `💀 Klątwa ${SL_CURSE_LABELS[curseVariant]}: ${SL_CURSE_DESCRIPTIONS[curseVariant]}${curseCoinSteal > 0 ? ` (-${curseCoinSteal} coins)` : ''}`, turnRef);
@@ -3144,6 +3183,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       curse_label: curseVariant ? SL_CURSE_LABELS[curseVariant] : null,
       curse_coin_steal: curseCoinSteal,
       knockback,
+      fork,
       boss_hit: bossHit,
       rolls_used_today: moveSeq
     };
@@ -3184,11 +3224,16 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     if (result.notes.includes('snake')) {
       slEmit('tile_landing', () => `🐍 **${nickname}** wdepnął na węża i zjechał na pole **${result.to_tile}**.`);
     }
+    if (result.fork) {
+      slEmit('tile_landing', () => result.fork.win
+        ? `🪜🎲 **${nickname}** wszedł na rozwidloną drabinę, wyrzucił **${result.fork.roll}** i poszedł górą na pole **${result.fork.to_tile}**!`
+        : `🪜🎲 **${nickname}** wszedł na rozwidloną drabinę, wyrzucił **${result.fork.roll}** — krótsza odnoga, pole **${result.fork.to_tile}**.`);
+    }
     if (result.knockback && result.knockback.length) {
       // Wypchnięcie kończy się na `knocked_tile`; drabina/wąż to DRUGI ruch, więc mówimy
       // o nim osobno („→ pole 3, a stamtąd 🪜 na 17"), zamiast pokazywać samo pole końcowe
       // jako miejsce wypchnięcia. Inaczej wychodziło „wypchnięty → pole 17" przy cofnięciu.
-      const extraFor = k => (k.tile_effect === 'ladder' ? `, a stamtąd 🪜 drabiną na **${k.to_tile}**`
+      const extraFor = k => (k.tile_effect === 'ladder' || k.tile_effect === 'fork_win' || k.tile_effect === 'fork_lose' ? `, a stamtąd 🪜 drabiną na **${k.to_tile}**`
         : k.tile_effect === 'snake' ? `, a stamtąd 🐍 wężem na **${k.to_tile}**`
         : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
         : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} coins na rzecz ${k.stolen_by}` : '');

@@ -92,8 +92,11 @@ module.exports = {
   loop_label: [-0.3, -0.18],
 
   // Łączniki wybrane tak, żeby żaden nie przechodził przez inne pole ani przez mostek.
-  // Drabina nad przewężeniem (4 → 28) to skrót górą: omija cały dół prawej pętli.
-  ladders: [[4, 28], [10, 26], [33, 41]],
+  ladders: [[10, 26], [33, 41]],
+  // ROZWIDLONA drabina nad przewężeniem. Zwykła 4 → 28 omijała cały dół prawej pętli
+  // (+24 pola) i była za mocna. Teraz wejście na 4 to dodatkowy rzut: 3 albo 6 = górą
+  // na 28, cokolwiek innego = krótsza odnoga na 11. Średnio ~+13 zamiast +24.
+  forks: [[4, 28, 11, [3, 6]]],
   // Pajęcza nić (29 → 9) spada tuż przy mostku, zaraz po tym, jak ktoś wszedł drabiną 10.
   snakes: [[25, 12], [29, 9], [44, 31]],
   // Dynie zamiast gwiazdek. Celowo skromniej niż na klasycznej planszy (5 dyń, razem
@@ -102,9 +105,6 @@ module.exports = {
   bonuses: [[2, 10], [14, 20], [19, 25], [23, 15], [36, 20]],
 
   marks: { ladder: '🪜', snake: '🐍', bonus: '🎃' },
-  // Pionek-nietoperz: zdjęcie gracza zostaje okrągłe (twarz musi być rozpoznawalna),
-  // a po bokach dostaje skrzydła. Mój nietoperz ma skrzydła w kolorze „to ja".
-  pawn: 'bat',
   confetti: ['🎃', '👻', '🦇', '🍬', '🕸️'],
 
   // Dekoracje: środek [x, y] w kratkach, `size` = szerokość w kratkach. Stoją POD drogą
