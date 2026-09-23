@@ -119,6 +119,14 @@ module.exports = {
     candy: { per_day: 3, max_on_board: 6 },
   },
 
+  // BOSS HALLOWEENOWY: od 12.10 UI go zapowiada, pierwsza nowa edycja bossa po 19.10 to
+  // Dynia Zagłady, a jej termin to zawsze noc Halloween (31.10, 20:00). Silniejsza od
+  // zwykłego bossa (×1.25) i dostaje tyle HP, ile dni roboczych zostaje do ataku.
+  special_boss: {
+    name: 'Dynia Zagłady', emoji: '🎃',
+    announce_from: '10-12', start_from: '10-19', attack_at: '10-31 20', hp_factor: 1.25,
+  },
+
   // Garderoba (sklep z kostiumami) jako chatka czarownicy w lewym dolnym rogu.
   shop_at: [1.25, 9.75],
 

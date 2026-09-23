@@ -777,17 +777,53 @@ document.getElementById('board-area').addEventListener('click', e => { if (e.tar
 function renderBossChip(g) {
   const chip = document.getElementById('boss-chip');
   const c = g.coop;
+  renderSpecialBossTeaser(c);
   if (!c || !c.boss) { chip.hidden = true; slToggleCoopPop(false); return; }
   const b = c.boss;
+  const sp = c.special_boss && c.special_boss.active ? c.special_boss : null;
   chip.hidden = false;
   chip.classList.toggle('is-low', b.percent <= 25);
+  chip.classList.toggle('is-special', !!sp);
   chip.innerHTML = `
-    <span class="boss-chip-name">👹 ${esc(b.name)}</span>
+    <span class="boss-chip-name">${sp ? esc(sp.emoji) : '👹'} ${esc(b.name)}</span>
     <span class="boss-chip-bar"><span class="boss-chip-fill" style="width:${b.percent}%"></span></span>
     <span class="boss-chip-hp mono">${b.hp}/${b.max_hp}</span>
     <span class="boss-chip-arrow" aria-hidden="true">▾</span>`;
   chip.title = `${b.name}: ${b.hp}/${b.max_hp} HP — kliknij, żeby zobaczyć walkę i wpłacić coins`;
 }
+// Zapowiedź bossa sezonowego (np. Dynia Zagłady): pigułka obok kafelka z odliczaniem
+// do ataku. Widać ją od `announce_from`, także zanim ten boss w ogóle się pojawi —
+// po to jest zapowiedź.
+function renderSpecialBossTeaser(c) {
+  let el = document.getElementById('special-boss-teaser');
+  const sp = c && c.special_boss;
+  if (!sp) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('span');
+    el.id = 'special-boss-teaser';
+    el.className = 'special-boss-teaser';
+    const chip = document.getElementById('boss-chip');
+    chip.parentNode.insertBefore(el, chip);
+  }
+  const when = new Date(sp.attack_at).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', weekday: 'short', day: 'numeric', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  el.dataset.until = sp.attack_at;
+  el.title = sp.active
+    ? `${sp.name} to teraz boss. Jeśli przeżyje do ${when}, zaatakuje wszystkich.`
+    : `${sp.name} nadciąga — pojawi się jako następny boss i zaatakuje ${when}.`;
+  el.innerHTML = `${esc(sp.emoji)} ${sp.active ? 'atak' : `${esc(sp.name)} nadciąga · atak`} <span class="mono" id="special-boss-countdown"></span>`;
+  updateSpecialBossCountdown();
+}
+function updateSpecialBossCountdown() {
+  const el = document.getElementById('special-boss-teaser');
+  const out = document.getElementById('special-boss-countdown');
+  if (!el || !out) return;
+  const ms = Date.parse(el.dataset.until) - Date.now();
+  if (ms <= 0) { out.textContent = 'teraz!'; return; }
+  const d = Math.floor(ms / 86400000), h = Math.floor((ms % 86400000) / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  out.textContent = d > 0 ? `za ${d}d ${h}h` : `za ${h}h ${m}m`;
+}
+setInterval(updateSpecialBossCountdown, 30000);
+
 function slToggleCoopPop(open) {
   const pop = document.getElementById('coop-pop');
   const chip = document.getElementById('boss-chip');

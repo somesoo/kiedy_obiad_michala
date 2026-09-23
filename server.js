@@ -2823,7 +2823,8 @@ const boss = require('./lib/boss')({
   slEnsureState,
   slEmit, postDiscord: slPostDiscord,
   snakesUrl: () => SNAKES_URL,
-  todayWaw, addBusinessDaysMs
+  todayWaw, addBusinessDaysMs,
+  getSpecialBoss: () => slSpecialBossNow()
 });
 boss.initSchema();
 boss.runStartupMigrations();
@@ -2832,6 +2833,24 @@ boss.registerRoutes(app, {
   buildState: playerId => slBuildState(playerId)
 });
 boss.startDeadlineScheduler();
+
+// Boss sezonowy (special_boss w pliku planszy) przeliczony na TEN rok: daty w pliku są
+// bez roku, żeby sezon działał co roku bez zmian. `key` odróżnia edycje z różnych lat —
+// Dynia z 2026 nie blokuje Dyni z 2027.
+function slSpecialBossNow() {
+  const sb = slBoard.special_boss;
+  if (!sb) return null;
+  const y = Number(todayWaw().slice(0, 4));
+  const at = (mmdd, hour = 0) => {
+    const [m, d] = mmdd.split('-').map(Number);
+    return warsawWallTimeToMs(y, m, d, hour);
+  };
+  const [attackDay, attackHour] = sb.attack_at.split(' ');
+  return {
+    key: `${slBoard.id}-${y}`, name: sb.name, emoji: sb.emoji, hp_factor: sb.hp_factor,
+    announceMs: at(sb.announce_from), startMs: at(sb.start_from), attackMs: at(attackDay, Number(attackHour))
+  };
+}
 
 // ── KOSTIUMY ── czysta kosmetyka pionka za coins (lib/costumes.js). Ta sama fabryka co
 // boss: helpery przychodzą w deps, jeden uchwyt bazy.

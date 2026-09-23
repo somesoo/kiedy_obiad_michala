@@ -1654,3 +1654,25 @@
 .candy-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 4px; border-radius: 4px; }
 .candy-row.is-me { background: rgba(200, 241, 53, 0.08); color: var(--accent); }
 .candy-note { margin-top: 5px; font-size: 10px; line-height: 1.35; }
+
+/* Boss sezonowy: kafelek w barwach dyni + pigułka z odliczaniem do ataku. */
+.boss-chip.is-special { border-color: var(--gold); }
+.boss-chip.is-special .boss-chip-fill { background: linear-gradient(90deg, #FF5A1F, #FFB347); }
+.special-boss-teaser {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--gold);
+  background: rgba(255, 138, 31, 0.12);
+  color: var(--gold);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: help;
+  animation: special-teaser 2.4s ease-in-out infinite;
+}
+/* Do prawej dosuwa się tylko PIERWSZY z elementów prawej grupy paska. */
+.game-bar-wardrobe:not([hidden]) ~ .special-boss-teaser,
+.special-boss-teaser ~ .boss-chip { margin-left: 0; }
+@keyframes special-teaser { 50% { box-shadow: 0 0 12px rgba(255, 138, 31, 0.55); } }
+@media (prefers-reduced-motion: reduce) { .special-boss-teaser { animation: none; } }
