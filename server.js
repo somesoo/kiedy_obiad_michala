@@ -1333,9 +1333,13 @@ app.post('/api/admin/discord-test', async (req, res) => {
 //  • Wydarzenie kooperacyjne: gracze dorzucają punkty do wspólnej puli; po przekroczeniu
 //    progu rusza event „bossowy", a po jego ukończeniu kontrybutorzy dostają nagrody.
 
-const SL_BOARD_COLS = 7;                     // szerokość planszy w polach
-const SL_BOARD_ROWS = 7;                     // wysokość planszy w polach
-const SL_BOARD_SIZE = SL_BOARD_COLS * SL_BOARD_ROWS;  // 49 pól (indeks 0..48), potem pętla
+// Kształt i układ planszy nie mieszkają w kodzie — każdy sezon to plik boards/<id>.js
+// (patrz lib/seasons.js). Aktywny sezon trzyma `slBoard`, ustawiany przy starcie
+// i przy zmianie sezonu z panelu (slInstallBoard). Liczba pól bywa różna w różnych
+// sezonach, dlatego rozmiar czytamy zawsze przez slBoardSize(), nigdy ze stałej.
+const seasons = require('./lib/seasons');
+let slBoard = seasons.get(seasons.DEFAULT_ID);
+function slBoardSize() { return slBoard.size; }
 const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
 const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
 const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
@@ -1559,7 +1563,7 @@ db.exec(`
 
   -- Konfiguracja wspólnej planszy: typ pola i (dla węża/drabiny) cel skoku.
   CREATE TABLE IF NOT EXISTS snakes.sl_board (
-    position INTEGER PRIMARY KEY,       -- 0..SL_BOARD_SIZE-1
+    position INTEGER PRIMARY KEY,       -- 0..(liczba pól aktywnego sezonu - 1)
     kind     TEXT NOT NULL,             -- 'ladder' | 'snake' | 'bonus'
     target   INTEGER,                   -- pole docelowe (ladder/snake), NULL dla bonus
     value    INTEGER DEFAULT 0          -- punkty bonusowe (bonus), 0 dla ladder/snake
@@ -2113,86 +2117,72 @@ function slMetaSet(key, value) {
   `).run(key, String(value));
 }
 
-// ── UKŁAD PLANSZY 7×7 ──
-// Drabiny ciągną w górę, węże w dół, pola bonusowe dają punkty bez przesunięcia.
-// Rozkład dobrany pod 49 pól: 4 drabiny / 4 węże / 5 bonusów (~27% pól to pola specjalne).
-// Żaden cel skoku nie ląduje na innym polu specjalnym (brak reakcji łańcuchowych).
-const SL_LADDERS = [               // [from, to] — to > from
-  [3, 17], [8, 24], [21, 39], [28, 44]
-];
-const SL_SNAKES = [                // [from, to] — to < from
-  [12, 2], [19, 7], [36, 20], [45, 29]
-];
-const SL_BONUSES = [               // [position, points]
-  [5, 15], [11, 20], [23, 25], [34, 30], [41, 35]
-];
-
-function slSeedBoardRows() {
+// ── SEZON PLANSZY ──
+// sl_board to LUSTRO aktywnego pliku sezonu: przy każdym starcie i każdej zmianie sezonu
+// kasujemy je i zaszczepiamy od nowa. Tabela nie trzyma stanu gracza (to robi sl_state),
+// więc reseed jest bezpieczny — poprawka w pliku (np. przesunięty wąż) wchodzi po
+// restarcie bez żadnej wersji układu. Dawne SL_BOARD_LAYOUT_VERSION i skalowanie pozycji
+// ze 100 na 49 pól (slMigrateBoard) już się na produkcji wykonały i zostały usunięte.
+function slSeedBoardRows(season) {
+  db.exec('DELETE FROM sl_board');
   const insert = db.prepare('INSERT INTO sl_board (position, kind, target, value) VALUES (?, ?, ?, ?)');
-  for (const [from, to] of SL_LADDERS) insert.run(from, 'ladder', to, 0);
-  for (const [from, to] of SL_SNAKES) insert.run(from, 'snake', to, 0);
-  for (const [pos, val] of SL_BONUSES) insert.run(pos, 'bonus', null, val);
+  for (const t of season.tiles) insert.run(t.position, t.kind, t.target, t.value);
 }
 
-// ── MIGRACJA ROZMIARU PLANSZY ──
-// Plansza schudła ze 100 do 49 pól. Pozycji graczy NIE zerujemy — skalujemy je
-// proporcjonalnie (abs_pos × nowy/stary), więc każdy zostaje mniej więcej tam, gdzie był
-// (ten sam procent okrążenia), a punkty, salda i ekwipunek zostają nietknięte.
-// Migracja jest idempotentna: znacznik `board_size` w sl_meta pilnuje, by poszła raz.
-// Bump przy KAŻDEJ zmianie SL_LADDERS/SL_SNAKES/SL_BONUSES — wymusza reseed na już
-// działających wdrożeniach, żeby zmiana układu (nie tylko rozmiaru) też dotarła.
-const SL_BOARD_LAYOUT_VERSION = 2;
-
-function slMigrateBoard() {
-  const rows = db.prepare('SELECT COUNT(*) AS c, MAX(position) AS m FROM sl_board').get();
-  const stored = slMetaGet('board_size');
-
-  // Świeża instalacja — po prostu zaszczep planszę.
-  if (Number(rows.c) === 0) {
-    transaction(() => slSeedBoardRows());
-    slMetaSet('board_size', SL_BOARD_SIZE);
-    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
-    console.log(`Snakes & Ladders: plansza zaseedowana ${SL_BOARD_COLS}×${SL_BOARD_ROWS} (${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów)`);
-    return;
+// Nowy sezon = wszyscy na polu 0. Licznik okrążeń ZOSTAJE: laps i tak wyliczamy z abs_pos
+// (floor(abs_pos / liczba pól)), więc „pole 0 okrążenia N" to dokładnie laps × nowy rozmiar.
+// Punkty, coins i ekwipunek nietknięte.
+// `season_move_floor` = ostatni ruch zagrany na poprzedniej planszy. Cofanie ruchu i dnia
+// odmawia dla ruchów o id ≤ tej wartości: ich from_abs to pozycja na INNEJ planszy (inny
+// rozmiar, inne pola), więc przywrócenie jej postawiłoby gracza w losowym miejscu.
+function slResetPositionsToStart(newSize) {
+  const upd = db.prepare('UPDATE sl_state SET abs_pos = ? WHERE player_id = ?');
+  let n = 0;
+  for (const st of db.prepare('SELECT player_id, laps FROM sl_state').all()) {
+    upd.run(Number(st.laps) * newSize, st.player_id);
+    n++;
   }
-
-  // Stary rozmiar: z metadanych, a gdy ich nie ma (baza sprzed tej wersji) — z układu pól.
-  const oldSize = stored ? Number(stored) : (Number(rows.m) >= SL_BOARD_SIZE ? 100 : SL_BOARD_SIZE);
-  if (oldSize === SL_BOARD_SIZE) {
-    slMetaSet('board_size', SL_BOARD_SIZE);
-  } else {
-    const scaled = transaction(() => {
-      let n = 0;
-      for (const st of db.prepare('SELECT player_id, abs_pos FROM sl_state').all()) {
-        const newAbs = Math.round(Number(st.abs_pos) * SL_BOARD_SIZE / oldSize);
-        db.prepare('UPDATE sl_state SET abs_pos = ?, laps = ? WHERE player_id = ?')
-          .run(newAbs, Math.floor(newAbs / SL_BOARD_SIZE), st.player_id);
-        n++;
-      }
-      db.exec('DELETE FROM sl_board');
-      slSeedBoardRows();
-      return n;
-    });
-    slMetaSet('board_size', SL_BOARD_SIZE);
-    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
-    console.log(`Snakes & Ladders: MIGRACJA planszy ${oldSize} → ${SL_BOARD_SIZE} pól, przeskalowano pozycje ${scaled} graczy (punkty i ekwipunek bez zmian)`);
-    return;
-  }
-
-  // Rozmiar bez zmian — ale sam UKŁAD (które pola są czym) mógł się zmienić w kodzie.
-  // sl_board nie trzyma stanu gracza (to robi sl_state), więc reseed jest tu bezpieczny:
-  // nie rusza pozycji, punktów ani ekwipunku nikogo — zmienia tylko co stoi na której kratce.
-  const storedLayout = Number(slMetaGet('board_layout_version') || 0);
-  if (storedLayout !== SL_BOARD_LAYOUT_VERSION) {
-    transaction(() => {
-      db.exec('DELETE FROM sl_board');
-      slSeedBoardRows();
-    });
-    slMetaSet('board_layout_version', SL_BOARD_LAYOUT_VERSION);
-    console.log(`Snakes & Ladders: układ planszy zaktualizowany (wersja ${SL_BOARD_LAYOUT_VERSION}) — ${SL_LADDERS.length} drabin, ${SL_SNAKES.length} węży, ${SL_BONUSES.length} bonusów`);
-  }
+  const last = db.prepare('SELECT MAX(id) AS m FROM sl_moves').get().m;
+  slMetaSet('season_move_floor', String(last == null ? 0 : Number(last)));
+  return n;
 }
-slMigrateBoard();
+
+function slSeasonMoveFloor() {
+  return Number(slMetaGet('season_move_floor') || 0);
+}
+
+// Ustawia sezon jako aktywny (baza + pamięć). resetPositions = wszyscy na start.
+function slInstallBoard(season, resetPositions) {
+  const moved = transaction(() => {
+    slSeedBoardRows(season);
+    const n = resetPositions ? slResetPositionsToStart(season.size) : 0;
+    slMetaSet('active_board', season.id);
+    slMetaSet('board_size', season.size);
+    return n;
+  });
+  slBoard = season; // dopiero po udanej transakcji — przy błędzie zostaje stara plansza
+  return moved;
+}
+
+(function slActivateBoardOnStartup() {
+  const wanted = slMetaGet('active_board') || seasons.DEFAULT_ID;
+  let season = seasons.get(wanted);
+  if (!season) {
+    // Plik zniknął albo ma błąd (szczegóły w logu wyżej, z lib/seasons.js). Wracamy na
+    // plansze podstawową zamiast wstać bez planszy.
+    console.error(`Snakes & Ladders: sezon "${wanted}" niedostępny — wracam na "${seasons.DEFAULT_ID}"`);
+    season = seasons.get(seasons.DEFAULT_ID);
+  }
+  // Brak board_size = świeża instalacja, nikt jeszcze nie stoi na planszy. Reset pozycji
+  // tylko wtedy, gdy plansza pod graczami faktycznie się zmieniła: inny sezon niż zapisany
+  // (fallback wyżej) albo ten sam plik po edycji ma inną liczbę pól — wtedy stare numery
+  // pól mogłyby w ogóle nie istnieć.
+  const storedSize = slMetaGet('board_size');
+  const changed = storedSize != null && (season.id !== wanted || Number(storedSize) !== season.size);
+  const moved = slInstallBoard(season, changed);
+  console.log(`Snakes & Ladders: sezon "${season.id}" (${season.name}) — ${season.size} pól, siatka ${season.cols}×${season.rows}`
+    + (changed ? `; plansza się zmieniła, ${moved} graczy wraca na pole 0` : ''));
+})();
 
 function slBoardMap() {
   const map = {};
@@ -2246,9 +2236,10 @@ function slDailyRollsFor(st, today) {
   return SL_DAILY_ROLLS + Math.max(0, extra);
 }
 
-// Pola na planszy = abs_pos zwinięty do 0..SL_BOARD_SIZE-1
+// Pola na planszy = abs_pos zwinięty do 0..(liczba pól - 1)
 function slTileOf(absPos) {
-  return ((absPos % SL_BOARD_SIZE) + SL_BOARD_SIZE) % SL_BOARD_SIZE;
+  const size = slBoardSize();
+  return ((absPos % size) + size) % size;
 }
 
 // URL zdjęcia profilowego gracza — z parametrem wersji (data ostatniej zmiany), żeby
@@ -2411,7 +2402,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
       UPDATE sl_state
       SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?
       WHERE player_id = ?
-    `).run(toAbs, Math.floor(toAbs / SL_BOARD_SIZE), bonusPoints - stolen, bonusPoints, occ.player_id);
+    `).run(toAbs, Math.floor(toAbs / slBoardSize()), bonusPoints - stolen, bonusPoints, occ.player_id);
 
     // Wypchnięty mógł wylądować na polu bonusowym — to jego punkty z BONUSU, nie z kostki:
     // nie rzucał, tylko został tam przesunięty.
@@ -2538,10 +2529,16 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
 })();
 
 
-// Buduje publiczny opis planszy (do rysowania w UI).
+// Buduje publiczny opis planszy (do rysowania w UI). Front nie zna żadnego kształtu na
+// sztywno: rysuje pola tam, gdzie każe `path`, więc nowy sezon = nowy plik, bez zmian w JS.
 function slBoardPayload() {
   const tiles = db.prepare('SELECT position, kind, target, value FROM sl_board ORDER BY position').all();
-  return { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS, tiles };
+  return {
+    id: slBoard.id, name: slBoard.name, theme: slBoard.theme, effects: slBoard.effects,
+    size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
+    path: slBoard.path, loop: slBoard.loop, tiles,
+    lap_points: SL_POINTS_PER_LAP
+  };
 }
 
 // Pozycje wszystkich graczy na wspólnej planszy (widoczne dla każdego).
@@ -3047,7 +3044,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
         const landedTile = slTileOf(abs);
         const base = abs - landedTile;
         const jitter = (1 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
-        const jitteredTile = Math.min(SL_BOARD_SIZE - 1, Math.max(0, landedTile + jitter));
+        const jitteredTile = Math.min(slBoardSize() - 1, Math.max(0, landedTile + jitter));
         const resolved = slResolveTileEffect(base + jitteredTile, board);
         abs = resolved.abs;
         tilePoints += resolved.tilePoints;
@@ -3068,8 +3065,8 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const pipPoints = rolls.reduce((a, r) => a + r, 0) * SL_POINTS_PER_PIP;
     const distance = Math.max(0, abs - from_abs);
     const progressPoints = distance * SL_POINTS_PER_TILE;
-    const oldLaps = Math.floor(from_abs / SL_BOARD_SIZE);
-    const newLaps = Math.floor(abs / SL_BOARD_SIZE);
+    const oldLaps = Math.floor(from_abs / slBoardSize());
+    const newLaps = Math.floor(abs / slBoardSize());
     const lapPoints = Math.max(0, newLaps - oldLaps) * SL_POINTS_PER_LAP;
     let earned = pipPoints + progressPoints + lapPoints + tilePoints;
 
@@ -3553,7 +3550,7 @@ app.get('/api/snakes/admin/settings', (req, res) => {
     defaults: SL_EVENT_DEFAULTS,
     webhook_configured: !!SL_DISCORD_WEBHOOK_URL,
     summary_hour: SL_SUMMARY_HOUR,
-    board: { size: SL_BOARD_SIZE, cols: SL_BOARD_COLS, rows: SL_BOARD_ROWS },
+    board: { id: slBoard.id, name: slBoard.name, size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows },
     powerup_costs: SL_POWERUP_COSTS,
     // Panel pokazuje koszty pod nazwami, które widzi gracz — inaczej admin czytałby
     // surowy klucz `double_move`, gdy reszta gry mówi o nim „Extra Move".
@@ -3597,6 +3594,31 @@ app.post('/api/snakes/admin/reset', (req, res) => {
   slEmit('coop_completed', () => '🔄 **Admin zresetował grę Snakes & Ladders** — wszyscy wracają na start z zerowym kontem.');
 
   res.json({ success: true, ...out });
+});
+
+// GET /api/snakes/admin/seasons?password= — lista sezonów z boards/ (tylko poprawne
+// pliki; błędne lądują w logu przy starcie) i to, który jest aktywny.
+app.get('/api/snakes/admin/seasons', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  res.json({ active: slBoard.id, seasons: seasons.list() });
+});
+
+// POST /api/snakes/admin/season { password, board } — przełącza sezon planszy. Wszyscy
+// wracają na pole 0 (okrążenia, punkty, coins i ekwipunek zostają), a ruchów sprzed zmiany
+// nie da się już cofnąć (patrz slResetPositionsToStart). Ponowne włączenie AKTYWNEGO
+// sezonu też resetuje pozycje — to świadome: „zacznijmy sezon od nowa".
+app.post('/api/snakes/admin/season', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const season = seasons.get(String(req.body.board || ''));
+  if (!season) return res.status(404).json({ error: 'Nie ma takiego sezonu (albo jego plik ma błąd — patrz logi serwera).' });
+
+  const previous = slBoard.id;
+  const moved = slInstallBoard(season, true);
+  console.log(`Snakes/Admin: sezon ${previous} → ${season.id} (${season.size} pól), ${moved} graczy na polu 0`);
+  slPostDiscord({ content: `🗺️ **Nowy sezon planszy: ${season.name}!** Wszyscy startują od pola 0 — punkty i coins zostają.` })
+    .catch(err => console.error('Snakes/Discord [season]:', err.message));
+
+  res.json({ success: true, active: season.id, players_moved: moved, board: slBoardPayload() });
 });
 
 // GET /api/snakes/admin/players — lista graczy z ich stanem w Snakes & Ladders
@@ -4051,7 +4073,7 @@ function slRollbackDay(date) {
     for (const m of movers) {
       const startAbs = Number(firstOfDay.get(m.player_id, date).from_abs);
       const pts = Number(m.points);
-      restore.run(startAbs, Math.floor(startAbs / SL_BOARD_SIZE), pts, pts, m.player_id);
+      restore.run(startAbs, Math.floor(startAbs / slBoardSize()), pts, pts, m.player_id);
       details.push({
         player_id: m.player_id, nickname: m.nickname, moves: Number(m.moves),
         points_removed: pts, back_to_tile: slTileOf(startAbs)
@@ -4124,6 +4146,13 @@ app.post('/api/snakes/admin/day/rollback', (req, res) => {
     });
   }
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
+  // Dzień z ruchami sprzed zmiany sezonu odpada w całości: ich from_abs to pole na innej
+  // planszy (patrz slResetPositionsToStart). Częściowe cofnięcie dnia byłoby gorsze niż żadne.
+  const preSeason = db.prepare('SELECT COUNT(*) AS c FROM sl_moves WHERE move_date = ? AND id <= ?')
+    .get(date, slSeasonMoveFloor()).c;
+  if (Number(preSeason) > 0) {
+    return res.status(409).json({ error: `Tego dnia (${date}) zmienił się sezon planszy — ruchy sprzed zmiany stały na innej planszy, więc dnia nie da się cofnąć.` });
+  }
   const out = slRollbackDay(date);
   console.log(`Snakes/Admin: cofnięto dzień ${date} — ${out.players} graczy, ${out.moves_deleted} ruchów, ${out.points_removed} pkt odjęte`);
   res.json({ success: true, ...out });
@@ -4149,7 +4178,7 @@ app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
     v != null && (!Number.isInteger(v) || v < min || (max != null && v > max)) ? label : null;
   const err = bad(balance, 0, null, 'Coins muszą być liczbą całkowitą ≥ 0.')
     || bad(totalPoints, 0, null, 'Punkty muszą być liczbą całkowitą ≥ 0.')
-    || bad(tile, 0, SL_BOARD_SIZE - 1, `Pole musi być z zakresu 0–${SL_BOARD_SIZE - 1}.`)
+    || bad(tile, 0, slBoardSize() - 1, `Pole musi być z zakresu 0–${slBoardSize() - 1}.`)
     || bad(laps, 0, null, 'Okrążenia muszą być liczbą całkowitą ≥ 0.')
     || bad(rollsToday, 0, null, 'Zużyte rzuty muszą być liczbą całkowitą ≥ 0.')
     || bad(extraRolls, 0, SL_MAX_EXTRA_ROLLS, `Dodatkowe sloty: 0–${SL_MAX_EXTRA_ROLLS}.`);
@@ -4170,7 +4199,7 @@ app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
     // Admin podaje ją tak, jak ją widzi w UI, więc składamy z powrotem tutaj.
     const nextTile = tile != null ? tile : slTileOf(Number(st.abs_pos));
     const nextLaps = laps != null ? laps : Number(st.laps);
-    const nextAbs = nextLaps * SL_BOARD_SIZE + nextTile;
+    const nextAbs = nextLaps * slBoardSize() + nextTile;
 
     // Licznik zużytych rzutów liczy się dla dnia z last_move_date — ustawiając go ręcznie
     // trzeba przypiąć go do DZIŚ, inaczej zmiana nie miałaby żadnego skutku.
@@ -4320,6 +4349,8 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
   const out = transaction(() => {
     const move = db.prepare('SELECT * FROM sl_moves WHERE player_id = ? ORDER BY id DESC LIMIT 1').get(playerId);
     if (!move) return { none: true };
+    // Ruch z poprzedniego sezonu: from_abs wskazuje pole na innej planszy.
+    if (Number(move.id) <= slSeasonMoveFloor()) return { before_season: true };
 
     const st = slEnsureState(playerId);
     const fromAbs = Number(move.from_abs);
@@ -4331,7 +4362,7 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
       UPDATE sl_state SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?),
         balance = MAX(0, balance - ?), rolls_today = ?
       WHERE player_id = ?
-    `).run(fromAbs, Math.floor(fromAbs / SL_BOARD_SIZE), pts, pts, nextRolls, playerId);
+    `).run(fromAbs, Math.floor(fromAbs / slBoardSize()), pts, pts, nextRolls, playerId);
 
     db.prepare('DELETE FROM sl_moves WHERE id = ?').run(move.id);
     // Ruch ma własne wiersze rozbicia oznaczone kolumną "ref" — kasujemy dokładnie je, żeby
@@ -4351,6 +4382,7 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
   });
 
   if (out.none) return res.status(400).json({ error: 'Ten gracz nie ma żadnego zapisanego ruchu.' });
+  if (out.before_season) return res.status(409).json({ error: 'Ostatni ruch tego gracza był jeszcze na planszy poprzedniego sezonu — nie da się go cofnąć.' });
   res.json({ success: true, nickname: player.nickname, ...out });
 });
 
