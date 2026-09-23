@@ -2223,9 +2223,26 @@ function slFindOccupant(tile, excludeIds) {
 // wypchnięcie trafia też do dziennika aktywności ofiary (i zbijającego, przy kradzieży).
 // Pole 0 (start planszy/okrążenia) jest bezpieczne — stojących tam graczy NIE da się
 // wypchnąć, więc kaskada urywa się, gdy trafi na kogoś stojącego akurat na starcie.
+// Odmiana „pole/pola/pól" — dziennik czyta się jak zdanie, więc „-3 pól" kłuje w oczy.
+function slTilesWord(n) {
+  const abs = Math.abs(n);
+  if (abs === 1) return 'pole';
+  const last = abs % 10;
+  const lastTwo = abs % 100;
+  return last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14) ? 'pola' : 'pól';
+}
+
 function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) {
   const pushedIds = new Set([rollerPlayerId]);
   const chain = [];
+  // ── KOLEJNOŚĆ WPISÓW W DZIENNIKU ──
+  // Dziennik jest sortowany `id DESC` (najnowsze u góry), więc kaskada zapisana
+  // chronologicznie czytała się OD KOŃCA: pierwszy na ekranie był ostatni domino.
+  // Dlatego wpisy najpierw zbieramy tutaj, a zapisujemy dopiero po pętli, w odwróconej
+  // kolejności kroków — wtedy DESC ustawia je z powrotem chronologicznie.
+  // NIE „naprawiaj" tego z powrotem na zapis w locie: to nie jest pomyłka, tylko
+  // jedyny sposób, żeby efekt domina dało się przeczytać z góry na dół.
+  const steps = [];
   let targetTile = slTileOf(landingAbsPos);
   let pusherId = rollerPlayerId;
   let pusherNickname = rollerNickname;
@@ -2268,10 +2285,15 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
       slLogPoints(pusherId, 'knockback', stolen);
     }
 
+    // Pole, na które gracz REALNIE został cofnięty — zanim zadziałała drabina/wąż.
+    // Bez tego dziennik sklejał dwa różne ruchy w jeden i wychodziło „z pola 7 → 17
+    // (-4 pola)", czyli skok DO PRZODU opisany jako cofnięcie o cztery pola.
+    const knockedTile = slTileOf(knockedAbs);
     const entry = {
       player_id: occ.player_id,
       nickname: occ.nickname,
       from_tile: slTileOf(fromAbs),
+      knocked_tile: knockedTile,
       to_tile: slTileOf(toAbs),
       tiles_back: tilesBack,
       tile_effect: resolved.note,
@@ -2281,12 +2303,24 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     };
     chain.push(entry);
 
-    const bits = [`z pola ${entry.from_tile} → ${entry.to_tile} (-${tilesBack} pól)`];
-    if (resolved.note === 'ladder') bits.push('🪜 i wjechał na drabinę!');
-    if (resolved.note === 'snake') bits.push('🐍 i zjechał wężem niżej!');
+    // Jeden krok kaskady = kilka wpisów, zapisywanych w takiej kolejności, żeby feed
+    // (DESC) pokazał je jako: kto zbił → dokąd wypchnięty → co go tam spotkało.
+    const step = [];
+
+    // Drabina i wąż to OSOBNY ruch, więc dostają własny wpis — o to prosił właściciel:
+    // najpierw „zbity na pole 3", potem „drabina z 3 na 17". Bonus zostaje w wierszu
+    // wypchnięcia, bo nie przesuwa pionka, tylko dosypuje punkty.
+    if (resolved.note === 'ladder') {
+      step.push([occ.player_id, `🪜 Z pola ${knockedTile} wjechał drabiną na ${entry.to_tile}`]);
+    } else if (resolved.note === 'snake') {
+      step.push([occ.player_id, `🐍 Z pola ${knockedTile} zjechał wężem na ${entry.to_tile}`]);
+    }
+
+    const bits = [`z pola ${entry.from_tile} → ${knockedTile} (-${tilesBack} ${slTilesWord(tilesBack)})`];
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
     if (stolen > 0) bits.push(`💰 stracił ${stolen} coins na rzecz ${pusherNickname}`);
-    slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`);
+    step.push([occ.player_id, `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`]);
+
     // Wypychający dostaje wpis ZAWSZE, także gdy nie było czego ukraść. Wcześniej ta linia
     // siedziała pod `if (stolen > 0)`, więc zbicie gracza z pustym portfelem nie zostawiało
     // po sobie w dzienniku ŻADNEGO śladu po stronie zbijającego — a to jego akcja i chce ją
@@ -2294,15 +2328,22 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname) 
     // UWAGA: w tym tekście nie może paść słowo „Wypchnięty". Cofanie całego dnia szuka ofiar
     // przez `detail LIKE '%Wypchnięty%'` na wpisach typu knockback (patrz /admin/day/rollback)
     // i policzyłoby zbijającego jako kogoś, kogo trzeba ręcznie przestawić na planszy.
-    slLogActivity(pusherId, 'knockback', stolen > 0
-      ? `💰 Zbiłeś ${occ.nickname} i zgarnąłeś ${stolen} coins!`
-      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} — nie miał ani jednego coina do zabrania.`);
+    step.push([pusherId, stolen > 0
+      ? `💰 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} i zgarnąłeś ${stolen} coins!`
+      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} — nie miał ani jednego coina do zabrania.`]);
+    steps.push(step);
 
     pushedIds.add(occ.player_id);
     pusherId = occ.player_id;
     pusherNickname = occ.nickname;
     if (fromAbs === toAbs) break; // brak realnej zmiany pozycji — koniec kaskady
     targetTile = slTileOf(toAbs);
+  }
+
+  // Kroki zapisujemy od OSTATNIEGO do pierwszego (patrz komentarz przy `steps`), żeby
+  // sortowanie `id DESC` ustawiło kaskadę z powrotem chronologicznie na ekranie.
+  for (let i = steps.length - 1; i >= 0; i--) {
+    for (const [playerId, detail] of steps[i]) slLogActivity(playerId, 'knockback', detail);
   }
   return chain;
 }
@@ -3011,13 +3052,16 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       slEmit('tile_landing', () => `🐍 **${nickname}** wdepnął na węża i zjechał na pole **${result.to_tile}**.`);
     }
     if (result.knockback && result.knockback.length) {
-      const extraFor = k => (k.tile_effect === 'ladder' ? ' 🪜 i wjechał na drabinę!'
-        : k.tile_effect === 'snake' ? ' 🐍 i zjechał wężem niżej!'
+      // Wypchnięcie kończy się na `knocked_tile`; drabina/wąż to DRUGI ruch, więc mówimy
+      // o nim osobno („→ pole 3, a stamtąd 🪜 na 17"), zamiast pokazywać samo pole końcowe
+      // jako miejsce wypchnięcia. Inaczej wychodziło „wypchnięty → pole 17" przy cofnięciu.
+      const extraFor = k => (k.tile_effect === 'ladder' ? `, a stamtąd 🪜 drabiną na **${k.to_tile}**`
+        : k.tile_effect === 'snake' ? `, a stamtąd 🐍 wężem na **${k.to_tile}**`
         : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
         : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} coins na rzecz ${k.stolen_by}` : '');
       slEmit('knockback', () => result.knockback.map((k, i) => i === 0
-        ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.to_tile}**${extraFor(k)}.`
-        : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.to_tile}**${extraFor(k)}.`
+        ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.knocked_tile}**${extraFor(k)}.`
+        : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.knocked_tile}**${extraFor(k)}.`
       ).join('\n'));
     }
     if (result.curse_variant) {
