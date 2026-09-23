@@ -283,20 +283,21 @@
         <div class="adm-stat" id="cfg-info">–</div>
       </div>
 
-      <div class="adm-card" style="border-color: var(--danger)">
-        <h3 style="color: var(--danger)">↩️ COFNIJ CAŁY DZIEŃ</h3>
+      <div class="adm-card" style="opacity:0.6">
+        <h3>↩️ COFNIJ CAŁY DZIEŃ <span style="font-size:11px;font-weight:400">— WYŁĄCZONE</span></h3>
         <div class="adm-note">
-          Kasuje wszystkie ruchy wskazanego dnia i stawia graczy tam, gdzie stali o 8:00 —
-          punkty i coins zarobione tego dnia znikają, dzienny limit rzutów (i sloty
-          z Extra Move) wracają do zera, dziennik z tego dnia jest czyszczony.
-          <strong>Nie zwraca</strong> coins wydanych w sklepie ani wpłaconych bossowi (kupione
-          power-upy zostają w ekwipunku) i nie odkręca coins ukradzionych przy wypchnięciu.
-          Gracza, którego ktoś tego dnia zbił, a on sam nie zdążył rzucić, trzeba poprawić
-          ręcznie — panel wypisze, kogo to dotyczy. <strong>Nieodwracalne.</strong>
+          <strong>Funkcja jest wyłączona i czeka na przebudowę.</strong> Powody: odejmowała
+          za dużo coins graczom, którzy byli tego dnia pod klątwą Kieszonkowiec, nie
+          odkręcała coins ukradzionych przy wypchnięciu ani wydanych w sklepie, a gracza
+          zbitego przez kogoś innego (który sam nie rzucał) i tak trzeba było poprawiać
+          ręcznie. Od przebudowy bossa dotyka dodatkowo wypłat, kar i HP, więc pomyłka
+          kosztuje więcej niż kiedyś.<br><br>
+          Do pojedynczych poprawek użyj <strong>„Cofnij ostatni ruch"</strong> przy graczu
+          albo ręcznej edycji jego punktów i coins.
         </div>
         <div class="adm-actions">
-          <input type="date" id="rollback-date" />
-          <button class="btn-danger" id="btn-day-rollback">↩️ Cofnij dzień do 8:00</button>
+          <input type="date" id="rollback-date" disabled />
+          <button class="btn-ghost" id="btn-day-rollback" disabled title="Funkcja wyłączona — czeka na przebudowę">↩️ Cofnij dzień do 8:00</button>
         </div>
       </div>
 
@@ -1195,6 +1196,7 @@
       const date = document.getElementById('rollback-date').value || playersToday;
       if (!confirm(`Cofnąć CAŁY dzień ${date}? Wszystkie ruchy z tego dnia znikną, gracze wrócą na pozycje z 8:00, a zarobione tego dnia punkty i coins przepadną. Tej operacji NIE da się cofnąć.`)) return;
       try {
+        // Serwer odmówi (503 disabled) — blokada jest po jego stronie, nie tylko w UI.
         const res = await api('POST', '/api/snakes/admin/day/rollback', { password: pass, date });
         await loadSettings();
         const pushed = res.pushed_not_restored.length

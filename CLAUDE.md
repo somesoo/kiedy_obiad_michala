@@ -110,7 +110,8 @@ rzucającemu (tylko jemu, toastem), że ktoś już tego gracza przeklął.
 
 Dodając cokolwiek, co zapisuje punkty lub coins, sprawdź wszystkie pięć:
 
-1. cofnięcie całego dnia (`slRollbackDay`) — kasuje po `day`
+1. cofnięcie całego dnia (`slRollbackDay`) — kasuje po `day` — **TRASA WYŁĄCZONA** (patrz niżej;
+   sama funkcja żyje i woła ją `slRevertBossDay`, więc spójność nadal trzeba utrzymywać)
 2. cofnięcie ostatniego ruchu (`/admin/players/:id/undo-move`) — kasuje po `ref = move:<id>`
 3. cofnięcie nagród bossa (`slRevertBossRewards`)
 4. reset całej gry (`/admin/reset`)
@@ -221,9 +222,17 @@ rm -rf db   # na koniec
 
 ## Znane, niezałatane
 
+- **Cofanie dnia (`/admin/day/rollback`) jest WYŁĄCZONE** — stała `SL_DAY_ROLLBACK_ENABLED
+  = false` tuż nad trasą, blokada zwraca 503. To świadoma decyzja właściciela, nie awaria:
+  funkcja czeka na przebudowę. Blokada siedzi po stronie SERWERA, bo trasa jest wystawiona
+  na świat i schowanie przycisku niczego by nie zamknęło; w panelu admina karta jest
+  wyszarzona, a przycisk `disabled`. **Nie odblokowuj jej mimochodem** — odblokowanie to
+  świadoma zmiana tej jednej stałej na `true`, po naprawieniu powodów niżej.
 - **Cofanie dnia i ruchu zabiera za dużo coins.** Rzut dopisuje do salda
   `earned - curseCoinSteal`, a oba narzędzia odejmują pełne `earned` z obu kolumn. Kto był
   pod klątwą Kieszonkowiec, traci 50 coins za dużo. `sl_moves` nie pamięta dziś tej różnicy.
+  To główny powód wyłączenia cofania dnia; **cofanie pojedynczego ruchu (`undo-move`) ma ten
+  sam błąd i ZOSTAŁO włączone** — działa na jednym ruchu, więc pomyłka jest tania.
 - **Scheduler Discorda Wordle loguje „powiadomienie wysłane"**, choć wywołanie jest
   zakomentowane.
 - **~540 z 1397 linii `public/style.css` to martwy kod** po bukmacherce, ładowany na
