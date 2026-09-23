@@ -2650,8 +2650,12 @@ function slLeaderboard(meId) {
     ORDER BY s.total_points DESC, s.laps DESC, s.abs_pos DESC
   `).all();
   const breakdown = slPointsBreakdownMap();
+  // Polowanie na cukierki (sezon z events.candy) nie ma osobnego rankingu — liczba 🍬
+  // stoi w wierszu gracza obok punktów. null = sezon bez cukierków.
+  const candies = seasonal.candyMap();
   return rows.map((r, i) => ({
     rank: i + 1,
+    candies: candies ? (candies.get(r.player_id) || 0) : null,
     player_id: r.player_id,
     nickname: r.nickname,
     total_points: Number(r.total_points),

@@ -88,6 +88,10 @@ dwóch rzeczy naraz.
 - **Pula kotła nie jest trzymana**, tylko liczona: minus suma coins z wierszy kotła. Przy
   wyczyszczeniu gracza jego wiersze kotła zostają z `player_id = NULL` — skasowanie
   wyjęcia powiększyłoby pulę, czyli wydrukowało coins dla następnego.
+- Polowanie na cukierki **nie ma osobnego rankingu**: `candies` idzie w wierszu rankingu
+  (`seasonal.candyMap()`), `null` = sezon bez cukierków i kolumny w ogóle nie ma.
+- Dzień drzwi z `hide_bonuses` wyłącza pola bonusowe (`seasonal.bonusesOff()` w
+  `slResolveTileEffect`) — drzwi ZASTĘPUJĄ dynie, a nie dokładają się do nich.
 - Kocioł i psikus zabierają coins **bez przycinania** (można zejść na minus, jak po
   bossie). Cukierek z drzwi daje **tylko punkty** — kategoria `season` w rozbiciu.
 

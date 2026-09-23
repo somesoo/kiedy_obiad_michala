@@ -6,7 +6,9 @@
    przeniósł się do lewego panelu, żeby oddać planszy maksimum miejsca. */
 .main-grid-snakes {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) 240px;
+  /* Lewa kolumna 236px, a nie 200: w sezonie z cukierkami wiersz rankingu mieści
+     jeszcze „🍬 N" obok punktów. */
+  grid-template-columns: 236px minmax(0, 1fr) 240px;
   gap: 14px;
   width: 100%;
   padding: 12px 16px;
@@ -685,8 +687,10 @@
 /* ── BOSS: kafelek w pasku + okienko z pełnym panelem ── */
 .boss-chip {
   margin-left: auto;
-  flex: 0 1 300px;
-  min-width: 190px;
+  /* Kafelek się nie ściska — kurczy się opis ostatniego rzutu obok (roll-result),
+     inaczej przy szerszej kolumnie rankingu z nazwy bossa zostawało „Dyni…". */
+  flex: 0 0 auto;
+  width: 290px;
   display: grid;
   grid-template-columns: auto minmax(40px, 1fr) auto auto;
   align-items: center;
@@ -700,7 +704,7 @@
   cursor: pointer;
 }
 .boss-chip:hover, .boss-chip.is-open { box-shadow: 0 0 12px rgba(232, 93, 74, 0.45); }
-.boss-chip-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.boss-chip-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .boss-chip-bar { height: 8px; border-radius: 4px; background: var(--surface-alt); overflow: hidden; }
 .boss-chip-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--danger), var(--gold)); }
 .boss-chip-hp { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
@@ -1651,9 +1655,9 @@
   white-space: nowrap;
   cursor: help;
 }
-.candy-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 4px; border-radius: 4px; }
-.candy-row.is-me { background: rgba(200, 241, 53, 0.08); color: var(--accent); }
-.candy-note { margin-top: 5px; font-size: 10px; line-height: 1.35; }
+.lb-right { display: inline-flex; align-items: baseline; gap: 8px; flex: 0 0 auto; }
+.lb-candy { font-size: 11px; color: #FF7FC1; cursor: help; white-space: nowrap; }
+.lb-candy.is-top { color: var(--gold); }
 
 /* Boss sezonowy: kafelek w barwach dyni + pigułka z odliczaniem do ataku. */
 .boss-chip.is-special { border-color: var(--gold); }

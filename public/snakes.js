@@ -619,7 +619,6 @@ function renderAll() {
   // Garderobę przerysowujemy tylko, gdy jest otwarta — inaczej i tak jej nie widać.
   if (document.getElementById('wardrobe').style.display === 'flex') renderCostumes(g);
   document.getElementById('btn-wardrobe').hidden = !!slBoardView(g.board).shop_at;
-  renderCandyHunt(g);
   renderLeaderboard(g);
   renderRollButton(g);
   renderCoop(g);
@@ -693,25 +692,6 @@ function renderSeasonEffects(effects) {
     host.appendChild(layer);
   }
   layer.innerHTML = html;
-}
-
-// ── POLOWANIE NA CUKIERKI ── (karta widoczna tylko w sezonie z `events.candy`)
-function renderCandyHunt(g) {
-  const card = document.getElementById('candy-card');
-  if (!card) return;
-  const c = g.season_events && g.season_events.candy;
-  card.style.display = c ? '' : 'none';
-  if (!c) return;
-  const top = c.ranking.slice(0, 5);
-  const meRow = c.ranking.find(r => r.is_me);
-  const rows = top.map(r => `
-    <div class="candy-row${r.is_me ? ' is-me' : ''}">
-      <span>${r.rank === 1 ? '👑' : `${r.rank}.`} ${esc(r.nickname)}</span><span class="mono">🍬 ${r.candies}</span>
-    </div>`).join('');
-  const mine = meRow && !top.includes(meRow)
-    ? `<div class="candy-row is-me"><span>${meRow.rank}. Ty</span><span class="mono">🍬 ${meRow.candies}</span></div>` : '';
-  document.getElementById('candy-hunt').innerHTML = (rows || '<div class="text-muted small">Nikt jeszcze nic nie znalazł.</div>') + mine
-    + `<div class="text-muted small candy-note">Na planszy leży ${c.tiles.length} 🍬. Kto zbierze najwięcej do końca października, zgarnia koronę.</div>`;
 }
 
 // ── SKLEP Z KOSTIUMAMI ──
@@ -2497,21 +2477,30 @@ window.addEventListener('scroll', slTipHide, true);
 // ── LEADERBOARD ──
 function renderLeaderboard(g) {
   const list = document.getElementById('leaderboard-list');
-  document.getElementById('players-count').textContent = `${g.leaderboard.length} graczy`;
   if (!g.leaderboard.length) {
+    document.getElementById('players-count').textContent = '0 graczy';
     list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie zagrał — bądź pierwszy!</div>';
     return;
   }
+  // Polowanie na cukierki: 🍬 obok punktów, a lider polowania ma koronę. `candies` jest
+  // null w sezonie bez cukierków — wtedy kolumny w ogóle nie ma.
+  const hunt = g.leaderboard.some(p => p.candies != null);
+  const topCandy = hunt ? Math.max(0, ...g.leaderboard.map(p => p.candies || 0)) : 0;
+  const onBoard = g.season_events && g.season_events.candy ? g.season_events.candy.tiles.length : 0;
+  document.getElementById('players-count').textContent = hunt
+    ? `${g.leaderboard.length} graczy · 🍬 ${onBoard} na planszy` : `${g.leaderboard.length} graczy`;
   list.innerHTML = g.leaderboard.map(p => {
     const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
     const meClass = p.is_me ? ' is-me' : '';
+    const candy = hunt
+      ? `<span class="lb-candy mono${topCandy > 0 && p.candies === topCandy ? ' is-top' : ''}" title="${topCandy > 0 && p.candies === topCandy ? 'Prowadzi w polowaniu na cukierki — kto będzie miał najwięcej na koniec października, zgarnia koronę' : 'Zebrane cukierki'}">${topCandy > 0 && p.candies === topCandy ? '👑' : ''}🍬 ${p.candies}</span>` : '';
     return `
       <div class="lb-row${meClass}" data-tip-player="${p.player_id}">
         <span class="lb-rank">${medal}</span>
         <div class="lb-main">
           <div class="lb-top">
             <span class="lb-nick">${esc(p.nickname)}</span>
-            <span class="lb-points mono">${p.total_points} <span class="lb-unit">pkt</span></span>
+            <span class="lb-right">${candy}<span class="lb-points mono">${p.total_points} <span class="lb-unit">pkt</span></span></span>
           </div>
           <div class="lb-stats">
             <span title="Ukończone okrążenia">🔁 ${p.laps}</span>
