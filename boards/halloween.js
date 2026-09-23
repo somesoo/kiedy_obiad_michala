@@ -96,10 +96,15 @@ module.exports = {
   ladders: [[4, 28], [10, 26], [33, 41]],
   // Pajęcza nić (29 → 9) spada tuż przy mostku, zaraz po tym, jak ktoś wszedł drabiną 10.
   snakes: [[25, 12], [29, 9], [44, 31]],
-  // Dynie zamiast gwiazdek. Najhojniejsza stoi dwa pola przed metą.
-  bonuses: [[2, 10], [14, 20], [19, 25], [23, 15], [36, 20], [39, 25], [46, 30]],
+  // Dynie zamiast gwiazdek. Celowo skromniej niż na klasycznej planszy (5 dyń, razem
+  // 90 pkt wobec 125): przy siedmiu bonusy ważyły za dużo w stosunku do samych rzutów.
+  // Droga powrotna lewej pętli (37–47) nie ma żadnej — tam rządzi wąż 44 → 31.
+  bonuses: [[2, 10], [14, 20], [19, 25], [23, 15], [36, 20]],
 
   marks: { ladder: '🪜', snake: '🐍', bonus: '🎃' },
+  // Pionek-nietoperz: zdjęcie gracza zostaje okrągłe (twarz musi być rozpoznawalna),
+  // a po bokach dostaje skrzydła. Mój nietoperz ma skrzydła w kolorze „to ja".
+  pawn: 'bat',
   confetti: ['🎃', '👻', '🦇', '🍬', '🕸️'],
 
   // Dekoracje: środek [x, y] w kratkach, `size` = szerokość w kratkach. Stoją POD drogą

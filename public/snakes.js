@@ -816,7 +816,7 @@ function renderBoard(g) {
 // bez nich = klasyczny wygląd, więc front działa z każdym payloadem.
 function slBoardView(board) {
   return Object.assign({
-    layout: 'grid', tile: 0.9, road: 'straight', closed: false, links: 'simple',
+    layout: 'grid', tile: 0.9, road: 'straight', closed: false, links: 'simple', pawn: 'circle',
     loop_label: null, marks: null, confetti: null, decor: []
   }, board.view || {});
 }
@@ -1087,6 +1087,11 @@ function renderLinkDots(links, board) {
   return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
 
+// Lewe skrzydło nietoperza; prawe to jego lustrzane odbicie zrobione w samym SVG (matrix),
+// a nie w CSS — dzięki temu animacja machania nie musi odbijać elementu i oba skrzydła
+// zginają się przy zdjęciu, a nie przeskakują na drugą stronę.
+const SL_BAT_WING = 'M40 6 C34 2 26 0 18 2 C12 3 5 6 0 4 C3 9 4 13 2 18 C6 15 10 15 12 19 C14 15 18 14 21 18 C23 14 27 13 30 16 C32 12 36 11 40 12 Z';
+
 function renderCell(idx, sp, players, posStyle, board) {
   const size = board.size;
   const marks = slMarks(board);
@@ -1127,15 +1132,21 @@ function renderCell(idx, sp, players, posStyle, board) {
     const rest = ordered.slice(1);
     overflow = `<span class="sl-pawn-more" title="${esc(rest.map(p => p.nickname).join(', '))}">+${rest.length}</span>`;
   }
+  const bat = slBoardView(board).pawn === 'bat';
   const pawnsHtml = shown.map(p => {
     const meCls = p.is_me ? ' sl-pawn-me' : '';
+    // Skrzydła nietoperza doklejone po bokach okrągłego zdjęcia. Każdy macha w innym
+    // rytmie (opóźnienie z player_id), żeby stado na planszy nie trzepotało jak jeden.
+    const wings = bat ? `
+        <svg class="sl-pawn-wing is-left" viewBox="0 0 40 24" aria-hidden="true" style="animation-delay:-${(Number(p.player_id) % 7) * 0.37}s"><path d="${SL_BAT_WING}"/></svg>
+        <svg class="sl-pawn-wing is-right" viewBox="0 0 40 24" aria-hidden="true" style="animation-delay:-${(Number(p.player_id) % 7) * 0.37}s"><path transform="matrix(-1 0 0 1 40 0)" d="${SL_BAT_WING}"/></svg>` : '';
     const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
     const pushCls = (state.pushFlash && state.pushFlash.has(p.player_id)) ? ' sl-pawn-pushed' : '';
     const shieldBadge = p.has_shield ? `<span class="sl-pawn-shield">🛡️</span>` : '';
     // Natywny title zniknął: nie da się w nim zrobić wielowierszowej rozpiski punktów.
     // Dane dla dymka jadą w data-* i są czytane dopiero przy najechaniu (patrz slTipShow).
     return `
-      <span class="sl-pawn-wrap${meCls}${shieldCls}${pushCls}" data-tip-player="${p.player_id}">
+      <span class="sl-pawn-wrap${bat ? ' is-bat' : ''}${meCls}${shieldCls}${pushCls}" data-tip-player="${p.player_id}">${wings}
         <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />
         ${shieldBadge}
       </span>`;

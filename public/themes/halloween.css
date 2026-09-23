@@ -83,6 +83,60 @@ body.season-halloween {
 }
 .season-halloween .sl-board-free .sl-mark { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8)); }
 
+/* ── PIONKI-NIETOPERZE ──
+   Zdjęcie zostaje okrągłe, skrzydła wystają po bokach i powoli machają. Skrzydło zgina
+   się przy zdjęciu (transform-origin po stronie ciała). Mój nietoperz: limonkowe skrzydła
+   z poświatą — ten sam kolor „to ja" co w całej grze. */
+.season-halloween .sl-pawn-wrap.is-bat { overflow: visible; }
+.season-halloween .sl-pawn-wrap.is-bat .sl-pawn-avatar {
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 0 2px #0A0612, 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+.season-halloween .sl-pawn-wing {
+  position: absolute;
+  top: 0;
+  width: 118%;
+  height: auto;
+  fill: #2A1D3D;
+  stroke: #A58BD6;
+  stroke-width: 1.4;
+  z-index: 0;
+  pointer-events: none;
+  animation: hw-wing 1.6s ease-in-out infinite;
+}
+.season-halloween .sl-pawn-wing.is-left  { right: 68%; transform-origin: 100% 30%; }
+.season-halloween .sl-pawn-wing.is-right { left: 68%; transform-origin: 0% 30%; animation-name: hw-wing-r; }
+/* Obrys „to ja" musi przebić ciemny obrys nietoperza wyżej — inaczej swój pionek
+   rozpoznawałoby się tylko po skrzydłach. */
+.season-halloween .sl-pawn-me.is-bat .sl-pawn-avatar {
+  box-shadow: 0 0 0 2px var(--accent), 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+.season-halloween .sl-pawn-me .sl-pawn-wing {
+  fill: rgba(200, 241, 53, 0.35);
+  stroke: var(--accent);
+  filter: drop-shadow(0 0 4px rgba(200, 241, 53, 0.7));
+}
+/* Uszka nad zdjęciem — bez nich to „kółko ze skrzydłami", z nimi nietoperz. */
+.season-halloween .sl-pawn-wrap.is-bat::before,
+.season-halloween .sl-pawn-wrap.is-bat::after {
+  content: '';
+  position: absolute;
+  top: -12%;
+  width: 26%;
+  height: 30%;
+  background: #0A0612;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  z-index: 0;
+}
+.season-halloween .sl-pawn-wrap.is-bat::before { left: 14%; transform: rotate(-14deg); }
+.season-halloween .sl-pawn-wrap.is-bat::after  { right: 14%; transform: rotate(14deg); }
+.season-halloween .sl-pawn-me.is-bat::before,
+.season-halloween .sl-pawn-me.is-bat::after { background: var(--accent); }
+
+@keyframes hw-wing   { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(-16deg) scaleX(0.72); } }
+@keyframes hw-wing-r { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(16deg) scaleX(0.72); } }
+
 /* ── DROGA: ścieżka z ubitej ziemi i sznur lampionów pośrodku ── */
 .season-halloween .sl-track-edge { stroke: #07040C; stroke-width: 30px; opacity: 1; }
 .season-halloween .sl-track-road { stroke: #3A2A22; stroke-width: 22px; opacity: 1; }
@@ -230,6 +284,7 @@ body.season-halloween {
   .season-halloween .d-carve,
   .season-halloween .d-flame,
   .season-halloween .sl-decor-ghost,
+  .season-halloween .sl-pawn-wing,
   .season-halloween .fx-fog,
   .season-halloween .fx-bat path { animation: none; }
   .season-halloween .fx-bat { display: none; }
