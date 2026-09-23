@@ -3961,11 +3961,33 @@ function slRollbackDay(date) {
   });
 }
 
+// ── COFANIE DNIA: WYŁĄCZONE ──
+// Funkcja czeka na przebudowę i do tego czasu jest zablokowana — świadoma decyzja
+// właściciela, nie awaria. Powody, dla których lepiej jej teraz nie używać:
+//   • odejmuje za dużo coins: rzut dopisuje do salda `earned - curseCoinSteal`, a cofanie
+//     zdejmuje pełne `earned` z obu kolumn, więc kto był pod klątwą Kieszonkowiec, traci
+//     50 coins za dużo (`sl_moves` nie pamięta dziś tej różnicy),
+//   • nie odkręca coins ukradzionych przy wypchnięciu ani wydanych w sklepie,
+//   • gracza, którego ktoś tego dnia zbił, a on sam nie rzucał, trzeba poprawić ręcznie,
+//   • od czasu przebudowy bossa dotyka też wypłat, kar i HP (slRevertBossDay), więc pomyłka
+//     kosztuje więcej niż kiedyś.
+// `slRollbackDay` ZOSTAJE nietknięta — przebudowa ma od czego wyjść, a przy okazji wołają
+// ją narzędzia bossa. Odblokowanie to zmiana tej jednej stałej na `true`.
+const SL_DAY_ROLLBACK_ENABLED = false;
+
 // POST /api/snakes/admin/day/rollback { password, date? } — cofa cały dzień gry do stanu
 // z 8:00 (domyślnie dzisiejszy, wg czasu Warszawy). Patrz slRollbackDay po szczegóły tego,
 // co wraca, a co zostaje. Nieodwracalne — potwierdzenie leży po stronie panelu.
+// Blokada siedzi TUTAJ, a nie tylko w panelu: trasa jest wystawiona na świat i schowanie
+// przycisku niczego by nie zamknęło.
 app.post('/api/snakes/admin/day/rollback', (req, res) => {
   if (!checkAdmin(req, res)) return;
+  if (!SL_DAY_ROLLBACK_ENABLED) {
+    return res.status(503).json({
+      error: 'Cofanie dnia jest wyłączone — funkcja czeka na przebudowę (m.in. odejmuje za dużo coins po klątwie Kieszonkowiec i nie odkręca kradzieży przy wypchnięciu). Do pojedynczych poprawek użyj „Cofnij ostatni ruch" albo ręcznej edycji gracza.',
+      disabled: true
+    });
+  }
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
   const out = slRollbackDay(date);
   console.log(`Snakes/Admin: cofnięto dzień ${date} — ${out.players} graczy, ${out.moves_deleted} ruchów, ${out.points_removed} pkt odjęte`);
