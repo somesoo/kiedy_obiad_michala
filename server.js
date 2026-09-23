@@ -2342,8 +2342,9 @@ function slResolveTileEffect(landedAbs, board, invertBoard = false) {
     abs = base + tile.target;
     if (abs < 0) abs = 0; // nie schodzimy poniżej startu
     note = tile.kind;
-  } else if (tile && tile.kind === 'bonus') {
+  } else if (tile && tile.kind === 'bonus' && !seasonal.bonusesOff()) {
     // Bonusów klątwa nie dotyczy — działają tak samo w obie strony.
+    // W dni drzwi „cukierek albo psikus" (hide_bonuses) bonusy są zdjęte z planszy.
     tilePoints += tile.value;
     note = 'bonus';
   }

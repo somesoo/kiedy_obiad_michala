@@ -112,11 +112,15 @@ module.exports = {
     // KOCIOŁ: na polach `drop` zabiera 10 coins (także na minus), chochla na 35 — tuż
     // przy namalowanym kotle — zgarnia wszystko, co się uzbierało.
     cauldron: { drop: [8, 21, 42], ladle: 35, amount: 10 },
-    // CUKIEREK ALBO PSIKUS: drzwi czynne tylko we wtorki i czwartki (2, 4).
-    trick_or_treat: { tiles: [13, 17, 27, 45], weekdays: [2, 4] },
+    // CUKIEREK ALBO PSIKUS: drzwi czynne tylko we wtorki i czwartki (2, 4). W te dni
+    // dynie-bonusy są zdjęte z planszy — drzwi je zastępują, a nie dokładają się do nich.
+    trick_or_treat: { tiles: [13, 17, 27, 45], weekdays: [2, 4], hide_bonuses: true },
     // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach, najwyżej 6 naraz.
     candy: { per_day: 3, max_on_board: 6 },
   },
+
+  // Garderoba (sklep z kostiumami) jako chatka czarownicy w lewym dolnym rogu.
+  shop_at: [1.25, 9.75],
 
   marks: { ladder: '🪜', snake: '🐍', bonus: '🎃' },
   confetti: ['🎃', '👻', '🦇', '🍬', '🕸️'],
@@ -145,7 +149,6 @@ module.exports = {
     { kind: 'cauldron', at: [10, 9.3], size: 2.1 },
 
     // Rogi.
-    { kind: 'pumpkin', at: [0.95, 10.1], size: 1.4 },
     { kind: 'pumpkin', at: [19.05, 10.15], size: 1.25, flip: true },
     { kind: 'web', at: [19.25, 0.75], size: 1.7 },
     { kind: 'candles', at: [7.9, 9.9], size: 1.0 },

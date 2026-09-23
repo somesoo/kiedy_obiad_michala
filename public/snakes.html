@@ -147,12 +147,6 @@
         <div id="shop-list"></div>
       </div>
 
-      <!-- Kostiumy: czysta kosmetyka pionka za coins. Treść składa renderCostumes(). -->
-      <div class="mini-card">
-        <div class="mini-head">🎭 KOSTIUMY <span class="text-muted">tylko wygląd</span></div>
-        <div id="costume-shop"></div>
-      </div>
-
       <!-- Polowanie na cukierki — tylko w sezonie z events.candy (renderCandyHunt). -->
       <div class="mini-card" id="candy-card" style="display:none">
         <div class="mini-head">🍬 ŁOWCY CUKIERKÓW</div>
@@ -175,13 +169,31 @@
         </div>
         <button class="btn-primary btn-roll" id="btn-roll">🎲 Rzuć kostką</button>
         <div class="roll-result" id="roll-result"></div>
+        <!-- Garderoba z paska — tylko na planszach bez chatki na planszy (view.shop_at). -->
+        <button class="btn-ghost game-bar-wardrobe" id="btn-wardrobe" hidden>🎭 Garderoba</button>
+        <!-- Boss zwinięty do kafelka z HP; kliknięcie otwiera pełny panel (#coop-pop). -->
+        <button class="boss-chip" id="boss-chip" hidden aria-expanded="false" aria-controls="coop-pop"></button>
       </div>
 
       <div id="board-area"></div>
 
-      <!-- WYDARZENIE KOOPERACYJNE — pod planszą, widoczne dla wszystkich -->
-      <div class="coop-card" id="coop-panel"></div>
+      <!-- WYDARZENIE KOOPERACYJNE — pełny panel bossa w okienku nad planszą. Żyje POZA
+           #board-area (renderBoard podmienia jej innerHTML), więc otwarte okienko i wpisana
+           kwota wpłaty przeżywają odświeżenie planszy. -->
+      <div class="coop-pop" id="coop-pop" hidden>
+        <button class="coop-pop-close" id="coop-pop-close" title="Zwiń">✕</button>
+        <div class="coop-card" id="coop-panel"></div>
+      </div>
     </section>
+
+    <!-- GARDEROBA — sklep z kostiumami i duży podgląd bohatera. Treść: renderCostumes(). -->
+    <div class="overlay wardrobe-overlay" id="wardrobe" style="display:none">
+      <div class="wardrobe-card" role="dialog" aria-modal="true" aria-labelledby="wardrobe-title">
+        <button class="wardrobe-close" id="wardrobe-close" title="Zamknij">✕</button>
+        <div class="wardrobe-title" id="wardrobe-title">🎭 Garderoba <span class="text-muted">— kostiumy to tylko wygląd</span></div>
+        <div id="costume-shop"></div>
+      </div>
+    </div>
 
     <!-- PRAWA KOLUMNA — HISTORIA AKTYWNOŚCI (ruchy + sklep + trafienia bossa, kto/co/którego dnia) -->
     <aside class="col-activity">

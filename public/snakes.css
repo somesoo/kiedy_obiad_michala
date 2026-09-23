@@ -589,45 +589,150 @@
   .sl-pawn-wing, .sl-costume-gadget.g-spider { animation: none; }
 }
 
-/* ── SKLEP Z KOSTIUMAMI ── */
+/* ── GARDEROBA (okno) ── */
+.wardrobe-overlay { z-index: 240; }
+.wardrobe-card {
+  position: relative;
+  width: min(760px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--muted);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.wardrobe-close {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer;
+}
+.wardrobe-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; margin-bottom: 14px; }
+.wardrobe-title .text-muted { font-size: 12px; font-weight: 400; }
+.wardrobe-body { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 18px; }
+@media (max-width: 640px) { .wardrobe-body { grid-template-columns: 1fr; } }
+.wardrobe-hero { display: flex; flex-direction: column; gap: 10px; }
+/* Duży bohater na „scenie" ze światłem punktowym. */
 .costume-preview {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 86px;
-  margin-bottom: 6px;
-  border-radius: 8px;
-  background: radial-gradient(circle at 50% 60%, rgba(255, 255, 255, 0.05), transparent 70%), var(--surface-alt);
+  height: 230px;
+  border-radius: 12px;
+  background:
+    radial-gradient(ellipse 45% 12% at 50% 86%, rgba(0, 0, 0, 0.55), transparent 70%),
+    radial-gradient(circle at 50% 35%, rgba(255, 236, 180, 0.12), transparent 60%),
+    linear-gradient(180deg, #22143A, #0B0712);
+  overflow: hidden;
 }
-/* W podglądzie pionek jest duży — wszystkie dodatki skalują się z nim (procenty). */
-.costume-preview .sl-pawn-wrap { width: 46px; height: 46px; }
-.costume-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px; }
+.costume-preview .sl-pawn-wrap { width: 96px; height: 96px; }
+.costume-preview .sl-pawn-avatar { border-width: 3px; }
+.wardrobe-worn { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.wardrobe-worn-row { display: flex; justify-content: space-between; gap: 8px; }
+.wardrobe-balance { font-size: 13px; color: var(--gold); text-align: right; }
+.costume-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
 .costume-tab {
   background: var(--surface-alt);
   border: 1px solid var(--muted);
-  border-radius: 6px;
+  border-radius: 999px;
   color: var(--text-muted);
-  font-size: 10px;
-  padding: 3px 4px;
+  font-size: 12px;
+  padding: 4px 12px;
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .costume-tab.is-active { border-color: var(--accent); color: var(--text-primary); }
-.costume-list { display: flex; flex-direction: column; gap: 4px; }
+.costume-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .costume-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
   gap: 6px;
-  padding: 3px 4px;
-  border-radius: 6px;
-  font-size: 11px;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--muted);
+  text-align: center;
 }
-.costume-item.is-worn { background: rgba(200, 241, 53, 0.08); }
-.costume-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.costume-item button { font-size: 10px; padding: 2px 7px; flex: 0 0 auto; }
+.costume-item.is-worn { border-color: var(--accent); background: rgba(200, 241, 53, 0.08); }
+.costume-icon { font-size: 30px; line-height: 1; }
+.costume-name { font-size: 12px; }
+.costume-item button { font-size: 11px; padding: 4px 10px; }
+
+/* Chatka garderoby na planszy (view.shop_at). */
+.sl-shop-hut {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  width: 9%;
+  min-width: 64px;
+  aspect-ratio: 1;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.sl-shop-hut:hover { transform: translate(-50%, -50%) scale(1.08); }
+.sl-shop-hut svg { width: 100%; height: 100%; overflow: visible; }
+.hut-glow { fill: rgba(255, 138, 31, 0.18); }
+.hut-roof { fill: #2A1740; stroke: #7B3FC4; stroke-width: 1.5; }
+.hut-hat { fill: #2A1740; stroke: #7B3FC4; stroke-width: 1.2; }
+.hut-wall { fill: #3A2A22; stroke: #1A120D; stroke-width: 1.5; }
+.hut-window { fill: #FFB347; }
+.hut-door { fill: #1A120D; }
+.hut-sign { fill: #FF8A1F; stroke: #7A3A08; stroke-width: 1; }
+.hut-sign-text { font: 700 8px 'JetBrains Mono', monospace; fill: #1A0A00; letter-spacing: 0.5px; }
+
+/* ── BOSS: kafelek w pasku + okienko z pełnym panelem ── */
+.boss-chip {
+  margin-left: auto;
+  flex: 0 1 300px;
+  min-width: 190px;
+  display: grid;
+  grid-template-columns: auto minmax(40px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.boss-chip:hover, .boss-chip.is-open { box-shadow: 0 0 12px rgba(232, 93, 74, 0.45); }
+.boss-chip-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.boss-chip-bar { height: 8px; border-radius: 4px; background: var(--surface-alt); overflow: hidden; }
+.boss-chip-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--danger), var(--gold)); }
+.boss-chip-hp { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.boss-chip-arrow { color: var(--text-muted); transition: transform 0.15s; }
+.boss-chip.is-open .boss-chip-arrow { transform: rotate(180deg); }
+.boss-chip.is-low .boss-chip-fill { animation: boss-chip-pulse 1.2s ease-in-out infinite; }
+@keyframes boss-chip-pulse { 50% { opacity: 0.55; } }
+.game-bar-wardrobe { margin-left: auto; flex: 0 0 auto; }
+.game-bar-wardrobe + .boss-chip { margin-left: 0; }
+
+.coop-pop {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  width: min(780px, 100%);
+  max-height: calc(100% - 60px);
+  overflow: auto;
+  z-index: 30;
+  border-radius: 14px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
+}
+.coop-pop[hidden] { display: none; }
+.coop-pop .coop-card { margin: 0; }
+/* Okienko ma własny pas nagłówka z przyciskiem zwijania — krzyżyk w rogu samego panelu
+   wchodził na przycisk „Wpłać". */
+.coop-pop { background: var(--surface); border: 1px solid var(--danger); padding-top: 26px; }
+.coop-pop .coop-card { border: none; }
+.coop-pop-close {
+  position: absolute; top: 4px; right: 8px; z-index: 1;
+  background: none; border: none; color: var(--text-muted); font-size: 12px; cursor: pointer;
+}
+.coop-pop-close::after { content: ' zwiń'; font-size: 11px; }
 
 /* ── PIONKI ── */
 .sl-pawns {

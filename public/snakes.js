@@ -616,11 +616,14 @@ function renderAll() {
   renderStats(g);
   renderBoard(g);
   renderShop(g);
-  renderCostumes(g);
+  // Garderobę przerysowujemy tylko, gdy jest otwarta — inaczej i tak jej nie widać.
+  if (document.getElementById('wardrobe').style.display === 'flex') renderCostumes(g);
+  document.getElementById('btn-wardrobe').hidden = !!slBoardView(g.board).shop_at;
   renderCandyHunt(g);
   renderLeaderboard(g);
   renderRollButton(g);
   renderCoop(g);
+  renderBossChip(g);
 }
 
 // ── SEZON PLANSZY ──
@@ -720,28 +723,86 @@ function renderCostumes(g) {
   const box = document.getElementById('costume-shop');
   if (!box || !g.costumes) return;
   const c = g.costumes;
-  // Podgląd = mój pionek złożony TĄ SAMĄ funkcją co na planszy (slPawnHtml).
+  // Podgląd = mój pionek złożony TĄ SAMĄ funkcją co na planszy (slPawnHtml), tylko duży —
+  // wszystkie dodatki są w procentach boku pionka, więc skalują się razem z nim.
   const me = { player_id: g.me.player_id, nickname: 'Ty', avatar_url: g.me.avatar_url, is_me: true, costume: c.worn };
-  const tabs = c.slots.map(sl => {
-    const worn = c.items.find(i => i.slot === sl.id && i.worn);
-    return `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}" title="${esc(sl.label)}">${worn ? worn.icon : '·'} ${esc(sl.label)}</button>`;
+  const worn = c.slots.map(sl => {
+    const it = c.items.find(i => i.slot === sl.id && i.worn);
+    return `<div class="wardrobe-worn-row"><span class="text-muted">${esc(sl.label)}</span><span>${it ? `${it.icon} ${esc(it.name)}` : '—'}</span></div>`;
   }).join('');
+  const tabs = c.slots.map(sl => `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}">${esc(sl.label)}</button>`).join('');
   const items = c.items.filter(i => i.slot === slCostumeTab).map(i => {
     let btn;
-    if (!i.owned) btn = `<button class="btn-ghost costume-buy" data-item="${i.id}" ${g.me.balance >= i.price ? '' : 'disabled'}>Kup · ${i.price}</button>`;
+    if (!i.owned) btn = `<button class="btn-primary costume-buy" data-item="${i.id}" ${g.me.balance >= i.price ? '' : 'disabled'}>Kup · ${i.price} coins</button>`;
     else if (i.worn) btn = `<button class="btn-ghost costume-off" data-slot="${i.slot}">Zdejmij</button>`;
     else btn = `<button class="btn-primary costume-wear" data-slot="${i.slot}" data-item="${i.id}">Załóż</button>`;
     return `
-      <div class="costume-item${i.worn ? ' is-worn' : ''}">
-        <span class="costume-name">${i.icon} ${esc(i.name)}</span>
+      <div class="costume-item${i.worn ? ' is-worn' : ''}${i.owned ? ' is-owned' : ''}">
+        <span class="costume-icon">${i.icon}</span>
+        <span class="costume-name">${esc(i.name)}</span>
         ${btn}
       </div>`;
   }).join('');
   box.innerHTML = `
-    <div class="costume-preview">${g.me.avatar_url ? slPawnHtml(me, { noTip: true }) : ''}</div>
-    <div class="costume-tabs">${tabs}</div>
-    <div class="costume-list">${items}</div>`;
+    <div class="wardrobe-body">
+      <div class="wardrobe-hero">
+        <div class="costume-preview">${g.me.avatar_url ? slPawnHtml(me, { noTip: true }) : ''}</div>
+        <div class="wardrobe-worn">${worn}</div>
+        <div class="wardrobe-balance mono">💰 ${g.me.balance} coins</div>
+      </div>
+      <div class="wardrobe-shop">
+        <div class="costume-tabs">${tabs}</div>
+        <div class="costume-list">${items}</div>
+      </div>
+    </div>`;
 }
+
+function openWardrobe() {
+  if (!state.game) return;
+  renderCostumes(state.game);
+  document.getElementById('wardrobe').style.display = 'flex';
+}
+function closeWardrobe() { document.getElementById('wardrobe').style.display = 'none'; }
+document.getElementById('btn-wardrobe').addEventListener('click', openWardrobe);
+document.getElementById('wardrobe-close').addEventListener('click', closeWardrobe);
+// Klik w tło (poza kartą) zamyka — jak w każdym oknie.
+document.getElementById('wardrobe').addEventListener('click', e => { if (e.target.id === 'wardrobe') closeWardrobe(); });
+// Chatka na planszy — delegacja, bo #board-area przerysowuje się przy każdej zmianie stanu.
+document.getElementById('board-area').addEventListener('click', e => { if (e.target.closest('.sl-shop-hut')) openWardrobe(); });
+
+// ── BOSS: kafelek z HP + panel w okienku ──
+// Pełny panel bossa zajmował pas pod planszą; zwinięty do kafelka w pasku oddaje planszy
+// tę wysokość, więc pola i pionki (z kostiumami) są większe. Stan „otwarte" żyje w DOM
+// (atrybut hidden na #coop-pop), bo okienko leży poza przerysowywaną planszą.
+function renderBossChip(g) {
+  const chip = document.getElementById('boss-chip');
+  const c = g.coop;
+  if (!c || !c.boss) { chip.hidden = true; slToggleCoopPop(false); return; }
+  const b = c.boss;
+  chip.hidden = false;
+  chip.classList.toggle('is-low', b.percent <= 25);
+  chip.innerHTML = `
+    <span class="boss-chip-name">👹 ${esc(b.name)}</span>
+    <span class="boss-chip-bar"><span class="boss-chip-fill" style="width:${b.percent}%"></span></span>
+    <span class="boss-chip-hp mono">${b.hp}/${b.max_hp}</span>
+    <span class="boss-chip-arrow" aria-hidden="true">▾</span>`;
+  chip.title = `${b.name}: ${b.hp}/${b.max_hp} HP — kliknij, żeby zobaczyć walkę i wpłacić coins`;
+}
+function slToggleCoopPop(open) {
+  const pop = document.getElementById('coop-pop');
+  const chip = document.getElementById('boss-chip');
+  const next = open == null ? pop.hidden : open;
+  pop.hidden = !next;
+  chip.setAttribute('aria-expanded', String(next));
+  chip.classList.toggle('is-open', next);
+}
+document.getElementById('boss-chip').addEventListener('click', () => slToggleCoopPop());
+document.getElementById('coop-pop-close').addEventListener('click', () => slToggleCoopPop(false));
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  closeWardrobe();
+  slToggleCoopPop(false);
+});
 
 document.getElementById('costume-shop').addEventListener('click', async e => {
   const tab = e.target.closest('.costume-tab');
@@ -861,7 +922,10 @@ function renderBoard(g) {
 
   // mapy: pole -> kafel specjalny, pole -> gracze
   const special = {};
-  board.tiles.forEach(t => { special[t.position] = t; });
+  // Dzień drzwi z `hide_bonuses`: dynie (pola bonusowe) są zdjęte — rysujemy je jak zwykłe
+  // pola, bo serwer i tak nic na nich dziś nie wypłaca.
+  const bonusesOff = !!(g.season_events && g.season_events.trick_or_treat && g.season_events.trick_or_treat.bonuses_off);
+  board.tiles.forEach(t => { if (!(bonusesOff && t.kind === 'bonus')) special[t.position] = t; });
   const pawns = {};
   g.players.forEach(p => { (pawns[p.tile] = pawns[p.tile] || []).push(p); });
 
@@ -889,6 +953,7 @@ function renderBoard(g) {
         <div class="sl-board${free ? ' sl-board-free' : ''}" style="--cols:${board.cols};--rows:${board.rows}">${cells}</div>
         ${renderConnectors(board)}
         ${renderPotLabel(board, g.season_events)}
+        ${renderShopHut(board)}
       </div>
     </div>
     ${renderLegend(board, g.season_events)}`;
@@ -920,6 +985,24 @@ function slEventTiles(ev) {
   return out;
 }
 
+// Chatka garderoby na planszy (view.shop_at = środek w kratkach). Klik → openWardrobe.
+function renderShopHut(board) {
+  const at = slBoardView(board).shop_at;
+  if (!at) return '';
+  return `<button class="sl-shop-hut" style="left:${(at[0] / board.cols) * 100}%;top:${(at[1] / board.rows) * 100}%" title="Garderoba — kostiumy dla Twojego pionka">
+    <svg viewBox="0 0 80 80" aria-hidden="true">
+      <ellipse class="hut-glow" cx="40" cy="52" rx="38" ry="24"/>
+      <path class="hut-roof" d="M6 38 L40 6 Q44 2 47 8 L74 38 Z"/>
+      <path class="hut-hat" d="M40 6 L52 -4 Q56 -7 58 -2 Q52 -2 50 4 Z"/>
+      <rect class="hut-wall" x="14" y="36" width="52" height="36" rx="3"/>
+      <rect class="hut-window" x="20" y="44" width="12" height="11" rx="2"/>
+      <path class="hut-door" d="M42 72 L42 52 Q49 44 56 52 L56 72 Z"/>
+      <rect class="hut-sign" x="12" y="24" width="56" height="12" rx="3"/>
+      <text class="hut-sign-text" x="40" y="33" text-anchor="middle">KOSTIUMY</text>
+    </svg>
+  </button>`;
+}
+
 // Pula kotła wypisana przy namalowanym kotle (dekoracja 'cauldron' z pliku sezonu).
 function renderPotLabel(board, ev) {
   if (!ev || !ev.cauldron) return '';
@@ -934,7 +1017,7 @@ function renderPotLabel(board, ev) {
 function slBoardView(board) {
   return Object.assign({
     layout: 'grid', tile: 0.9, road: 'straight', closed: false, links: 'simple', pawn: 'circle', ghost_after_days: null,
-    fork_junctions: {},
+    fork_junctions: {}, shop_at: null,
     loop_label: null, marks: null, confetti: null, decor: []
   }, board.view || {});
 }
@@ -1400,7 +1483,9 @@ function renderLegend(board, ev = null) {
       <span>🏁 meta — potem pętla na start (+${board.lap_points} pkt)</span>
       <span class="sl-legend-ladder">━ ${esc(m.ladder)} drabina — ${closed ? 'skrót do przodu' : 'w górę'}</span>
       <span class="sl-legend-snake">〜 ${esc(m.snake)} wąż — ${closed ? 'cofa' : 'w dół'}</span>
-      <span>${esc(m.bonus)} bonus — punkty</span>
+      ${ev && ev.trick_or_treat && ev.trick_or_treat.bonuses_off
+        ? `<span>${esc(m.bonus)} dziś bez bonusów — zamiast nich drzwi 🚪</span>`
+        : `<span>${esc(m.bonus)} bonus — punkty</span>`}
       ${board.tiles.some(t => t.kind === 'fork') ? '<span class="sl-legend-ladder">🎲 rozwidlona drabina — rzut decyduje, którą odnogą</span>' : ''}
       ${ev && ev.cauldron ? `<span>🧪 kocioł −${ev.cauldron.amount} coins · 🥄 chochla zgarnia pulę</span>` : ''}
       ${ev && ev.trick_or_treat ? `<span>🚪 cukierek albo psikus${ev.trick_or_treat.active ? ' — dziś otwarte!' : ''}</span>` : ''}
