@@ -20,6 +20,7 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 |---|---|---|
 | **Snakes & Ladders** (prefiks `sl*`) | większość `server.js`, `public/snakes*` | **aktywna gra, tu idzie cała praca** |
 | **Sezony planszy** | `boards/*.js`, `lib/seasons.js`, `public/themes/` | plansza = plik; admin przełącza sezon |
+| **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
 | **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/snakes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
 | **Wordle po polsku** | ~20% `server.js`, `public/app.js`, `index.html` | **zakończony 2026-08-31** przez `GAME_END_AT`; `gameHasEnded()` zwraca `true`, gra jest trwale zablokowana. Nie inwestuj tu czasu bez wyraźnej prośby. |
@@ -69,6 +70,26 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
   wtedy na starcie.
 - Na wąskim ekranie plansza 'free' ma minimalną szerokość i przewija się w bok, zamiast
   ściskać pola do kilkunastu pikseli.
+
+## Mechaniki sezonowe — kocioł, drzwi, cukierki
+
+`lib/seasonal.js` (fabryka), konfiguracja w `events` pliku planszy. Zdarzenie odpala
+**tylko rzucający**, na polu, na którym **wylądował** (po drabinie/wężu/rozwidleniu, przed
+wypychaniem); wypchnięci nic nie płacą i nic nie zbierają. Każde pole ma najwyżej jedno
+zdarzenie, a cukierki sypią się tylko na zwykłe pola — lądowanie nigdy nie rozstrzyga
+dwóch rzeczy naraz.
+
+- **Własny rejestr `sl_season_ledger`** (`kind`, `points`, `coins`, `candies`, `day`, `ref`).
+  `resolveLanding()` tylko rozstrzyga (psikus może cofnąć pionek — przed wypychaniem),
+  a `apply(ref)` zapisuje, gdy ruch zna już swoje id. Cofanie czyta rejestr.
+- **„Cofnij ruch" odkręca rejestr PRZED odjęciem `earned`.** Tamto odejmowanie przycina
+  saldo do zera; w odwrotnej kolejności przycięcie zjadało część `earned`, a zwrot z kotła
+  dopisywał się w całości — drukowało coins.
+- **Pula kotła nie jest trzymana**, tylko liczona: minus suma coins z wierszy kotła. Przy
+  wyczyszczeniu gracza jego wiersze kotła zostają z `player_id = NULL` — skasowanie
+  wyjęcia powiększyłoby pulę, czyli wydrukowało coins dla następnego.
+- Kocioł i psikus zabierają coins **bez przycinania** (można zejść na minus, jak po
+  bossie). Cukierek z drzwi daje **tylko punkty** — kategoria `season` w rozbiciu.
 
 ## Kostiumy — czysta kosmetyka
 

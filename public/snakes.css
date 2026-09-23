@@ -1521,3 +1521,31 @@
   100% { transform: rotate(0deg) translate(0, 0); }
 }
 @media (prefers-reduced-motion: reduce) { .fork-die.is-rolling { animation: none; } }
+
+/* ── ZDARZENIA SEZONOWE NA POLACH ── */
+.sl-ev-mark { cursor: help; }
+.sl-ev-drop  { border-color: #7CFF4F; box-shadow: 0 0 10px rgba(124, 255, 79, 0.35); }
+.sl-ev-ladle { border-color: #7CFF4F; border-width: 2px; box-shadow: 0 0 14px rgba(124, 255, 79, 0.55); }
+.sl-ev-door.is-open { border-color: #FF8A1F; box-shadow: 0 0 14px rgba(255, 138, 31, 0.6); animation: sl-door 1.6s ease-in-out infinite; }
+.sl-ev-door.is-closed .sl-ev-mark { opacity: 0.4; filter: grayscale(1); }
+.sl-ev-candy .sl-ev-mark { animation: sl-candy 2.2s ease-in-out infinite; }
+@keyframes sl-door { 0%, 100% { box-shadow: 0 0 8px rgba(255, 138, 31, 0.4); } 50% { box-shadow: 0 0 18px rgba(255, 138, 31, 0.8); } }
+@keyframes sl-candy { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg) scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { .sl-ev-door.is-open, .sl-ev-candy .sl-ev-mark { animation: none; } }
+.sl-pot-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(10, 6, 18, 0.85);
+  border: 1px solid #7CFF4F;
+  color: #9DFF6B;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: help;
+}
+.candy-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 4px; border-radius: 4px; }
+.candy-row.is-me { background: rgba(200, 241, 53, 0.08); color: var(--accent); }
+.candy-note { margin-top: 5px; font-size: 10px; line-height: 1.35; }

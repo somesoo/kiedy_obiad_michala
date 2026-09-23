@@ -1878,7 +1878,7 @@ db.exec(`
 // więc nie powtarzamy w nim ani jednego, ani drugiego — wpis ma być krótki jak nagłówek.
 // ── ROZBICIE PUNKTÓW NA KATEGORIE ──
 // Kolejność ma znaczenie — UI wypisuje kategorie dokładnie w tej kolejności.
-const SL_POINT_CATEGORIES = ['dice', 'bonus', 'knockback', 'boss'];
+const SL_POINT_CATEGORIES = ['dice', 'bonus', 'knockback', 'boss', 'season'];
 
 // Dopisuje punkty do rozbicia. Wołane RAZEM z każdym dopisaniem do total_points — jeśli
 // kiedyś dojdzie nowe źródło punktów, ma tu trafić także, inaczej po cichu wpadnie do puli
@@ -1958,7 +1958,9 @@ const SL_ACTIVITY_TYPES = {
   boss_hit:  'Walka z bossem',
   avatar:    'Zmiana zdjęcia profilowego',
   bonus_grant: 'Doładowania coins od admina',
-  boss_reward: 'Rozliczenie walki z bossem'
+  boss_reward: 'Rozliczenie walki z bossem',
+  // Kocioł, cukierek albo psikus, cukierki (lib/seasonal.js) — wpisy w bloku tury.
+  season_event: 'Wydarzenia sezonu'
 };
 
 // Widoczność typów — ten sam wzorzec co przełączniki Discorda (patrz slEventsConfig):
@@ -2836,6 +2838,14 @@ const costumes = require('./lib/costumes')({ db, transaction, slLogActivity, slE
 costumes.initSchema();
 costumes.registerRoutes(app, { authPlayer, buildState: playerId => slBuildState(playerId) });
 
+// ── MECHANIKI SEZONOWE ── kocioł, cukierek albo psikus, cukierki (lib/seasonal.js).
+// Aktywną planszę podajemy funkcją, nie wartością — admin może zmienić sezon w locie.
+const seasonal = require('./lib/seasonal')({
+  db, transaction, slLogActivity, slLogPoints, slEmit, todayWaw, isWeekendStr,
+  getSeason: () => slBoard, tileOf: slTileOf, boardSize: slBoardSize
+});
+seasonal.initSchema();
+
 // ── MIGRACJA (jednorazowa): DOŁADOWANIE „bank się pomylił" — każdy gracz dostaje
 // SL_BANK_ERROR_GRANT coins do portfela. Jednorazowy prezent od admina przy okazji
 // przemianowania waluty na coins, nie element mechaniki.
@@ -2918,6 +2928,7 @@ function slBuildState(playerId) {
     shop: shop.items,
     shop_price_curse: shop.price_curse,
     costumes: costumes.slCostumeShop(playerId),
+    season_events: seasonal.payload(playerId),
     coop: boss.slCoopPayload(playerId),
     server_date: today
   };
@@ -3123,6 +3134,13 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       }
     }
 
+    // ── ZDARZENIE SEZONOWE NA POLU LĄDOWANIA ── (kocioł, drzwi, cukierek)
+    // Rozstrzygamy TERAZ, bo psikus potrafi cofnąć pionek, a wypychanie ma się liczyć
+    // z pola, na którym gracz faktycznie stanął. Zapis efektów — dopiero po wstawieniu
+    // ruchu, kiedy znamy jego `ref` (patrz seasonalLanding.apply niżej).
+    const seasonalLanding = seasonal.resolveLanding({ playerId, landedAbs: abs, day: today, turnRef });
+    abs = seasonalLanding.abs;
+
     // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
     // Sprawdzane na OSTATECZNYM polu lądowania tej tury (po drabinach/wężach/klątwie,
     // po obu rzutach przy Extra Move) — nie na każdym pośrednim kroku.
@@ -3176,6 +3194,9 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?, last_move_date = ?, rolls_today = ?, last_move_at = CURRENT_TIMESTAMP
       WHERE player_id = ?
     `).run(abs, newLaps, earned - curseCoinSteal, earned, today, moveSeq, playerId);
+    // Efekty zdarzenia sezonowego idą do własnego rejestru (sl_season_ledger) z tym samym
+    // `ref` co ruch — „Cofnij ruch" odkręci je dokładnie, nie ruszając `earned`.
+    seasonalLanding.apply(moveRef);
 
     // Rozwidlenie dopisujemy po ludzku — sam znacznik [fork_win] nic by nikomu nie mówił.
     const forkTxt = fork ? ` 🪜🎲 rozwidlenie: wypadło ${fork.roll} → ${fork.win ? 'górą' : 'krótszą odnogą'} na pole ${fork.to_tile}` : '';
@@ -3215,6 +3236,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       curse_coin_steal: curseCoinSteal,
       knockback,
       fork,
+      season_event: seasonalLanding.result,
       boss_hit: bossHit,
       rolls_used_today: moveSeq
     };
@@ -3255,6 +3277,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     if (result.notes.includes('snake')) {
       slEmit('tile_landing', () => `🐍 **${nickname}** wdepnął na węża i zjechał na pole **${result.to_tile}**.`);
     }
+    seasonal.emitFor(result.season_event, nickname);
     if (result.fork) {
       slEmit('tile_landing', () => result.fork.win
         ? `🪜🎲 **${nickname}** wszedł na rozwidloną drabinę, wyrzucił **${result.fork.roll}** i poszedł górą na pole **${result.fork.to_tile}**!`
@@ -3664,6 +3687,7 @@ app.post('/api/snakes/admin/reset', (req, res) => {
     // moduł, żeby lista tabel do wyczyszczenia mieszkała tam, gdzie te tabele powstają.
     boss.slResetBossData();
     costumes.slResetCostumes(); // reset = zerowe konto, więc i szafa pusta
+    seasonal.resetAll();
     // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
     // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).
     return { players_affected: playersAffected, coop: boss.slCoopPayload(null) };
@@ -3749,6 +3773,7 @@ app.delete('/api/snakes/admin/players/:id', (req, res) => {
     db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
     boss.slClearPlayerBossData(playerId); // ŚCIEŻKA COFANIA #5 — wkłady i wypłaty bossa
     costumes.slClearPlayerCostumes(playerId);
+    seasonal.clearPlayer(playerId);
     db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_points_log WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);
@@ -4181,6 +4206,7 @@ function slRollbackDay(date) {
     // ŚCIEŻKA COFANIA #1 — wypłaty i kary bossa z tego dnia wracają na konta, a obrażenia
     // zadane tego dnia wracają bossowi na pasek (o ile walka wciąż trwa).
     const bossBack = boss.slRevertBossDay(date);
+    seasonal.revertDay(date);
     const activity = db.prepare('DELETE FROM sl_activity WHERE day = ?').run(date);
 
     return {
@@ -4436,6 +4462,12 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
     const pts = Number(move.points);
     const sameDay = st.last_move_date === move.move_date;
     const nextRolls = sameDay ? Math.max(0, Number(st.rolls_today) - 1) : Number(st.rolls_today);
+
+    // Kocioł, psikusy i cukierki tego ruchu (ten sam `ref`) odkręcamy PRZED odjęciem
+    // `earned` niżej. Tamto odejmowanie przycina saldo do zera — gdyby kocioł zabrał
+    // wcześniej 10 coins i zepchnął gracza nisko, przycięcie „zjadłoby" część `earned`,
+    // a zwrot z kotła dopisałby się potem w całości, czyli wydrukował coins.
+    seasonal.revertRef(`move:${move.id}`);
 
     db.prepare(`
       UPDATE sl_state SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?),

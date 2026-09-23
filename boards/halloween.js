@@ -107,6 +107,17 @@ module.exports = {
   // Droga powrotna lewej pętli (37–47) nie ma żadnej — tam rządzi wąż 44 → 31.
   bonuses: [[2, 10], [14, 20], [19, 25], [23, 15], [36, 20]],
 
+  // Mechaniki sezonowe (logika: lib/seasonal.js).
+  events: {
+    // KOCIOŁ: na polach `drop` zabiera 10 coins (także na minus), chochla na 35 — tuż
+    // przy namalowanym kotle — zgarnia wszystko, co się uzbierało.
+    cauldron: { drop: [8, 21, 42], ladle: 35, amount: 10 },
+    // CUKIEREK ALBO PSIKUS: drzwi czynne tylko we wtorki i czwartki (2, 4).
+    trick_or_treat: { tiles: [13, 17, 27, 45], weekdays: [2, 4] },
+    // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach, najwyżej 6 naraz.
+    candy: { per_day: 3, max_on_board: 6 },
+  },
+
   marks: { ladder: '🪜', snake: '🐍', bonus: '🎃' },
   confetti: ['🎃', '👻', '🦇', '🍬', '🕸️'],
   // Kto przepuści dwa pełne dni robocze bez rzutu, straszy na planszy jako duch.

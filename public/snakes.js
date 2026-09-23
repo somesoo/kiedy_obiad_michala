@@ -368,7 +368,7 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 });
 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', curse_fired: '💀', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', curse_fired: '💀', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆', season_event: '🎃' };
 
 // Które bloki dziennika są rozwinięte — po `ref`, który jest stały między odświeżeniami.
 const activityOpen = new Set();
@@ -617,6 +617,7 @@ function renderAll() {
   renderBoard(g);
   renderShop(g);
   renderCostumes(g);
+  renderCandyHunt(g);
   renderLeaderboard(g);
   renderRollButton(g);
   renderCoop(g);
@@ -689,6 +690,25 @@ function renderSeasonEffects(effects) {
     host.appendChild(layer);
   }
   layer.innerHTML = html;
+}
+
+// ── POLOWANIE NA CUKIERKI ── (karta widoczna tylko w sezonie z `events.candy`)
+function renderCandyHunt(g) {
+  const card = document.getElementById('candy-card');
+  if (!card) return;
+  const c = g.season_events && g.season_events.candy;
+  card.style.display = c ? '' : 'none';
+  if (!c) return;
+  const top = c.ranking.slice(0, 5);
+  const meRow = c.ranking.find(r => r.is_me);
+  const rows = top.map(r => `
+    <div class="candy-row${r.is_me ? ' is-me' : ''}">
+      <span>${r.rank === 1 ? '👑' : `${r.rank}.`} ${esc(r.nickname)}</span><span class="mono">🍬 ${r.candies}</span>
+    </div>`).join('');
+  const mine = meRow && !top.includes(meRow)
+    ? `<div class="candy-row is-me"><span>${meRow.rank}. Ty</span><span class="mono">🍬 ${meRow.candies}</span></div>` : '';
+  document.getElementById('candy-hunt').innerHTML = (rows || '<div class="text-muted small">Nikt jeszcze nic nie znalazł.</div>') + mine
+    + `<div class="text-muted small candy-note">Na planszy leży ${c.tiles.length} 🍬. Kto zbierze najwięcej do końca października, zgarnia koronę.</div>`;
 }
 
 // ── SKLEP Z KOSTIUMAMI ──
@@ -847,6 +867,7 @@ function renderBoard(g) {
 
   const view = slBoardView(board);
   const free = view.layout === 'free';
+  const events = slEventTiles(g.season_events);
   let cells = '';
   board.path.forEach(([c, r], idx) => {
     // Układ 'free': pole nie siedzi w kratce, tylko stoi absolutnie w punkcie z pliku.
@@ -857,7 +878,7 @@ function renderBoard(g) {
       ? `left:${((c + (1 - view.tile) / 2) / board.cols) * 100}%;top:${((r + (1 - view.tile) / 2) / board.rows) * 100}%;`
         + `width:${(view.tile / board.cols) * 100}%;height:${(view.tile / board.rows) * 100}%`
       : `grid-column:${c + 1};grid-row:${r + 1}`;
-    cells += renderCell(idx, special[idx], pawns[idx], pos, board);
+    cells += renderCell(idx, special[idx], pawns[idx], pos, board, events[idx]);
   });
 
   area.innerHTML = `
@@ -867,9 +888,45 @@ function renderBoard(g) {
         ${renderTrack(board)}
         <div class="sl-board${free ? ' sl-board-free' : ''}" style="--cols:${board.cols};--rows:${board.rows}">${cells}</div>
         ${renderConnectors(board)}
+        ${renderPotLabel(board, g.season_events)}
       </div>
     </div>
-    ${renderLegend(board)}`;
+    ${renderLegend(board, g.season_events)}`;
+}
+
+// ── ZDARZENIA SEZONOWE NA POLACH (lib/seasonal.js) ──
+// Mapa pole → { kind, icon, title }. Pola zdarzeń nigdy nie są polami specjalnymi
+// (pilnuje walidacja planszy), więc znaczek zdarzenia ma wolne miejsce na polu.
+function slEventTiles(ev) {
+  const out = {};
+  if (!ev) return out;
+  if (ev.cauldron) {
+    ev.cauldron.drop.forEach(t => {
+      out[t] = { kind: 'drop', icon: '🧪', title: `Kocioł: zabiera ${ev.cauldron.amount} coins (także na minus) — w kotle ${ev.cauldron.pot}` };
+    });
+    out[ev.cauldron.ladle] = { kind: 'ladle', icon: '🥄', title: `Chochla: zgarniasz cały kocioł — teraz ${ev.cauldron.pot} coins` };
+  }
+  if (ev.trick_or_treat) {
+    const days = ev.trick_or_treat.weekdays.map(d => ['pon', 'wt', 'śr', 'czw', 'pt'][d - 1]).join(' i ');
+    ev.trick_or_treat.tiles.forEach(t => {
+      out[t] = ev.trick_or_treat.active
+        ? { kind: 'door', active: true, icon: '🚪', title: 'Cukierek albo psikus! Dziś drzwi są otwarte: 50/50 punkty albo psikus.' }
+        : { kind: 'door', active: false, icon: '🚪', title: `Cukierek albo psikus — drzwi otwierają się tylko w: ${days}.` };
+    });
+  }
+  if (ev.candy) {
+    ev.candy.tiles.forEach(t => { if (!out[t]) out[t] = { kind: 'candy', icon: '🍬', title: 'Cukierek! Stań tu, żeby go zebrać.' }; });
+  }
+  return out;
+}
+
+// Pula kotła wypisana przy namalowanym kotle (dekoracja 'cauldron' z pliku sezonu).
+function renderPotLabel(board, ev) {
+  if (!ev || !ev.cauldron) return '';
+  const pot = slBoardView(board).decor.find(d => d.kind === 'cauldron');
+  if (!pot) return '';
+  return `<span class="sl-pot-label" style="left:${(pot.at[0] / board.cols) * 100}%;top:${((pot.at[1] + 0.9) / board.rows) * 100}%"
+    title="Tyle zgarnie chochla na polu ${ev.cauldron.ladle}">🧪 ${ev.cauldron.pot} coins</span>`;
 }
 
 // Ustawienia wyglądu z pliku sezonu (lib/seasons.js → view). Stary serwer albo plansza
@@ -1271,7 +1328,7 @@ const SL_COSTUME_ART = {
 };
 
 
-function renderCell(idx, sp, players, posStyle, board) {
+function renderCell(idx, sp, players, posStyle, board, ev = null) {
   const size = board.size;
   const marks = slMarks(board);
   // Pole w układzie 'free' jest małe (ułamek kratki na gęstej siatce), więc napis
@@ -1290,6 +1347,10 @@ function renderCell(idx, sp, players, posStyle, board) {
     if (free) flag = '<span class="sl-flag sl-flag-finish">🏁 META</span>'; else idxLabel = `${idx} 🏁`;
   }
   let mark = '';
+  if (ev) {
+    cls += ` sl-ev sl-ev-${ev.kind}${ev.kind === 'door' ? (ev.active ? ' is-open' : ' is-closed') : ''}`;
+    mark = `<span class="sl-mark sl-ev-mark" title="${esc(ev.title)}">${ev.icon}</span>`;
+  }
   if (sp) {
     cls += ` sl-${sp.kind}`;
     if (sp.kind === 'ladder') mark = `<span class="sl-mark" title="Drabina → ${sp.target}">${esc(marks.ladder)}</span>`;
@@ -1329,7 +1390,7 @@ function renderCell(idx, sp, players, posStyle, board) {
     </div>`;
 }
 
-function renderLegend(board) {
+function renderLegend(board, ev = null) {
   const m = slMarks(board);
   // Na zamkniętym torze nie ma „góry" ani „dołu" — drabina to skrót do przodu, wąż cofa.
   const closed = slBoardView(board).closed;
@@ -1341,6 +1402,9 @@ function renderLegend(board) {
       <span class="sl-legend-snake">〜 ${esc(m.snake)} wąż — ${closed ? 'cofa' : 'w dół'}</span>
       <span>${esc(m.bonus)} bonus — punkty</span>
       ${board.tiles.some(t => t.kind === 'fork') ? '<span class="sl-legend-ladder">🎲 rozwidlona drabina — rzut decyduje, którą odnogą</span>' : ''}
+      ${ev && ev.cauldron ? `<span>🧪 kocioł −${ev.cauldron.amount} coins · 🥄 chochla zgarnia pulę</span>` : ''}
+      ${ev && ev.trick_or_treat ? `<span>🚪 cukierek albo psikus${ev.trick_or_treat.active ? ' — dziś otwarte!' : ''}</span>` : ''}
+      ${ev && ev.candy ? '<span>🍬 cukierek do zebrania</span>' : ''}
       <span>🛡️ gracz z tarczą</span>
       <span class="sl-legend-me">■ Twój pionek</span>
     </div>`;
@@ -1519,6 +1583,19 @@ function showRollResult(m) {
   if (m.notes.includes('ladder')) noteTxt.push('🪜 drabina w górę!');
   if (m.notes.includes('snake')) noteTxt.push('🐍 wąż w dół!');
   if (m.notes.includes('bonus')) noteTxt.push('⭐ pole bonusowe!');
+  const se = m.season_event;
+  if (se) {
+    const txt = {
+      cauldron_drop: `🧪 Kocioł zabrał ${-se.coins} coins!`,
+      cauldron_take: se.coins > 0 ? `🥄 Zgarnąłeś chochlą cały kocioł: +${se.coins} coins!` : '🥄 Chochla… ale kocioł był pusty.',
+      treat: `🍭 Cukierek! +${se.points} pkt`,
+      treat_candy: `🍭 Cukierek! +🍬 i +${se.points} pkt`,
+      trick_egg: `🥚 Psikus! Zgniłe jajo: ${se.coins} coins`,
+      trick_scare: `👻 Psikus! Duch przestraszył Cię na pole ${se.to_tile}`,
+      candy: '🍬 Znalazłeś cukierka!',
+    }[se.kind];
+    if (txt) noteTxt.push(txt);
+  }
   if (m.fork) {
     noteTxt.push(m.fork.win
       ? `🪜🎲 rozwidlona drabina: wypadło ${m.fork.roll} — idziesz górą na pole ${m.fork.to_tile}!`
@@ -2222,6 +2299,7 @@ const SL_POINT_CATEGORY_LABELS = [
   ['boss',      '👹', 'walka z bossem'],
   ['knockback', '💥', 'zbicia przeciwnika'],
   ['bonus',     '⭐', 'punkty bonusowe'],
+  ['season',    '🎃', 'wydarzenia sezonu'],
   ['pre_split', '📦', 'sprzed podziału'],
 ];
 
