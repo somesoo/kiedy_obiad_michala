@@ -86,8 +86,13 @@ i front rysuje je jako jeden blok: rzut robi za nagłówek, reszta wcina się po
 Dokładając cokolwiek, co dzieje się W TRAKCIE rzutu, przekaż `turnRef` do `slLogActivity` —
 bez tego wpis wypadnie z bloku i znów zrobi się ściana nierozróżnialnych wierszy.
 Front zakłada, że wpisy jednej tury **sąsiadują ze sobą** na liście (są, bo sortowanie idzie
-po `id`), i **nie sortuje podlinijek rosnąco** — kolejność z serwera już czyta się
-chronologicznie, bo kaskada zbić jest zapisywana odwrotnie (patrz `slApplyKnockback`).
+po `id`), i sortuje podlinijki **ROSNĄCO po `id`**, czyli chronologicznie: blok czyta się
+z góry na dół, odwrotnie niż sama lista dni (ta zostaje od najnowszych). Dlatego serwer
+zapisuje kaskadę zbić PO KOLEI — kolejność zapisu jest kolejnością na ekranie. Kiedyś było
+odwrotnie (wpisy szły od ostatniego domina, żeby płaski feed `id DESC` czytał się
+chronologicznie); po wprowadzeniu bloków ta sztuczka zaczęła działać przeciwko nim i jej
+nie ma. Cena: w płaskim widoku panelu admina kaskada czyta się od końca — to narzędzie
+moderacji, nie narracja.
 
 Historię sprzed tej zmiany dogrywa jednorazowa migracja `backfillActivityTurnRefs`
 (flaga `activity_turn_ref_backfill_done`). Odtwarza klucz z CIĄGŁOŚCI `id`: cały rzut leci
