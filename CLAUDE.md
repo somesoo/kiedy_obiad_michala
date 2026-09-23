@@ -80,6 +80,15 @@ Freeze i Curse mają się ujawniać **dopiero przy odpaleniu**. Dziennik aktywno
 Cel nie dostaje własnego wpisu i nie widzi nic w swoim stanie gry. Wyjątek: blokada tarczą
 — atak przepadł, więc nie ma już czego kryć, i tam obie strony są nazwane.
 
+**Dziennik grupuje się w TURY.** Wszystkie wpisy z jednego rzutu (sam rzut, klątwa, zbicia
+z całą kaskadą, trafienie bossa) dostają wspólny `sl_activity.ref` ze `slNewTurnRef()`
+i front rysuje je jako jeden blok: rzut robi za nagłówek, reszta wcina się pod nim.
+Dokładając cokolwiek, co dzieje się W TRAKCIE rzutu, przekaż `turnRef` do `slLogActivity` —
+bez tego wpis wypadnie z bloku i znów zrobi się ściana nierozróżnialnych wierszy.
+Front zakłada, że wpisy jednej tury **sąsiadują ze sobą** na liście (są, bo sortowanie idzie
+po `id`), i **nie sortuje podlinijek rosnąco** — kolejność z serwera już czyta się
+chronologicznie, bo kaskada zbić jest zapisywana odwrotnie (patrz `slApplyKnockback`).
+
 Konsekwencja przy pisaniu kodu: **nigdy nie podświetlaj ani nie filtruj po treści wpisu**.
 Predykat „to mój wpis" to zawsze `entry.player_id`. Dopasowanie po nicku w tekście
 natychmiast wysypałoby sekret Freeze'a. Z tego powodu odpalona klątwa ma własny typ wpisu

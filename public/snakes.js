@@ -403,16 +403,40 @@ function renderActivity(data) {
     return;
   }
 
+  // ── GRUPOWANIE PO TURZE ──
+  // Wszystkie wpisy z jednego rzutu mają wspólny `ref` (patrz slNewTurnRef na serwerze)
+  // i przychodzą obok siebie, bo lista jest sortowana po id. Zbijamy je w jeden blok:
+  // rzut robi za nagłówek, reszta (klątwa, zbicia, kaskada, trafienie bossa) wcina się
+  // pod nim. Wcześniej to była ściana jednakowych wierszy z tą samą godziną i różnymi
+  // nickami — nie dało się zobaczyć, gdzie kończy się jedna tura.
+  //
+  // Kolejność PODLINIJEK zostaje taka, jak przyszły z serwera (malejąco po id), bo to
+  // właśnie ona czyta się chronologicznie: klątwa (zapisana po rzucie) ląduje tuż pod
+  // nagłówkiem, a kaskada zbić — zapisywana odwrotnie, patrz slApplyKnockback — wraca
+  // do właściwej kolejności. Nie sortuj tego rosnąco „dla porządku".
+  const groups = [];
+  for (const e of data.entries) {
+    const prev = groups[groups.length - 1];
+    if (prev && e.ref && prev.ref === e.ref) prev.entries.push(e);
+    else groups.push({ ref: e.ref || null, entries: [e] });
+  }
+
   let lastDay = null;
   let html = '';
-  for (const e of data.entries) {
-    if (e.date !== lastDay) {
-      html += `<div class="activity-day">${esc(e.date)}</div>`;
-      lastDay = e.date;
-    }
+  // `hideNick` — podlinijki należące do gracza z nagłówka nie powtarzają jego nicku
+  // („kanat 6 → pole 33" / „⚔️ atak na bossa"), ale cudze ZAWSZE go mają, bo bez niego
+  // nie wiadomo, kogo dotyczą (paulinka wypchnięta, witold rzucił klątwę).
+  const renderRow = (e, sub, hideNick) => {
     const time = new Date(e.created_at.replace(' ', 'T') + 'Z')
       .toLocaleTimeString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit' });
     const icon = ACTIVITY_ICONS[e.type] || '•';
+    // Treść prawie każdego wpisu zaczyna się od własnego emoji, a obok stoi jeszcze
+    // kolumna z ikoną typu — wychodziło „🎲 kanat 🎲 6 → pole 40". Ucinamy ten wiodący
+    // emoji, bo ikona z gutteru mówi to samo i trzyma pion. Wpisy bez emoji (np. trafienie
+    // bossa) zostają nietknięte, więc ⚔️ dalej ma co pokazywać.
+    // To zmiana WYŁĄCZNIE wizualna: predykat „to mój wpis" liczy się niżej z `player_id`,
+    // nigdy z treści — patrz komentarz poniżej.
+    const text = String(e.detail).replace(/^\p{Extended_Pictographic}️?\s*/u, '');
     // Wyróżniamy wpisy DOTYCZĄCE MOJEGO PIONKA — po player_id wpisu, nigdy po treści.
     // To nie jest wybór estetyczny, tylko warunek bezpieczeństwa: serwer celowo zapisuje
     // wpis obu stronom wszędzie tam, gdzie obie strony mają wiedzieć (klątwa rzucona na
@@ -429,15 +453,49 @@ function renderActivity(data) {
     // i rzucającemu, więc każdy z nich ma „swój" (po player_id). Typ wpisu, nie jego
     // treść — z tego samego powodu co wyżej.
     const curseFired = mine && e.type === 'curse_fired';
-    html += `
-      <div class="activity-entry${mine ? ' is-me' : ''}${curseFired ? ' is-curse-fired' : ''}"${curseFired ? ' title="Klątwa odpaliła"' : mine ? ' title="Twoja akcja"' : ''}>
-        <span class="activity-time mono">${time}</span>
+    return `
+      <div class="activity-entry${sub ? ' is-sub' : ''}${mine ? ' is-me' : ''}${curseFired ? ' is-curse-fired' : ''}"${curseFired ? ' title="Klątwa odpaliła"' : mine ? ' title="Twoja akcja"' : ''}>
+        <span class="activity-time mono">${sub ? '' : time}</span>
         <span class="activity-icon">${icon}</span>
-        <span class="activity-body"><strong>${esc(e.nickname)}</strong> ${esc(e.detail)}</span>
+        <span class="activity-body">${hideNick ? '' : `<strong>${esc(e.nickname)}</strong> `}${esc(text)}</span>
       </div>`;
+  };
+
+  for (const g of groups) {
+    const first = g.entries[0];
+    if (first.date !== lastDay) {
+      html += `<div class="activity-day">${esc(first.date)}</div>`;
+      lastDay = first.date;
+    }
+
+    // Pojedynczy wpis (zakup, awatar, nagroda bossa) — bez ramki, jak dotąd.
+    if (g.entries.length === 1) {
+      html += renderRow(first, false, false);
+      continue;
+    }
+
+    // Nagłówkiem jest wpis o rzucie; gdy moderacja go ukryła, blok zostaje bez nagłówka,
+    // ale nadal trzyma się kupy wizualnie.
+    const headIdx = g.entries.findIndex(e => e.type === 'roll');
+    const head = headIdx >= 0 ? g.entries[headIdx] : null;
+    // Skutki układamy narracyjnie: najpierw co odmieniło ten rzut (klątwa), potem kogo
+    // zbił, na końcu ile oberwał boss. Sortowanie jest STABILNE, więc wewnątrz każdego
+    // rodzaju zostaje kolejność z serwera — a to właśnie ona czyta się chronologicznie
+    // (kaskada zbić jest tam zapisana odwrotnie, patrz slApplyKnockback).
+    const order = { curse_fired: 1, knockback: 2, boss_hit: 3 };
+    const subs = g.entries
+      .filter((_, i) => i !== headIdx)
+      .sort((a, b) => (order[a.type] || 9) - (order[b.type] || 9));
+    const mineTurn = head && Number(head.player_id) === Number(state.playerId);
+    html += `<div class="activity-turn${mineTurn ? ' is-my-turn' : ''}">`;
+    if (head) html += renderRow(head, false, false);
+    html += subs.map(e => renderRow(e, !!head,
+      !!head && Number(e.player_id) === Number(head.player_id))).join('');
+    html += `</div>`;
   }
   list.innerHTML = html;
 }
+
 
 document.getElementById('activity-date').addEventListener('change', e => loadActivity(e.target.value || null));
 
