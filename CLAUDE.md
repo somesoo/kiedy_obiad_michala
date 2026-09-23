@@ -86,6 +86,19 @@ natychmiast wysypałoby sekret Freeze'a. Z tego powodu odpalona klątwa ma włas
 `curse_fired` (ofiara i rzucający dostają osobne wpisy, front świeci je na zielono po
 `player_id` + typie).
 
+**Drożyzna (wariant 8) ma TRZY stany**, nie dwa — kolumna `sl_effects.revealed_at` trzyma
+ten środkowy: *ukryta* (ceny w sklepie bazowe, gracz nic nie wie) → *odsłonięta* (pierwsza
+próba zakupu zostaje **wstrzymana**, nic nie jest pobierane, ceny idą w górę) → *zużyta*
+(dopiero następny, świadomy zakup ją zdejmuje). Dzięki temu nie trzeba wybierać między
+„witryna kłamie o cenie" a „klątwa zdradza się przed odpaleniem": dopóki jest ukryta, nikt
+nie zapłaci więcej, niż zobaczył, bo NIC nie zostaje pobrane.
+
+**Odsłonięcie NIE zostawia wpisu w dzienniku** — i to nie jest przeoczenie. Dziennik jest
+publiczny, więc wpis „zakup wstrzymany" zdradziłby tarczę okrężną drogą: wszyscy widzieliby,
+że gracz coś kupował, a gdyby kupił Shield (po którym wpisu nie ma), zostałoby „próbował"
+bez „kupił" — czyli jednoznaczna informacja, co kupił. Ofiara dowiaduje się z toasta
+i ze stałego ostrzeżenia w sklepie; w dzienniku ląduje dopiero sam zakup.
+
 **Wariantu klątwy nie zna nikt, także rzucający**, dopóki nie odpali — nie ma go
 w odpowiedzi `/shop/use` ani w toaście. Klątwy na jednym graczu odpalają **po jednej na
 ruch** (FIFO), nigdy naraz, a kolejka ma sufit: `SL_CURSE_MAX_PENDING_PER_TARGET` (2)
