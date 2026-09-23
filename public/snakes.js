@@ -853,7 +853,17 @@ async function buyPowerup(type) {
       : `🛒 Kupiono: ${POWERUP_META[type].name}`);
     loadActivity(document.getElementById('activity-date').value || null);
   } catch (e) {
-    showToast(e.message);
+    // Zakup wstrzymany przez świeżo odsłoniętą Drożyznę — NIC nie zostało kupione ani
+    // pobrane z konta. Serwer dosyła świeży stan z podniesionymi cenami: przerysowujemy
+    // sklep, żeby gracz zobaczył nowe kwoty, i zostawiamy mu decyzję jeszcze raz.
+    if (e.data && e.data.price_curse_revealed) {
+      state.game = e.data.state;
+      renderAll();
+      showToast(e.data.error);
+      loadActivity(document.getElementById('activity-date').value || null);
+    } else {
+      showToast(e.message);
+    }
   } finally {
     state.busy = false;
   }

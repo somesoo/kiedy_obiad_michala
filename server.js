@@ -1354,8 +1354,10 @@ const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
 // działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
 const SL_CURSE_VARIANTS = 8;
 const SL_CURSE_COIN_STEAL = 50; // ile coins zabiera Kieszonkowiec (wariant 3)
-// Drożyzna (wariant 8) jako JEDYNA klątwa nie odpala się na ruchu, tylko przy najbliższym
-// zakupie w sklepie — podbija jego cenę o ten mnożnik i dopiero wtedy się zużywa.
+// Drożyzna (wariant 8) jako JEDYNA klątwa nie odpala się na ruchu, tylko w sklepie.
+// Ma trzy stany — ukryta, odsłonięta, zużyta (patrz kolumna "revealed_at" niżej): pierwsza
+// próba zakupu jest WSTRZYMYWANA i tylko odsłania klątwę, podbijając ceny o ten mnożnik;
+// zużywa się dopiero przy następnym, świadomym zakupie.
 const SL_CURSE_PRICE_VARIANT = 8;
 const SL_CURSE_PRICE_MARKUP = 1.5;
 // KOLEJKA KLĄTW. Klątwy na jednym graczu NIE odpalają naraz — każdy ruch zdejmuje
@@ -1378,7 +1380,7 @@ const SL_CURSE_MAX_PENDING_PER_CASTER = 1;
 // i dostawał „za mało — koszt 105".
 function slPendingPriceCurse(playerId) {
   return db.prepare(`
-    SELECT id, source_player_id FROM sl_effects
+    SELECT id, source_player_id, revealed_at FROM sl_effects
     WHERE target_player_id = ? AND type = 'curse' AND status = 'pending' AND variant = ?
     ORDER BY id LIMIT 1
   `).get(playerId, SL_CURSE_PRICE_VARIANT) || null;
@@ -1389,14 +1391,15 @@ function slShopPriceOf(type, cursed) {
   return cursed ? Math.ceil(base * SL_CURSE_PRICE_MARKUP) : base;
 }
 
-// Cennik DLA KONKRETNEGO GRACZA — z doliczoną Drożyzną, jeśli na nim wisi.
-// To ujawnia klątwę jej ofierze w chwili wejścia do sklepu, czyli minimalnie wcześniej
-// niż przy kliknięciu „Kup" — i tak ma być: UI, które pokazuje inną cenę, niż pobiera,
-// jest po prostu zepsute. Zasada ukrytej informacji nie jest tym naruszona, bo mówi
-// o NIEZDRADZANIU CELU osobom trzecim; tutaj ofiara widzi wyłącznie własną cenę, a kto
-// rzucił klątwę, nie wychodzi z tego payloadu w ogóle.
+// Cennik DLA KONKRETNEGO GRACZA — z doliczoną Drożyzną, ale WYŁĄCZNIE gdy jest już
+// ujawniona (patrz kolumna revealed_at). Dopóki klątwa siedzi ukryta, cennik pokazuje
+// ceny bazowe i nie zdradza jej ani słowem — a i tak nikt nie przepłaci, bo pierwsza
+// próba zakupu zostaje wstrzymana zamiast obciążyć konto.
+// Zasada ukrytej informacji jest tym nietknięta: ofiara dowiaduje się dopiero w chwili
+// odpalenia klątwy, a kto ją rzucił, nie wychodzi z tego payloadu w ogóle.
 function slShopPayload(playerId) {
-  const cursed = !!slPendingPriceCurse(playerId);
+  const curse = slPendingPriceCurse(playerId);
+  const cursed = !!(curse && curse.revealed_at);
   return {
     items: SL_POWERUP_TYPES.map(type => ({
       type,
@@ -1427,7 +1430,7 @@ const SL_CURSE_DESCRIPTIONS = {
   5: 'na ten ruch drabiny i węże działa się od drugiego końca — ze szczytu drabiny zjeżdżasz na dół, z ogona węża wjeżdżasz do góry',
   6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
   7: 'pole bonusowe na ten ruch nie działa',
-  8: `najbliższy zakup w sklepie kosztuje o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% więcej`
+  8: `pierwsza próba zakupu zostaje wstrzymana, a ceny w sklepie rosną o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% do najbliższego zakupu`
 };
 
 // Warianty 1/2 zmieniają wartość kości PRZED ruchem — reszta rzutów nie rusza.
@@ -1677,6 +1680,16 @@ ensureColumn('sl_state', 'last_move_at', 'DATETIME');
 // jest ignorowany, więc niewykorzystane sloty przepadają razem z resztą limitu.
 ensureColumn('sl_state', 'extra_rolls', 'INTEGER DEFAULT 0');
 ensureColumn('sl_state', 'extra_rolls_date', 'TEXT');
+
+// Drożyzna ma TRZY stany, nie dwa, i ta kolumna trzyma ten środkowy:
+//   1. wisi ukryta      — revealed_at NULL, ceny w sklepie bazowe, gracz nic nie wie,
+//   2. ujawniona        — revealed_at ustawione pierwszą PRÓBĄ zakupu (która nie obciąża
+//                         konta), ceny pokazane i pobierane w podwyżce,
+//   3. zużyta           — status 'consumed' po zakupie, ceny wracają.
+// Bez stanu 2 trzeba było wybierać między „witryna kłamie o cenie" a „klątwa zdradza się
+// sama, zanim odpali". Ten stan pozwala mieć jedno i drugie: cena nigdy nie kłamie,
+// bo dopóki klątwa jest ukryta, NIC nie zostaje pobrane.
+ensureColumn('sl_effects', 'revealed_at', 'DATETIME');
 
 // Kolumny bossa dokłada lib/boss.js (initSchema).
 
@@ -3055,12 +3068,33 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     const st = slEnsureState(playerId);
 
     // KLĄTWA DROŻYZNA: czeka w kolejce jak każda inna, ale odpala się dopiero TUTAJ —
-    // przy pierwszym zakupie po jej rzuceniu. Podbija cenę i zużywa się WYŁĄCZNIE przy
-    // udanym zakupie: gdy graczowi zabraknie punktów, klątwa zostaje na kolejną próbę
-    // (inaczej dałoby się ją zdjąć klikaniem „Kup" bez grosza przy duszy).
+    // przy pierwszym zakupie po jej rzuceniu. Zużywa się WYŁĄCZNIE przy udanym zakupie:
+    // gdy graczowi zabraknie coins, klątwa zostaje na kolejną próbę (inaczej dałoby się
+    // ją zdjąć klikaniem „Kup" bez grosza przy duszy).
     const priceCurse = slPendingPriceCurse(playerId);
-    const cost = slShopPriceOf(type, !!priceCurse);
 
+    // ── ODSŁONIĘCIE ──
+    // Pierwsza próba zakupu pod ukrytą Drożyzną NIE kupuje niczego i NIE rusza salda:
+    // wstrzymujemy ją, zapalamy klątwę i oddajemy świeży cennik z podwyżką. Dopiero
+    // kolejne kliknięcie kupuje — po cenie, którą gracz ma już przed oczami.
+    // Dzięki temu nie trzeba wybierać między „witryna kłamie" a „klątwa zdradza się przed
+    // czasem": do tej chwili nic nie było widać, a mimo to nikt nie zapłacił więcej,
+    // niż zobaczył. Zakup jest wstrzymany, a nie anulowany — to celowo ma być moment,
+    // w którym gracz decyduje jeszcze raz, już znając cenę.
+    if (priceCurse && !priceCurse.revealed_at) {
+      db.prepare(`UPDATE sl_effects SET revealed_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(priceCurse.id);
+      // ŚWIADOMIE BEZ WPISU W DZIENNIKU. Dziennik jest publiczny, a wpis „zakup
+      // wstrzymany" zdradziłby tarczę okrężną drogą: wszyscy zobaczyliby, że gracz
+      // właśnie coś kupował, a gdyby kupił Shield — po którym wpisu nie ma (patrz niżej)
+      // — zostałby ślad „próbował" bez „kupił", czyli jednoznaczna informacja, co kupił.
+      // Ofiara i tak wie swoje: dostaje toast od ręki, a w sklepie wisi ostrzeżenie aż
+      // do zakupu. W dzienniku ląduje dopiero sam zakup, czyli moment, w którym klątwa
+      // realnie zabolała.
+      return { revealed: true, base_cost: baseCost, cost: slShopPriceOf(type, true) };
+    }
+
+    const cost = slShopPriceOf(type, !!priceCurse);
     if (st.balance < cost) return { poor: true, balance: st.balance, cost, cursed: !!priceCurse };
 
     db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(cost, playerId);
@@ -3090,6 +3124,21 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
     }
     return { poor: false, cost, cursed: !!priceCurse, extra: cost - baseCost };
   });
+
+  // Zakup wstrzymany przez świeżo odsłoniętą Drożyznę. 409, a nie 400: to nie jest błąd
+  // gracza, tylko stan, który się właśnie zmienił — front ma przerysować sklep (nowe ceny
+  // przychodzą w `state`) i pokazać powiadomienie, a nie zwykły komunikat o błędzie.
+  if (out.revealed) {
+    return res.status(409).json({
+      error: `${priceCurseLabel}! Twój zakup został wstrzymany — ceny w sklepie idą w górę o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% do najbliższego zakupu. ${SL_POWERUP_LABELS[type]} kosztuje teraz ${out.cost} zamiast ${out.base_cost}.`,
+      price_curse_revealed: true,
+      curse: { label: priceCurseLabel, markup_percent: Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100) },
+      type,
+      cost: out.cost,
+      base_cost: out.base_cost,
+      state: slBuildState(playerId)
+    });
+  }
 
   if (out.poor) {
     // Cena z klątwy nie jest zagadką w momencie, w którym zaczyna boleć — mówimy wprost,
