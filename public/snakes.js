@@ -816,7 +816,8 @@ function renderBoard(g) {
 // bez nich = klasyczny wygląd, więc front działa z każdym payloadem.
 function slBoardView(board) {
   return Object.assign({
-    layout: 'grid', tile: 0.9, road: 'straight', closed: false, links: 'simple', pawn: 'circle',
+    layout: 'grid', tile: 0.9, road: 'straight', closed: false, links: 'simple', pawn: 'circle', ghost_after_days: null,
+    fork_junctions: {},
     loop_label: null, marks: null, confetti: null, decor: []
   }, board.view || {});
 }
@@ -997,11 +998,22 @@ function renderConnectors(board) {
   if (!links.length) return '';
   const drawn = slBoardView(board).links === 'drawn';
 
-  const parts = links.map(t => {
-    const a = tileCenter(t.position, board);
-    const b = tileCenter(t.target, board);
+  // Rozwidlona drabina to TRZY odcinki: pień z pola startowego do węzła i dwie gałęzie
+  // z węzła — do celu „wygranej" i „przegranej". Bez węzła w pliku sezonu: dwie drabiny
+  // prosto z pola startowego.
+  const segs = [];
+  for (const t of links) {
+    if (t.kind !== 'fork') { segs.push({ t, a: tileCenter(t.position, board), b: tileCenter(t.target, board) }); continue; }
+    const start = tileCenter(t.position, board);
+    const j = slForkJunction(t, board);
+    if (j) segs.push({ t, a: start, b: j, trunk: true });
+    segs.push({ t, a: j || start, b: tileCenter(t.target, board), branch: 'win' });
+    segs.push({ t, a: j || start, b: tileCenter(t.alt_target, board), branch: 'lose' });
+  }
+
+  const parts = segs.map(({ t, a, b, branch }) => {
     const up = t.kind !== 'snake';
-    const cls = up ? `sl-link-ladder${t.kind === 'fork' ? ' sl-link-fork' : ''}` : 'sl-link-snake';
+    const cls = up ? `sl-link-ladder${t.kind === 'fork' ? ` sl-link-fork${branch ? ` is-${branch}` : ''}` : ''}` : 'sl-link-snake';
     const title = t.kind === 'fork' ? slForkTitle(t)
       : t.kind === 'ladder' ? `Drabina: ${t.position} → ${t.target}`
       : `Wąż: ${t.position} → ${t.target}`;
@@ -1027,20 +1039,33 @@ function renderConnectors(board) {
   }).join('');
 
   return `<svg class="sl-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${parts}</svg>`
-    + renderLinkDots(links, board) + renderForkLabels(board);
+    + renderLinkDots(links, board) + renderForkNodes(board);
 }
 
 function slForkTitle(t) {
   return `Rozwidlona drabina: rzuć jeszcze raz — ${t.faces.join(' lub ')} → pole ${t.target}, inaczej → pole ${t.alt_target}`;
 }
 
-// Etykietka na środku rozwidlonej drabiny: jakie oczka prowadzą górą i dokąd idzie się
-// przy pozostałych. Bez niej gracz widziałby zwykłą drabinę i czuł się oszukany.
-function renderForkLabels(board) {
+// Węzeł rozwidlonej drabiny w % sceny (albo null, gdy plik sezonu go nie podaje).
+// Współrzędne węzła to ŚRODEK w kratkach, tak jak `at` dekoracji.
+function slForkJunction(t, board) {
+  const j = slBoardView(board).fork_junctions[t.position];
+  return j ? { x: (j[0] / board.cols) * 100, y: (j[1] / board.rows) * 100 } : null;
+}
+
+// Kółko z kostką w miejscu, gdzie drabina się rozwidla. Podpowiedź po najechaniu jest
+// celowo „po informatycznemu" — to dokładnie ta reguła, którą liczy serwer
+// (slResolveTileEffect), zapisana jak kod.
+function renderForkNodes(board) {
   return board.tiles.filter(t => t.kind === 'fork').map(t => {
-    const a = tileCenter(t.position, board);
-    const b = tileCenter(t.target, board);
-    return `<span class="sl-fork-label" style="left:${(a.x + b.x) / 2}%;top:${(a.y + b.y) / 2}%" title="${esc(slForkTitle(t))}">🎲 ${t.faces.join('/')} → ${t.target} · inaczej → ${t.alt_target}</span>`;
+    const j = slForkJunction(t, board) || tileCenter(t.position, board);
+    const others = [1, 2, 3, 4, 5, 6].filter(v => !t.faces.includes(v));
+    const code = `const d = rzutKostka(); // 1–6\n`
+      + `if ([${t.faces.join(', ')}].includes(d)) idzNaPole(${t.target});\n`
+      + `else idzNaPole(${t.alt_target}); // ${others.join(', ')}`;
+    return `<span class="sl-fork-node" style="left:${j.x}%;top:${j.y}%" tabindex="0" aria-label="${esc(slForkTitle(t))}">🎲
+      <span class="sl-fork-code" role="tooltip"><span class="sl-fork-code-head">rozwidlenie.js</span><code>${esc(code).replace(/\n/g, '<br>')}</code></span>
+    </span>`;
   }).join('');
 }
 
@@ -1098,9 +1123,12 @@ function renderLinkDots(links, board) {
     const a = tileCenter(t.position, board);
     const b = tileCenter(t.target, board);
     const kind = t.kind === 'snake' ? 'snake' : 'ladder';
+    // Rozwidlenie ma dwa końce — kropka także na celu krótszej odnogi.
+    const alt = t.kind === 'fork' ? tileCenter(t.alt_target, board) : null;
     return `
       <span class="sl-dot sl-dot-start sl-dot-${kind}" style="left:${a.x}%;top:${a.y}%"></span>
-      <span class="sl-dot sl-dot-end sl-dot-${kind}" style="left:${b.x}%;top:${b.y}%"></span>`;
+      <span class="sl-dot sl-dot-end sl-dot-${kind}" style="left:${b.x}%;top:${b.y}%"></span>
+      ${alt ? `<span class="sl-dot sl-dot-end sl-dot-${kind}" style="left:${alt.x}%;top:${alt.y}%"></span>` : ''}`;
   }).join('');
   return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
@@ -1152,8 +1180,14 @@ function renderCell(idx, sp, players, posStyle, board) {
     overflow = `<span class="sl-pawn-more" title="${esc(rest.map(p => p.nickname).join(', '))}">+${rest.length}</span>`;
   }
   const bat = slBoardView(board).pawn === 'bat';
+  const ghostAfter = slBoardView(board).ghost_after_days;
   const pawnsHtml = shown.map(p => {
     const meCls = p.is_me ? ' sl-pawn-me' : '';
+    // Duch = gracz, który od kilku dni roboczych nie rzucał (liczy serwer). Czysty wygląd:
+    // półprzezroczysty pionek w prześcieradle. Dalej da się go zbić i dalej ma swoje pole.
+    const ghost = ghostAfter && p.missed_workdays >= ghostAfter;
+    const ghostCls = ghost ? ' sl-pawn-ghost' : '';
+    const ghostSheet = ghost ? `<svg class="sl-pawn-sheet" viewBox="0 0 40 44" aria-hidden="true"><path d="M20 1 C8 1 3 11 3 21 L3 43 L9 38 L14 43 L20 38 L26 43 L31 38 L37 43 L37 21 C37 11 32 1 20 1 Z"/><ellipse cx="14" cy="18" rx="3" ry="4.5"/><ellipse cx="26" cy="18" rx="3" ry="4.5"/></svg>` : '';
     // Skrzydła nietoperza doklejone po bokach okrągłego zdjęcia. Każdy macha w innym
     // rytmie (opóźnienie z player_id), żeby stado na planszy nie trzepotało jak jeden.
     const wings = bat ? `
@@ -1165,8 +1199,8 @@ function renderCell(idx, sp, players, posStyle, board) {
     // Natywny title zniknął: nie da się w nim zrobić wielowierszowej rozpiski punktów.
     // Dane dla dymka jadą w data-* i są czytane dopiero przy najechaniu (patrz slTipShow).
     return `
-      <span class="sl-pawn-wrap${bat ? ' is-bat' : ''}${meCls}${shieldCls}${pushCls}" data-tip-player="${p.player_id}">${wings}
-        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />
+      <span class="sl-pawn-wrap${bat ? ' is-bat' : ''}${meCls}${shieldCls}${pushCls}${ghostCls}" data-tip-player="${p.player_id}"${ghost ? ` title="${esc(p.nickname)} — nie rzucał od ${p.missed_workdays >= 99 ? 'zawsze' : `${p.missed_workdays} dni roboczych`}"` : ''}>${wings}
+        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />${ghostSheet}
         ${shieldBadge}
       </span>`;
   }).join('') + overflow;

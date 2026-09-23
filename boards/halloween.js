@@ -95,8 +95,11 @@ module.exports = {
   ladders: [[10, 26], [33, 41]],
   // ROZWIDLONA drabina nad przewężeniem. Zwykła 4 → 28 omijała cały dół prawej pętli
   // (+24 pola) i była za mocna. Teraz wejście na 4 to dodatkowy rzut: 3 albo 6 = górą
-  // na 28, cokolwiek innego = krótsza odnoga na 11. Średnio ~+13 zamiast +24.
-  forks: [[4, 28, 11, [3, 6]]],
+  // na 28, cokolwiek innego = krótsza odnoga na 7, tuż za mostek. Średnio ~+10 zamiast +24.
+  // Krótsza odnoga NIE idzie na 11: pole 11 leży na tym samym ramieniu drogi co 7–10, więc
+  // drabina do niego biegłaby wzdłuż drogi, po pionkach. Węzeł [9.7, 2.2] to jedyne miejsce,
+  // z którego pień i obie odnogi mijają wszystkie pola (luz ~0,7 kratki) i mostek.
+  forks: [[4, 28, 7, [3, 6], [9.7, 2.2]]],
   // Pajęcza nić (29 → 9) spada tuż przy mostku, zaraz po tym, jak ktoś wszedł drabiną 10.
   snakes: [[25, 12], [29, 9], [44, 31]],
   // Dynie zamiast gwiazdek. Celowo skromniej niż na klasycznej planszy (5 dyń, razem
@@ -106,14 +109,16 @@ module.exports = {
 
   marks: { ladder: '🪜', snake: '🐍', bonus: '🎃' },
   confetti: ['🎃', '👻', '🦇', '🍬', '🕸️'],
+  // Kto przepuści dwa pełne dni robocze bez rzutu, straszy na planszy jako duch.
+  ghost_after_days: 2,
 
   // Dekoracje: środek [x, y] w kratkach, `size` = szerokość w kratkach. Stoją POD drogą
   // i łącznikami. Rozmieszczone w pustych miejscach: wnętrza pętli, pas nad i pod
   // przewężeniem, rogi.
   decor: [
-    { kind: 'moon', at: [10, 1.55], size: 2.6 },
-    { kind: 'ghost', at: [12.6, 1.35], size: 1.05 },
-    { kind: 'ghost', at: [7.35, 1.05], size: 0.8, flip: true },
+    // Księżyc przesunięty w lewo: nad przewężeniem stoi węzeł rozwidlonej drabiny.
+    { kind: 'moon', at: [8.1, 1.05], size: 2.0 },
+    { kind: 'ghost', at: [12.4, 1.3], size: 1.0 },
 
     // Prawa pętla: nawiedzony dom między pionową pajęczą nicią a prawym brzegiem.
     { kind: 'house', at: [16.75, 5.35], size: 2.75 },

@@ -243,22 +243,61 @@
 .sl-bonus  { background: rgba(245, 200, 66, 0.16); border-color: var(--gold); }
 .sl-fork   { background: rgba(200, 241, 53, 0.14); border-color: var(--accent-dim); border-style: dashed; }
 
-/* Etykietka rozwidlonej drabiny — na środku drabiny, nad łącznikami. */
-.sl-fork-label {
+/* Węzeł rozwidlonej drabiny: kółko z kostką tam, gdzie pień rozchodzi się na dwie
+   drabiny. Po najechaniu (albo fokusie z klawiatury) pokazuje regułę zapisaną jak kod. */
+.sl-fork-node {
   position: absolute;
   transform: translate(-50%, -50%);
-  z-index: 3;
-  padding: 1px 7px;
-  border-radius: 999px;
+  z-index: 4;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
   background: var(--bg);
-  border: 1px solid var(--accent-dim);
-  color: var(--accent);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 10px rgba(200, 241, 53, 0.45);
+  font-size: 15px;
+  cursor: help;
+  outline: none;
+}
+.sl-fork-code {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  min-width: 290px;
+  padding: 0;
+  border-radius: 8px;
+  background: #0B0B10;
+  border: 1px solid var(--muted);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+  text-align: left;
+  overflow: hidden;
+}
+.sl-fork-code-head {
+  display: block;
+  padding: 3px 10px;
+  background: var(--surface-alt);
+  color: var(--text-muted);
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  white-space: nowrap;
-  pointer-events: auto;
-  cursor: help;
 }
+.sl-fork-code code {
+  display: block;
+  padding: 7px 10px;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: nowrap;
+}
+.sl-fork-node:hover .sl-fork-code,
+.sl-fork-node:focus .sl-fork-code { display: block; }
+/* Krótsza odnoga odrobinę przygaszona — gałąź „wygranej" ma przyciągać oko. */
+.sl-link-fork.is-lose { opacity: 0.75; }
 
 /* ── LINIE ŁĄCZĄCE WĘŻE I DRABINY ──
    Warstwa SVG leży NAD tłem pól, ale POD pionkami (z-index 1 vs 2), więc linie
@@ -406,6 +445,29 @@
   overflow: hidden;
   z-index: 5;
 }
+
+/* ── DUCH (nieaktywny gracz, patrz ghost_after_days) ──
+   Zdjęcie blednie i szarzeje, a na nie nachodzi półprzezroczyste prześcieradło z oczami
+   — twarz dalej prześwituje, żeby było wiadomo, KTO straszy. Duch lekko się unosi. */
+.sl-pawn-ghost { animation: sl-ghost-float 3.2s ease-in-out infinite; }
+.sl-pawn-ghost .sl-pawn-avatar { filter: grayscale(1) brightness(1.2); opacity: 0.7; }
+.sl-pawn-sheet {
+  position: absolute;
+  left: -6%;
+  top: -4%;
+  width: 112%;
+  height: auto;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.72;
+}
+.sl-pawn-sheet path { fill: rgba(240, 240, 255, 0.32); stroke: rgba(255, 255, 255, 0.85); stroke-width: 1.2; }
+.sl-pawn-sheet ellipse { fill: #140C1F; opacity: 0.85; }
+@keyframes sl-ghost-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) { .sl-pawn-ghost { animation: none; } }
 
 /* ── PIONKI ── */
 .sl-pawns {

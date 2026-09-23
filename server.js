@@ -2576,6 +2576,25 @@ function slBoardPayload() {
 // TYLKO gracze ze zdjęciem profilowym — bez zdjęcia nie widać ich na planszy i nie da
 // się ich wskazać jako celu power-upa (has_avatar = 1 w WHERE). To lustrzane odbicie
 // bramki na rzut (patrz POST /api/snakes/roll): kto nie wgrał zdjęcia, ten "nie gra".
+// Ile PEŁNYCH dni roboczych gracz przepuścił bez rzutu: dni pon–pt ściśle między ostatnim
+// ruchem a dzisiaj. Dzisiaj się nie liczy — do 16:00 każdy ma jeszcze czas. Gracz, który
+// nigdy nie rzucał, dostaje wartość „dużo", bo po prostu nie gra.
+// Na tym stoją duchy na planszy (patrz ghost_after_days w pliku sezonu) — to czysty wygląd,
+// nic w grze od tego nie zależy.
+function slMissedWorkdays(lastMoveDate, today) {
+  if (!lastMoveDate) return 99;
+  const [y, m, d] = lastMoveDate.split('-').map(Number);
+  let cur = Date.UTC(y, m - 1, d);
+  let missed = 0;
+  for (let i = 0; i < 60; i++) {
+    cur += 24 * 60 * 60 * 1000;
+    const day = new Date(cur).toISOString().slice(0, 10);
+    if (day >= today) break;
+    if (!isWeekendStr(day)) missed++;
+  }
+  return missed;
+}
+
 function slPlayersPayload(meId) {
   const rows = db.prepare(`
     SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.total_points, s.balance, s.last_move_date, s.rolls_today,
@@ -2598,6 +2617,7 @@ function slPlayersPayload(meId) {
       player_id: r.player_id,
       nickname: r.nickname,
       avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at),
+      missed_workdays: slMissedWorkdays(r.last_move_date, today),
       tile: slTileOf(r.abs_pos),
       abs_pos: Number(r.abs_pos),
       laps: Number(r.laps),
