@@ -1701,6 +1701,71 @@ ensureColumn('sl_activity', 'ref', 'TEXT');
 ensureColumn('sl_activity', 'visibility', 'TEXT');
 ensureColumn('sl_activity', 'public_detail', 'TEXT');
 
+// ── MIGRACJA (jednorazowa): KLUCZ TURY DLA STAREJ HISTORII ──
+// Wpisy sprzed wprowadzenia `ref` renderowałyby się pojedynczo, czyli cała dotychczasowa
+// historia zostałaby ścianą wierszy, a od wdrożenia w dół nagle zaczęłyby się bloki.
+// Da się to odtworzyć, bo CAŁY rzut leci w JEDNEJ transakcji — wpisy jednej tury są więc
+// ciągłe w numeracji `id` i nie mogą się przepleść z cudzym rzutem. Układ jest stały:
+//
+//     [zbicia z kaskadą]  🎲 rzut  [klątwa]  [trafienie bossa]
+//
+// Kotwicą jest wpis o rzucie; to, co stoi tuż PRZED nim (zbicia) i tuż PO nim (klątwa,
+// boss), należy do tej samej tury. Wszystko inne zostaje samodzielnym wierszem.
+//
+// Rozpoznanie kotwicy po emoji na początku treści jest tu WYJĄTKIEM od zasady „nie
+// filtruj po treści wpisu" i jest bezpieczne: zasada chroni przed zdradzeniem CELU ataku
+// (patrz komentarz przy renderActivity), a tu tylko rysujemy ramki wokół wierszy, które
+// i tak są publiczne. Starsze klątwy miały typ 'roll' zamiast 'curse_fired', więc po
+// samym typie nie dałoby się odróżnić rzutu od klątwy.
+(function backfillActivityTurnRefs() {
+  const FLAG = 'activity_turn_ref_backfill_done';
+  if (slMetaGet(FLAG)) return;
+
+  const updated = transaction(() => {
+    slMetaSet(FLAG, new Date().toISOString());
+    const rows = db.prepare(
+      'SELECT id, type, detail FROM sl_activity WHERE ref IS NULL ORDER BY id'
+    ).all();
+    if (!rows.length) return 0;
+
+    const isAnchor = r => r.type === 'roll' && (r.detail.startsWith('🎲') || r.detail.startsWith('❄️'));
+    // Skutki rzutu zapisywane PO nim: klątwa (dziś 'curse_fired', dawniej 'roll' z 💀)
+    // i trafienie bossa. Ciąg urywa się na pierwszym wpisie innego rodzaju.
+    const isAftermath = r => r.type === 'curse_fired' || r.type === 'boss_hit'
+      || (r.type === 'roll' && r.detail.startsWith('💀'));
+
+    const assign = db.prepare('UPDATE sl_activity SET ref = ? WHERE id = ?');
+    let pending = [];   // zbicia czekające na swoją kotwicę
+    let current = null; // ref tury, w której właśnie jesteśmy
+    let count = 0;
+
+    for (const r of rows) {
+      if (isAnchor(r)) {
+        current = `turn:backfill:${r.id}`;
+        for (const p of pending) { assign.run(current, p.id); count++; }
+        pending = [];
+        assign.run(current, r.id); count++;
+      } else if (current && isAftermath(r)) {
+        assign.run(current, r.id); count++;
+      } else if (r.type === 'knockback') {
+        // Zbicia są zapisywane PRZED wpisem o rzucie, więc trafią do NASTĘPNEJ kotwicy.
+        pending.push(r);
+        current = null;
+      } else {
+        // Zakup, awatar, nagroda bossa — samodzielny wiersz. Domyka bieżącą turę i kasuje
+        // bufor: zbicia bez kotwicy (np. gdy wpis o rzucie skasowano) zostają luzem.
+        pending = [];
+        current = null;
+      }
+    }
+    return count;
+  });
+
+  if (updated > 0) {
+    console.log(`Snakes: stara historia pogrupowana w tury — ${updated} wpisów dostało klucz. Leci tylko raz.`);
+  }
+})();
+
 // sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
 // jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
 // błąd unikalności, więc trzeba przebudować tabelę (SQLite nie zmienia constraintów
