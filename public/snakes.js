@@ -270,7 +270,7 @@ document.getElementById('avatar-overlay-close').addEventListener('click', () => 
 // celu są re-renderowane co chwilę, więc listenery wpięte bezpośrednio w nie
 // znikałyby przy każdym odświeżeniu. Działa dla każdego .sl-pawn-avatar / .target-avatar,
 // niezależnie kiedy powstał.
-const AVATAR_HOVER_SELECTOR = '.sl-pawn-avatar, .target-avatar, .my-avatar-thumb';
+const AVATAR_HOVER_SELECTOR = '.sl-pawn-avatar, .target-avatar, .my-avatar-thumb, img.activity-face';
 
 function positionAvatarHoverPreview(x, y) {
   const el = document.getElementById('avatar-hover-preview');
@@ -369,6 +369,9 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
 const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', curse_fired: '💀', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆' };
 
+// Które bloki dziennika są rozwinięte — po `ref`, który jest stały między odświeżeniami.
+const activityOpen = new Set();
+
 async function loadActivity(date) {
   try {
     const q = date ? `?date=${encodeURIComponent(date)}` : '';
@@ -429,7 +432,7 @@ function renderActivity(data) {
   const renderRow = (e, sub, hideNick) => {
     const time = new Date(e.created_at.replace(' ', 'T') + 'Z')
       .toLocaleTimeString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit' });
-    const icon = ACTIVITY_ICONS[e.type] || '•';
+    const icon = e.icon || ACTIVITY_ICONS[e.type] || '•';
     // Treść prawie każdego wpisu zaczyna się od własnego emoji, a obok stoi jeszcze
     // kolumna z ikoną typu — wychodziło „🎲 kanat 🎲 6 → pole 40". Ucinamy ten wiodący
     // emoji, bo ikona z gutteru mówi to samo i trzyma pion. Wpisy bez emoji (np. trafienie
@@ -461,6 +464,48 @@ function renderActivity(data) {
       </div>`;
   };
 
+  // Rząd malutkich awatarów w zwiniętym nagłówku bloku — „kogo to dotyczy" bez czytania.
+  // Lista graczy pochodzi WYŁĄCZNIE z `player_id` wpisów w bloku, nigdy z treści: pasek
+  // nie może pokazać nikogo, kogo nie widać już jako nicku po rozwinięciu (Freeze, klątwy).
+  const isMe = id => Number(id) === Number(state.playerId);
+  const renderFaces = entries => {
+    const seen = new Set();
+    const people = [];
+    for (const e of entries) {
+      if (seen.has(Number(e.player_id))) continue;
+      seen.add(Number(e.player_id));
+      people.push(e);
+    }
+    if (!people.length) return '';
+    // Przy karze bossa to cała ekipa — kilkanaście kółek nie mieści się w wąskiej kolumnie.
+    const MAX = 6;
+    const faces = people.slice(0, MAX).map(p => {
+      const cls = `activity-face${isMe(p.player_id) ? ' is-me' : ''}`;
+      return p.avatar_url
+        ? `<img class="${cls}" src="${esc(p.avatar_url)}" alt="${esc(p.nickname)}" title="${esc(p.nickname)}" loading="lazy" />`
+        : `<span class="${cls} is-initial" title="${esc(p.nickname)}">${esc(String(p.nickname || '?').charAt(0).toUpperCase())}</span>`;
+    }).join('');
+    const more = people.length > MAX ? `<span class="activity-face is-more">+${people.length - MAX}</span>` : '';
+    return `<span class="activity-faces">${faces}${more}</span>`;
+  };
+
+  // Zwijany blok: nagłówek + awatary widać zawsze, szczegóły dopiero po kliknięciu.
+  // Awatary idą osobnym rzędem POD tekstem nagłówka, a nie obok niego — w wąskiej
+  // kolumnie obok tekstu zjadały mu miejsce i nagłówek łamał się na cztery linie.
+  // Stan „rozwinięty" żyje w activityOpen (po `ref`), bo lista przerysowuje się co 10 s
+  // przez innerHTML — bez tego rozwinięty blok zwijałby się sam pod palcem.
+  const renderBlock = (ref, headHtml, facesHtml, bodyHtml, classes) => {
+    const open = activityOpen.has(ref);
+    return `
+      <div class="activity-turn is-collapsible${open ? ' is-open' : ''}${classes}" data-ref="${esc(ref)}">
+        <div class="activity-turn-head" role="button" tabindex="0" aria-expanded="${open}" title="${open ? 'Zwiń' : 'Pokaż szczegóły'}">
+          ${headHtml}<span class="activity-chevron" aria-hidden="true">▸</span>
+          ${facesHtml ? `<div class="activity-faces-row">${facesHtml}</div>` : ''}
+        </div>
+        <div class="activity-turn-body">${bodyHtml}</div>
+      </div>`;
+  };
+
   for (const g of groups) {
     const first = g.entries[0];
     if (first.date !== lastDay) {
@@ -468,16 +513,40 @@ function renderActivity(data) {
       lastDay = first.date;
     }
 
-    // Pojedynczy wpis (zakup, awatar, nagroda bossa) — bez ramki, jak dotąd.
+    // Pojedynczy wpis (zakup, awatar) — bez ramki, jak dotąd.
     if (g.entries.length === 1) {
       html += renderRow(first, false, false);
       continue;
     }
 
-    // Nagłówkiem jest wpis o rzucie; gdy moderacja go ukryła, blok zostaje bez nagłówka,
-    // ale nadal trzyma się kupy wizualnie.
+    const hasMe = g.entries.some(e => isMe(e.player_id));
+
+    // ── ROZLICZENIE BOSSA ── (kamień milowy, wygrana, kara) — wpis na gracza, wszystkie
+    // o tym samym. Nagłówek to podsumowanie; po rozwinięciu każdy widzi swoją kwotę.
+    if (String(g.ref).startsWith('boss:')) {
+      const sorted = g.entries.slice().sort((a, b) => a.id - b.id);
+      const texts = sorted.map(e => String(e.detail));
+      // Kara i kamień milowy mają identyczną treść u wszystkich — pokazujemy ją raz.
+      // Przy wygranej kwoty są różne, więc zostaje wspólny początek („Boss pokonany").
+      const summary = texts.every(t => t === texts[0]) ? texts[0] : texts[0].split(' — ')[0];
+      const headHtml = renderRow({
+        ...sorted[0],
+        detail: `${summary} · ${sorted.length} os.`,
+        // Ikona z treści (🎯 próg / 🏆 wygrana / 💥 kara), a nie ogólne 🏆 typu — w zwiniętym
+        // bloku to jedyna wskazówka, czy boss dał, czy zabrał.
+        icon: (summary.match(/^\p{Extended_Pictographic}\uFE0F?/u) || [])[0],
+        // Nagłówek nie jest niczyim wpisem — „to ja" świeci na awatarze i w szczegółach.
+        player_id: null
+      }, false, true);
+      const body = sorted.map(e => renderRow(e, true, false)).join('');
+      html += renderBlock(g.ref, headHtml, renderFaces(sorted), body,
+        `${hasMe ? ' has-me' : ''} is-boss-block`);
+      continue;
+    }
+
+    // ── TURA ── Nagłówkiem jest wpis o rzucie; gdy moderacja go ukryła, jego miejsce
+    // zajmuje pierwszy skutek, żeby blok dalej miał co pokazać po zwinięciu.
     const headIdx = g.entries.findIndex(e => e.type === 'roll');
-    const head = headIdx >= 0 ? g.entries[headIdx] : null;
     // Skutki układamy narracyjnie: najpierw co odmieniło ten rzut (klątwa), potem kogo
     // zbił, na końcu ile oberwał boss. WEWNĄTRZ każdego rodzaju sortujemy ROSNĄCO po `id`,
     // czyli chronologicznie — blok ma się czytać z góry na dół, odwrotnie niż sama lista
@@ -487,15 +556,44 @@ function renderActivity(data) {
     const subs = g.entries
       .filter((_, i) => i !== headIdx)
       .sort((a, b) => ((order[a.type] || 9) - (order[b.type] || 9)) || (a.id - b.id));
-    const mineTurn = head && Number(head.player_id) === Number(state.playerId);
-    html += `<div class="activity-turn${mineTurn ? ' is-my-turn' : ''}">`;
-    if (head) html += renderRow(head, false, false);
-    html += subs.map(e => renderRow(e, !!head,
-      !!head && Number(e.player_id) === Number(head.player_id))).join('');
-    html += `</div>`;
+    const head = headIdx >= 0 ? g.entries[headIdx] : subs.shift();
+    const mineTurn = isMe(head.player_id);
+    // Awatary pokazują INNYCH graczy, których tura dotknęła (zbici, rzucający klątwę) —
+    // autor rzutu i tak stoi z nickiem w nagłówku. Trafienie bossa to tylko ⚔️ na końcu.
+    const others = subs.filter(e => Number(e.player_id) !== Number(head.player_id));
+    const bossMark = subs.some(e => e.type === 'boss_hit')
+      ? '<span class="activity-mark" title="Atak na bossa">⚔️</span>' : '';
+    const body = subs.map(e => renderRow(e, true,
+      Number(e.player_id) === Number(head.player_id))).join('');
+    html += renderBlock(g.ref, renderRow(head, false, false), renderFaces(others) + bossMark, body,
+      `${mineTurn ? ' is-my-turn' : ''}${hasMe && !mineTurn ? ' has-me' : ''}`);
   }
   list.innerHTML = html;
 }
+
+function toggleActivityBlock(headEl) {
+  const block = headEl.closest('.activity-turn.is-collapsible');
+  if (!block) return;
+  const ref = block.dataset.ref;
+  const open = !block.classList.contains('is-open');
+  if (open) activityOpen.add(ref); else activityOpen.delete(ref);
+  block.classList.toggle('is-open', open);
+  headEl.setAttribute('aria-expanded', String(open));
+  headEl.title = open ? 'Zwiń' : 'Pokaż szczegóły';
+}
+
+// Delegacja na liście, a nie listener na każdym bloku — lista przerysowuje się co 10 s.
+document.getElementById('activity-list').addEventListener('click', e => {
+  const head = e.target.closest('.activity-turn-head');
+  if (head) toggleActivityBlock(head);
+});
+document.getElementById('activity-list').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const head = e.target.closest('.activity-turn-head');
+  if (!head) return;
+  e.preventDefault();
+  toggleActivityBlock(head);
+});
 
 
 document.getElementById('activity-date').addEventListener('change', e => loadActivity(e.target.value || null));

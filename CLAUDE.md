@@ -98,9 +98,22 @@ Historię sprzed tej zmiany dogrywa jednorazowa migracja `backfillActivityTurnRe
 (flaga `activity_turn_ref_backfill_done`). Odtwarza klucz z CIĄGŁOŚCI `id`: cały rzut leci
 w jednej transakcji, więc wpisy jednej tury nie mogą się przepleść z cudzym rzutem, a układ
 jest stały — `[zbicia] 🎲 rzut [klątwa] [boss]`. Kotwicę rozpoznaje po emoji na początku
-treści i to **jedyny** dozwolony wyjątek od „nie filtruj po treści": starsze klątwy miały typ
-`roll` zamiast `curse_fired`, więc po samym typie nie dało się ich odróżnić od rzutu, a samo
-rysowanie ramek wokół publicznych wierszy niczego nie zdradza.
+treści i to jeden z **dwóch** dozwolonych wyjątków od „nie filtruj po treści": starsze klątwy
+miały typ `roll` zamiast `curse_fired`, więc po samym typie nie dało się ich odróżnić od
+rzutu, a samo rysowanie ramek wokół publicznych wierszy niczego nie zdradza.
+
+**Rozliczenia bossa też są blokiem.** Kamień milowy, wygrana i kara piszą wpis KAŻDEMU
+graczowi (bo „to ja" liczy się z `player_id`), więc przy karze to kilkanaście identycznych
+wierszy. Dostają wspólny `ref` ze `slBossActivityRef()` (`boss:<cycle>:<rodzaj>`), a front
+rysuje nagłówek-podsumowanie. Stare rozliczenia dogrywa `backfillBossRewardRefs` (flaga
+`activity_boss_ref_backfill_done`) — drugi wyjątek: skleja sąsiednie `boss_reward` o tym
+samym początku treści sprzed „ — ".
+
+**Bloki są domyślnie ZWINIĘTE.** Widać nagłówek i pod nim rząd malutkich awatarów „kogo to
+dotyczy" (w turze: inni gracze niż autor rzutu; w rozliczeniu bossa: wszyscy). Awatary biorą
+się **wyłącznie z `player_id` wpisów w bloku** — pasek nie może pokazać nikogo, kogo nie widać
+już jako nicku po rozwinięciu. Stan „rozwinięty" trzyma `activityOpen` po `ref`, bo lista
+przerysowuje się co 10 s przez `innerHTML`.
 
 Konsekwencja przy pisaniu kodu: **nigdy nie podświetlaj ani nie filtruj po treści wpisu**.
 Predykat „to mój wpis" to zawsze `entry.player_id`. Dopasowanie po nicku w tekście

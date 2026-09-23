@@ -1766,6 +1766,58 @@ ensureColumn('sl_activity', 'public_detail', 'TEXT');
   }
 })();
 
+// ── MIGRACJA (jednorazowa): stare rozliczenia bossa też zwijają się w jeden blok ──
+// Od teraz kamień milowy, wygrana i kara dostają wspólny `ref` przy zapisie (patrz
+// slBossActivityRef w lib/boss.js). Stare wpisy go nie mają, a kara to kilkanaście
+// identycznych wierszy naraz — dokładnie ta ściana, którą blok ma zwinąć.
+//
+// Jedno rozliczenie to jedna pętla w jednej transakcji, więc jego wpisy są ciągłe w `id`
+// i mają ten sam początek treści sprzed „ — " („🎯 Boss zbity do 75%", „🏆 Boss
+// pokonany", „💥 Boss zaatakował"). Kilka progów przekroczonych jednym ciosem różni się
+// procentem, więc się nie skleją. Do tego limit czasu między wpisami — na wypadek, gdyby
+// dwie kary z rzędu nie miały nic pomiędzy. Tak jak przy turach: treść służy tu tylko do
+// narysowania ramki wokół publicznych wierszy, nie do rozpoznania celu ataku.
+(function backfillBossRewardRefs() {
+  const FLAG = 'activity_boss_ref_backfill_done';
+  if (slMetaGet(FLAG)) return;
+
+  const updated = transaction(() => {
+    slMetaSet(FLAG, new Date().toISOString());
+    const rows = db.prepare(
+      'SELECT id, type, detail, ref, created_at FROM sl_activity ORDER BY id'
+    ).all();
+    const assign = db.prepare('UPDATE sl_activity SET ref = ? WHERE id = ?');
+    const head = r => String(r.detail).split(' — ')[0];
+    const ts = r => Date.parse(String(r.created_at).replace(' ', 'T') + 'Z') || 0;
+    let count = 0;
+    let run = [];
+    const flush = () => {
+      // Pojedynczy wpis zostaje samodzielnym wierszem — nie ma czego zwijać.
+      if (run.length > 1) {
+        const ref = `boss:backfill:${run[0].id}`;
+        for (const r of run) { assign.run(ref, r.id); count++; }
+      }
+      run = [];
+    };
+    for (const r of rows) {
+      const fits = r.type === 'boss_reward' && r.ref == null;
+      const prev = run[run.length - 1];
+      if (fits && prev && head(prev) === head(r) && Math.abs(ts(r) - ts(prev)) <= 5000) {
+        run.push(r);
+        continue;
+      }
+      flush();
+      if (fits) run.push(r);
+    }
+    flush();
+    return count;
+  });
+
+  if (updated > 0) {
+    console.log(`Snakes: stare rozliczenia bossa zebrane w bloki — ${updated} wpisów dostało klucz. Leci tylko raz.`);
+  }
+})();
+
 // sl_moves: stare wdrożenia mają UNIQUE(player_id, move_date) — blokadę na WYŁĄCZNIE
 // jeden ruch dziennie. Przy więcej niż jednym ruchu dziennie druga wstawka wywaliłaby
 // błąd unikalności, więc trzeba przebudować tabelę (SQLite nie zmienia constraintów
@@ -2010,8 +2062,10 @@ function slPublicActivity({ date = null, limit = 150 } = {}) {
   if (date) { where.push('a.day = ?'); args.push(date); }
 
   const rows = db.prepare(`
-    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.day, a.created_at, a.ref
+    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.day, a.created_at, a.ref,
+           s.avatar_updated_at
     FROM sl_activity a JOIN players p ON p.id = a.player_id
+    LEFT JOIN sl_state s ON s.player_id = a.player_id
     WHERE ${where.join(' AND ')}
     ORDER BY a.id DESC LIMIT ?
   `).all(...args, Math.min(300, Math.max(1, limit)));
@@ -2031,7 +2085,10 @@ function slPublicActivity({ date = null, limit = 150 } = {}) {
       detail: slActivityPublicDetail(r, mod).detail,
       date: r.day,
       created_at: r.created_at,
-      ref: r.ref
+      ref: r.ref,
+      // Do rzędu awatarów w zwiniętym bloku. Bierze się WYŁĄCZNIE z `player_id` wpisu,
+      // więc nie pokazuje nikogo, kogo nie widać już jako nicku w rozwiniętym bloku.
+      avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at)
     })),
     dates
   };

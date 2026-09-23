@@ -494,6 +494,77 @@
   opacity: 0.92;
 }
 .activity-entry.is-sub .activity-time { width: 0; overflow: hidden; }
+
+/* ── ZWIJANY BLOK ──
+   Domyślnie widać tylko nagłówek (rzut albo podsumowanie rozliczenia bossa) i rząd
+   malutkich awatarów tych, których blok dotyczy. Szczegóły — to, co było wcześniej
+   rozpisane wiersz po wierszu — pojawiają się po kliknięciu. */
+.activity-turn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  border-radius: 0 6px 6px 0;
+  padding-right: 4px;
+}
+.activity-turn-head:hover { background: rgba(255, 255, 255, 0.04); }
+.activity-turn-head:focus-visible { outline: 1px solid var(--accent-dim); outline-offset: -1px; }
+.activity-turn-head > .activity-entry { flex: 1 1 0%; min-width: 0; }
+/* Tło „to ja" na całym nagłówku, a nie tylko pod tekstem — inaczej kończyłoby się
+   w pół wiersza, tuż przed awatarami. */
+.activity-turn-head:has(> .activity-entry.is-me) { background: rgba(200, 241, 53, 0.07); }
+.activity-turn-head > .activity-entry.is-me { background: transparent; }
+.activity-turn-body { display: none; padding-bottom: 2px; }
+.activity-turn.is-open .activity-turn-body { display: block; }
+
+.activity-chevron {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.activity-turn.is-open .activity-chevron { transform: rotate(90deg); }
+
+/* Kółka lekko na siebie nachodzą, żeby kilka osób zmieściło się w wąskiej kolumnie. */
+/* Rząd awatarów pod tekstem nagłówka — wcięty do pionu treści (za godziną i ikoną),
+   żeby czytał się jako „kogo to dotyczy", a nie jako osobny wpis. */
+.activity-faces-row {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 3px 56px;
+}
+.activity-faces { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.activity-face {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--surface, #1a1a1a);
+  margin-left: -4px;
+  background: var(--surface-alt);
+  flex: 0 0 auto;
+}
+.activity-face:first-child { margin-left: 0; }
+.activity-face.is-initial,
+.activity-face.is-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+}
+.activity-face.is-more { width: auto; min-width: 16px; padding: 0 3px; border-radius: 8px; }
+/* „To ja" w rzędzie awatarów — obwódka w kolorze akcentu, jak wszędzie indziej. */
+.activity-face.is-me { border-color: var(--accent); position: relative; z-index: 1; }
+.activity-mark { flex: 0 0 auto; font-size: 10px; }
+
+/* Blok, który mnie dotyczy, choć to nie moja tura (zbili mnie, dostałem nagrodę bossa) —
+   akcent na kresce, żeby było to widać także po zwinięciu. */
+.activity-turn.has-me { border-left-color: var(--accent); }
 .activity-body { min-width: 0; word-break: break-word; }
 .activity-body strong { font-family: 'Space Grotesk', sans-serif; }
 
