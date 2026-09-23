@@ -1,0 +1,236 @@
+/* ══ MOTYW: NOC DUCHÓW (październik) ══
+   Doładowywany z payloadu planszy (board.theme = 'halloween', patrz applySeason) i usuwany
+   przy zmianie sezonu. Wszystko jest pod body.season-halloween, żeby w chwili przełączania
+   sezonu stary motyw nie mieszał się z nowym.
+   Paleta: fioletowa noc + dyniowy pomarańcz. Limonkowy akcent zostaje jako „toksyczna
+   zieleń" — to kolor „to ja" w całej grze i nie zmieniamy mu znaczenia. */
+
+body.season-halloween {
+  --bg:           #0E0A15;
+  --surface:      #171022;
+  --surface-alt:  #21172F;
+  --muted:        #3B2D4F;
+  --text-muted:   #8C7BA3;
+  --gold:         #FF9A2E;
+  --pumpkin:      #FF8A1F;
+  --night-top:    #22143A;
+  --night-bottom: #0B0712;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(120, 70, 190, 0.22), transparent 70%),
+    var(--bg);
+}
+
+/* ── NIEBO POD PLANSZĄ ── */
+.season-halloween .sl-board-wrap {
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse 22% 30% at 50% 12%, rgba(255, 236, 180, 0.14), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 50% 110%, rgba(124, 255, 79, 0.07), transparent 70%),
+    linear-gradient(180deg, var(--night-top), var(--night-bottom));
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+/* Gwiazdy — kilka warstw kropek z gradientów, bez obrazków. */
+.season-halloween .sl-board-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, #fff, transparent),
+    radial-gradient(1px 1px at 27% 8%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 41% 24%, #ffe9c4, transparent),
+    radial-gradient(1px 1px at 63% 11%, #fff, transparent),
+    radial-gradient(1px 1px at 72% 30%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 86% 16%, #fff, transparent),
+    radial-gradient(1px 1px at 93% 42%, #fff, transparent),
+    radial-gradient(1px 1px at 6% 46%, #fff, transparent),
+    radial-gradient(1px 1px at 54% 4%, #fff, transparent),
+    radial-gradient(1px 1px at 34% 40%, #d8c8ff, transparent);
+}
+
+/* ── POLA: nagrobki ── */
+.season-halloween .sl-board-free .sl-cell {
+  border-radius: 46% 46% 9px 9px / 38% 38% 9px 9px;
+  background: linear-gradient(180deg, #4B3F60, #2E2640);
+  border: 1px solid #66557F;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.season-halloween .sl-board-free .sl-idx { color: #CFC2E6; font-weight: 600; }
+.season-halloween .sl-board-free .sl-ladder {
+  background: linear-gradient(180deg, #3F5A2A, #22301B);
+  border-color: var(--accent);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(200, 241, 53, 0.35);
+}
+.season-halloween .sl-board-free .sl-snake {
+  background: linear-gradient(180deg, #5E2A3A, #2F1520);
+  border-color: var(--danger);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(232, 93, 74, 0.35);
+}
+.season-halloween .sl-board-free .sl-bonus {
+  background: linear-gradient(180deg, #6A3E14, #3A200A);
+  border-color: var(--pumpkin);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 138, 31, 0.5);
+}
+.season-halloween .sl-board-free .sl-cell-start {
+  background: linear-gradient(180deg, #1F5454, #123030);
+  border-color: #40C4C4;
+}
+.season-halloween .sl-board-free .sl-cell-finish {
+  border: 2px solid var(--gold);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 154, 46, 0.45);
+}
+.season-halloween .sl-board-free .sl-mark { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8)); }
+
+/* ── DROGA: ścieżka z ubitej ziemi i sznur lampionów pośrodku ── */
+.season-halloween .sl-track-edge { stroke: #07040C; stroke-width: 30px; opacity: 1; }
+.season-halloween .sl-track-road { stroke: #3A2A22; stroke-width: 22px; opacity: 1; }
+.season-halloween .sl-track-dash {
+  stroke: #FFB347;
+  stroke-width: 3px;
+  stroke-dasharray: 0.1 14;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 2px rgba(255, 179, 71, 0.9));
+}
+.season-halloween .sl-track-loop { stroke: var(--gold); }
+.season-halloween .sl-loop-label { background: var(--night-top); }
+
+/* ── ŁĄCZNIKI ── */
+.season-halloween .sl-link-ladder .sl-ladder-rail { stroke: #A8793F; stroke-width: 3.5px; }
+.season-halloween .sl-link-ladder .sl-ladder-rungs { stroke: #7A5A30; stroke-width: 2.5px; }
+.season-halloween .sl-link-ladder { filter: drop-shadow(0 0 3px rgba(200, 241, 53, 0.35)); }
+.season-halloween .sl-link-snake .sl-snake-belly { stroke: #140A10; stroke-width: 9px; }
+.season-halloween .sl-link-snake .sl-snake-back { stroke: #8E3BD9; stroke-width: 5px; }
+.season-halloween .sl-link-snake { filter: drop-shadow(0 0 4px rgba(142, 59, 217, 0.55)); }
+.season-halloween .sl-dot-snake { color: #8E3BD9; }
+.season-halloween .sl-dot-ladder { color: #C79A55; }
+.season-halloween .sl-legend-snake { color: #B57BFF; }
+
+/* ── DEKORACJE ── */
+.season-halloween .d-silhouette { fill: #0A0612; }
+.season-halloween .d-hill { fill: #120C1C; }
+.season-halloween .d-moon { fill: #F7E6B5; }
+.season-halloween .d-moon-halo { fill: rgba(247, 230, 181, 0.10); }
+.season-halloween .d-moon-crater { fill: rgba(180, 150, 100, 0.35); }
+.season-halloween .sl-decor-moon { filter: drop-shadow(0 0 18px rgba(255, 236, 180, 0.45)); }
+
+.season-halloween .d-window { fill: #FFB347; animation: hw-flicker 3.2s infinite steps(1); }
+.season-halloween .d-window-b { animation-duration: 4.7s; animation-delay: -1.3s; }
+.season-halloween .d-window-c { animation-duration: 6.1s; animation-delay: -2.2s; }
+.season-halloween .d-door { fill: #2A1A10; }
+.season-halloween .sl-decor-house { filter: drop-shadow(0 0 10px rgba(255, 179, 71, 0.18)); }
+
+.season-halloween .d-ghost { fill: rgba(236, 236, 255, 0.85); }
+.season-halloween .d-ghost-eye { fill: #140C1F; }
+.season-halloween .sl-decor-ghost {
+  opacity: 0.8;
+  filter: drop-shadow(0 0 6px rgba(220, 220, 255, 0.55));
+  animation: hw-bob 5s ease-in-out infinite;
+}
+.season-halloween .sl-decor-ghost.is-flipped { animation-name: hw-bob-flip; animation-duration: 6.5s; }
+
+.season-halloween .d-stone { fill: #4A3F5C; }
+.season-halloween .d-stone-line { stroke: #2C2538; stroke-width: 3; fill: none; stroke-linecap: round; }
+.season-halloween .d-grass { fill: #1B2718; }
+.season-halloween .d-fence { stroke: #1A1226; stroke-width: 3.5; fill: none; stroke-linecap: round; }
+
+.season-halloween .d-pot { fill: #0E0A14; stroke: #2A2238; stroke-width: 2; }
+.season-halloween .d-brew { fill: #7CFF4F; }
+.season-halloween .d-glow { fill: rgba(124, 255, 79, 0.16); }
+.season-halloween .d-glow-orange { fill: rgba(255, 138, 31, 0.16); }
+.season-halloween .d-bubble { fill: #9DFF6B; animation: hw-bubble 2.6s ease-in infinite; }
+.season-halloween .d-bubble-b { animation-delay: -0.9s; animation-duration: 3.1s; }
+.season-halloween .d-bubble-c { animation-delay: -1.7s; animation-duration: 2.2s; }
+.season-halloween .d-fire { fill: #FF7B1C; animation: hw-flicker-soft 0.9s ease-in-out infinite alternate; }
+.season-halloween .sl-decor-cauldron { filter: drop-shadow(0 0 10px rgba(124, 255, 79, 0.35)); }
+
+.season-halloween .d-pumpkin { fill: #E8731A; }
+.season-halloween .d-pumpkin-mid { fill: #FF8A1F; }
+.season-halloween .d-stem { fill: #3E7A2C; }
+.season-halloween .d-carve { fill: #FFD36B; animation: hw-flicker-soft 1.6s ease-in-out infinite alternate; }
+.season-halloween .sl-decor-pumpkin { filter: drop-shadow(0 0 8px rgba(255, 138, 31, 0.45)); }
+
+.season-halloween .d-web { stroke: rgba(220, 220, 235, 0.35); stroke-width: 1.2; fill: none; }
+.season-halloween .d-spider { fill: #0A0612; }
+
+.season-halloween .d-candle { fill: #E9DCC3; }
+.season-halloween .d-flame { fill: #FFC14D; transform-box: fill-box; transform-origin: 50% 100%; animation: hw-flame 0.8s ease-in-out infinite alternate; }
+.season-halloween .d-flame-b { animation-delay: -0.3s; }
+.season-halloween .d-flame-c { animation-delay: -0.55s; }
+
+/* ── EFEKTY: nietoperze i mgła (warstwa #season-fx) ── */
+.season-halloween .fx-bat {
+  position: absolute;
+  left: -60px;
+  width: 34px;
+  fill: #0A0612;
+  filter: drop-shadow(0 0 2px rgba(180, 140, 255, 0.35));
+  animation: hw-bat-fly 16s linear infinite;
+}
+.season-halloween .fx-bat path { transform-origin: 50% 50%; animation: hw-flap 0.35s ease-in-out infinite alternate; }
+.season-halloween .fx-bat-0 { top: 14%; animation-delay: 0s; }
+.season-halloween .fx-bat-1 { top: 22%; width: 26px; animation-delay: -5s; animation-duration: 19s; }
+.season-halloween .fx-bat-2 { top: 9%;  width: 22px; animation-delay: -9s; animation-duration: 23s; }
+.season-halloween .fx-bat-3 { top: 36%; width: 30px; animation-delay: -12s; animation-duration: 17s; }
+.season-halloween .fx-bat-4 { top: 28%; width: 18px; animation-delay: -2s; animation-duration: 27s; }
+
+.season-halloween .fx-fog {
+  position: absolute;
+  left: -50%;
+  width: 200%;
+  height: 34%;
+  bottom: -6%;
+  background:
+    radial-gradient(ellipse 18% 55% at 20% 60%, rgba(200, 190, 230, 0.10), transparent 70%),
+    radial-gradient(ellipse 22% 45% at 55% 70%, rgba(200, 190, 230, 0.08), transparent 70%),
+    radial-gradient(ellipse 16% 50% at 85% 60%, rgba(200, 190, 230, 0.09), transparent 70%);
+  animation: hw-fog 60s linear infinite;
+}
+.season-halloween .fx-fog-b { bottom: -12%; opacity: 0.8; animation-duration: 85s; animation-direction: reverse; }
+
+@keyframes hw-flicker {
+  0%, 100% { opacity: 1; }
+  41% { opacity: 0.35; }
+  43% { opacity: 1; }
+  76% { opacity: 0.6; }
+  78% { opacity: 1; }
+}
+@keyframes hw-flicker-soft { from { opacity: 0.75; } to { opacity: 1; } }
+@keyframes hw-flame { from { transform: scale(0.85, 0.9); } to { transform: scale(1.05, 1.1); } }
+@keyframes hw-bob {
+  0%, 100% { transform: translate(-50%, -50%); }
+  50% { transform: translate(-50%, -68%); }
+}
+@keyframes hw-bob-flip {
+  0%, 100% { transform: translate(-50%, -50%) scaleX(-1); }
+  50% { transform: translate(-50%, -66%) scaleX(-1); }
+}
+@keyframes hw-bubble {
+  0% { transform: translateY(0); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-14px); opacity: 0; }
+}
+@keyframes hw-flap { from { transform: scaleY(1); } to { transform: scaleY(0.45); } }
+/* Nietoperz przelatuje przez planszę w ~40% cyklu, a resztę czasu czeka poza nią —
+   dzięki temu przeloty są rzadkie i nie męczą oka. */
+@keyframes hw-bat-fly {
+  0%   { transform: translate(0, 0); }
+  10%  { transform: translate(28vw, -18px); }
+  20%  { transform: translate(55vw, 12px); }
+  30%  { transform: translate(82vw, -10px); }
+  40%, 100% { transform: translate(110vw, 6px); }
+}
+@keyframes hw-fog { from { transform: translateX(0); } to { transform: translateX(25%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .season-halloween .d-window,
+  .season-halloween .d-bubble,
+  .season-halloween .d-fire,
+  .season-halloween .d-carve,
+  .season-halloween .d-flame,
+  .season-halloween .sl-decor-ghost,
+  .season-halloween .fx-fog,
+  .season-halloween .fx-bat path { animation: none; }
+  .season-halloween .fx-bat { display: none; }
+}

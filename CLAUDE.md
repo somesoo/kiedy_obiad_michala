@@ -45,7 +45,29 @@ a aktywny siedzi w `sl_meta.active_board`.
   na `.sl-cell`. Gap rozjechałby drogę i łączniki z kafelkami (`slGridPoint`).
 - Motyw: `public/themes/<theme>.css` doładowywany z payloadu, a efekty to klasy `fx-<nazwa>`
   na `<body>`. Warstwy efektów muszą żyć **poza** `#board-area`, bo `renderBoard` podmienia
-  jej `innerHTML`.
+  jej `innerHTML`. Efekty rysuje `renderSeasonEffects` do `#season-fx` (biblioteka
+  `SL_EFFECTS` w `snakes.js`); nieznana nazwa efektu jest pomijana.
+
+**Układ swobodny (`layout: 'free'`, wzorzec: `boards/halloween.js`).** Pola nie siedzą
+w kratkach, tylko stoją w UŁAMKOWYCH punktach, więc droga może iść po krzywej (Noc Duchów
+to ósemka ∞ liczona w pliku po długości łuku). Konwencja współrzędnych jest ta sama co
+w siatce: pole to kwadrat 1×1 zaczepiony w `[x, y]`, środek = `+0.5`. Dzięki temu droga
+i łączniki (`slGridPoint`) działają bez osobnej matematyki. Walidacja pilnuje wtedy
+minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
+
+- Wygląd z pliku jedzie w `board.view` (`layout`, `tile`, `road: 'smooth'`, `closed`,
+  `links: 'drawn'`, `loop_label`, `marks`, `confetti`, `decor`). Serwer tylko go przekazuje;
+  front czyta przez `slBoardView()` z domyślnymi, więc plansza bez `view` wygląda klasycznie.
+- `decor` niesie tylko `kind` + pozycję. Rysunki SVG siedzą w `SL_DECOR` w `snakes.js`,
+  a payload **nigdy** nie niesie znaczników — nieznany `kind` jest pomijany.
+- Tor zamknięty, który przecina sam siebie, rysuje drogę w **dwóch kawałkach** z własnym
+  obrzeżem — drugi kładzie się na pierwszy jak mostek. Pola trzymają się z dala od
+  skrzyżowania (`BRIDGE_GAP` w pliku planszy).
+- Pole w układzie 'free' jest małe: przy więcej niż 2 pionkach pokazuje jeden (mój,
+  jeśli tam stoję) i licznik „+N". To ważne zaraz po zmianie sezonu — wszyscy stoją
+  wtedy na starcie.
+- Na wąskim ekranie plansza 'free' ma minimalną szerokość i przewija się w bok, zamiast
+  ściskać pola do kilkunastu pikseli.
 
 ## Dwie waluty — to jest fundament, nie szczegół
 

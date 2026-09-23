@@ -2537,6 +2537,7 @@ function slBoardPayload() {
     id: slBoard.id, name: slBoard.name, theme: slBoard.theme, effects: slBoard.effects,
     size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
     path: slBoard.path, loop: slBoard.loop, tiles,
+    view: slBoard.view,
     lap_points: SL_POINTS_PER_LAP
   };
 }

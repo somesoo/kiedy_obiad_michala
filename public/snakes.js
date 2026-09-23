@@ -654,6 +654,40 @@ function applySeason(board) {
 
   const sub = document.getElementById('board-season-name');
   if (sub) sub.textContent = `${board.name} · ${board.size} pól · wszystkie pionki na jednej pętli`;
+
+  renderSeasonEffects(board.effects || []);
+}
+
+// ── EFEKTY SEZONU ──
+// Warstwa leży w kolumnie planszy, ale POZA #board-area: renderBoard podmienia innerHTML
+// planszy przy każdej zmianie stanu i zresetowałby animacje w pół lotu. Tu budujemy ją
+// raz na sezon (applySeason wychodzi wcześniej, gdy sezon się nie zmienił).
+// Efekt, którego front nie zna, jest po prostu pomijany.
+const SL_EFFECTS = {
+  // Nietoperze przelatują od czasu do czasu przez planszę — różne tory, wysokości
+  // i opóźnienia, żeby nie leciały kluczem.
+  bats: () => [0, 1, 2, 3, 4].map(i => `
+    <svg class="fx-bat fx-bat-${i}" viewBox="0 0 64 32" aria-hidden="true">
+      <path d="M32 14 C29 8 26 8 24 12 C20 4 10 2 0 8 C8 10 12 16 12 22 C16 18 20 18 22 22 C25 18 28 18 30 20 L32 24 L34 20 C36 18 39 18 42 22 C44 18 48 18 52 22 C52 16 56 10 64 8 C54 2 44 4 40 12 C38 8 35 8 32 14 Z"/>
+    </svg>`).join(''),
+  // Mgła: dwa szerokie, rozmyte pasy dryfujące u dołu planszy w przeciwne strony.
+  fog: () => '<div class="fx-fog fx-fog-a"></div><div class="fx-fog fx-fog-b"></div>',
+};
+
+function renderSeasonEffects(effects) {
+  const host = document.querySelector('.col-game');
+  if (!host) return;
+  let layer = document.getElementById('season-fx');
+  const html = effects.map(e => (SL_EFFECTS[e] ? SL_EFFECTS[e]() : '')).join('');
+  if (!html) { if (layer) layer.remove(); return; }
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'season-fx';
+    layer.className = 'season-fx';
+    layer.setAttribute('aria-hidden', 'true');
+    host.appendChild(layer);
+  }
+  layer.innerHTML = html;
 }
 
 // ── STATY ──
@@ -751,27 +785,163 @@ function renderBoard(g) {
   const pawns = {};
   g.players.forEach(p => { (pawns[p.tile] = pawns[p.tile] || []).push(p); });
 
+  const view = slBoardView(board);
+  const free = view.layout === 'free';
   let cells = '';
   board.path.forEach(([c, r], idx) => {
-    cells += renderCell(idx, special[idx], pawns[idx], `grid-column:${c + 1};grid-row:${r + 1}`, board.size);
+    // Układ 'free': pole nie siedzi w kratce, tylko stoi absolutnie w punkcie z pliku.
+    // Szerokość i wysokość to ułamek kratki (view.tile), wyśrodkowany w jej kwadracie
+    // 1×1 — dzięki temu slGridPoint (środek = c + 0.5) trafia w środek pola tak samo
+    // jak w siatce, a droga i łączniki nie wymagają osobnej matematyki.
+    const pos = free
+      ? `left:${((c + (1 - view.tile) / 2) / board.cols) * 100}%;top:${((r + (1 - view.tile) / 2) / board.rows) * 100}%;`
+        + `width:${(view.tile / board.cols) * 100}%;height:${(view.tile / board.rows) * 100}%`
+      : `grid-column:${c + 1};grid-row:${r + 1}`;
+    cells += renderCell(idx, special[idx], pawns[idx], pos, board);
   });
 
   area.innerHTML = `
-    <div class="sl-board-wrap">
+    <div class="sl-board-wrap${free ? ' is-free' : ''}">
       <div class="sl-board-stage" style="${slBoardInsets(board)}">
+        ${renderDecor(board)}
         ${renderTrack(board)}
-        <div class="sl-board" style="--cols:${board.cols};--rows:${board.rows}">${cells}</div>
+        <div class="sl-board${free ? ' sl-board-free' : ''}" style="--cols:${board.cols};--rows:${board.rows}">${cells}</div>
         ${renderConnectors(board)}
       </div>
     </div>
     ${renderLegend(board)}`;
 }
 
+// Ustawienia wyglądu z pliku sezonu (lib/seasons.js → view). Stary serwer albo plansza
+// bez nich = klasyczny wygląd, więc front działa z każdym payloadem.
+function slBoardView(board) {
+  return Object.assign({
+    layout: 'grid', tile: 0.9, road: 'straight', closed: false, links: 'simple',
+    loop_label: null, marks: null, confetti: null, decor: []
+  }, board.view || {});
+}
+
+function slMarks(board) {
+  return Object.assign({ ladder: '🪜', snake: '🐍', bonus: '⭐' }, slBoardView(board).marks || {});
+}
+
+// ── DEKORACJE SEZONU ──
+// Plik sezonu mówi tylko CO i GDZIE (`kind`, środek, szerokość w kratkach), a rysunki
+// siedzą tutaj. Payload nigdy nie niesie znaczników SVG — nieznany `kind` jest pomijany,
+// więc przez plik planszy nie da się wstrzyknąć niczego do strony.
+// Każdy rysunek ma własny viewBox i zachowuje proporcje (nie rozciąga się z planszą jak
+// warstwa drogi), a kolory biorą się z klas `d-*`, które ustawia motyw.
+const SL_DECOR = {
+  moon: { vb: '0 0 120 100', svg: `
+    <circle class="d-moon-halo" cx="60" cy="50" r="46"/>
+    <circle class="d-moon" cx="60" cy="50" r="34"/>
+    <circle class="d-moon-crater" cx="48" cy="40" r="7"/>
+    <circle class="d-moon-crater" cx="70" cy="60" r="9"/>
+    <circle class="d-moon-crater" cx="72" cy="36" r="4"/>
+    <circle class="d-moon-crater" cx="50" cy="64" r="3.5"/>
+    <path class="d-silhouette" d="M20 30 q6 -7 11 0 q2 -5 5 -1 q3 -4 5 1 q5 -7 11 0 q-6 1 -9 6 q-2 -3 -4 1 q-2 -4 -4 0 q-3 -5 -9 -1 z"/>
+    <path class="d-silhouette" d="M84 72 q4 -5 8 0 q1.5 -3.5 3.5 -.7 q2 -2.8 3.5 .7 q3.5 -5 8 0 q-4.5 .7 -6.5 4.3 q-1.5 -2 -3 .7 q-1.5 -2.8 -3 0 q-2 -3.6 -6.5 -.7 z"/>` },
+  ghost: { vb: '0 0 60 80', svg: `
+    <path class="d-ghost" d="M30 4 C14 4 8 18 8 32 L8 70 L15 63 L22 71 L30 63 L38 71 L45 63 L52 70 L52 32 C52 18 46 4 30 4 Z"/>
+    <ellipse class="d-ghost-eye" cx="23" cy="30" rx="4" ry="6"/>
+    <ellipse class="d-ghost-eye" cx="37" cy="30" rx="4" ry="6"/>
+    <ellipse class="d-ghost-eye" cx="30" cy="45" rx="5" ry="6"/>` },
+  house: { vb: '0 -10 120 120', svg: `
+    <path class="d-hill" d="M0 110 Q20 88 60 90 Q100 88 120 110 Z"/>
+    <path class="d-silhouette" d="M24 96 L24 52 L14 52 L38 22 L50 36 L50 16 L44 16 L58 -2 L72 16 L66 16 L66 40 L82 26 L106 54 L96 54 L96 96 Z"/>
+    <path class="d-silhouette" d="M56 -2 L58 -8 L60 -2 Z"/>
+    <rect class="d-window" x="31" y="58" width="9" height="12" rx="1"/>
+    <rect class="d-window d-window-b" x="54" y="22" width="8" height="11" rx="4"/>
+    <rect class="d-window d-window-c" x="80" y="60" width="9" height="12" rx="1"/>
+    <rect class="d-window d-window-b" x="62" y="52" width="8" height="10" rx="1"/>
+    <path class="d-door" d="M44 96 L44 78 Q50 70 56 78 L56 96 Z"/>
+    <path class="d-silhouette" d="M96 70 L112 70 L112 96 L96 96 Z"/>
+    <path class="d-silhouette" d="M100 70 L100 58 L106 58 L106 70 Z"/>` },
+  tree: { vb: '0 0 100 120', svg: `
+    <path class="d-silhouette" d="M46 120 L48 78 C40 70 26 66 14 52 C26 60 36 62 44 66 C40 54 32 44 30 30 C38 44 44 52 48 60 L50 34 C46 26 44 18 46 8 C50 18 52 26 53 34 C58 26 66 20 78 16 C68 24 60 32 56 44 L55 62 C62 52 74 46 90 44 C76 50 64 58 56 70 L54 120 Z"/>
+    <path class="d-silhouette" d="M20 120 Q50 108 80 120 Z"/>` },
+  tomb: { vb: '0 0 60 70', svg: `
+    <path class="d-stone" d="M10 68 L10 26 C10 10 50 10 50 26 L50 68 Z"/>
+    <path class="d-stone-line" d="M20 30 L40 30 M22 38 L38 38 M24 46 L36 46"/>
+    <path class="d-grass" d="M4 68 Q30 60 56 68 Z"/>` },
+  'tomb-cross': { vb: '0 0 60 80', svg: `
+    <path class="d-stone" d="M25 78 L25 30 L10 30 L10 20 L25 20 L25 4 L35 4 L35 20 L50 20 L50 30 L35 30 L35 78 Z"/>
+    <path class="d-grass" d="M6 78 Q30 70 54 78 Z"/>` },
+  fence: { vb: '0 0 160 40', svg: `
+    <path class="d-fence" d="M4 22 L156 22 M4 34 L156 34 M10 40 L10 10 L6 14 M10 10 L14 14 M30 40 L30 8 L26 12 M30 8 L34 12 M50 40 L50 10 L46 14 M50 10 L54 14 M70 40 L70 8 L66 12 M70 8 L74 12 M90 40 L90 10 L86 14 M90 10 L94 14 M110 40 L110 8 L106 12 M110 8 L114 12 M130 40 L130 10 L126 14 M130 10 L134 14 M150 40 L150 8 L146 12 M150 8 L154 12"/>` },
+  cauldron: { vb: '0 0 120 100', svg: `
+    <ellipse class="d-glow" cx="60" cy="30" rx="44" ry="18"/>
+    <circle class="d-bubble" cx="46" cy="22" r="5"/>
+    <circle class="d-bubble d-bubble-b" cx="66" cy="16" r="4"/>
+    <circle class="d-bubble d-bubble-c" cx="78" cy="24" r="3"/>
+    <path class="d-fire" d="M34 98 Q38 84 44 92 Q48 78 54 90 Q60 74 66 90 Q72 78 76 92 Q82 84 86 98 Z"/>
+    <path class="d-pot" d="M18 36 L102 36 Q106 42 98 44 Q104 86 60 88 Q16 86 22 44 Q14 42 18 36 Z"/>
+    <ellipse class="d-brew" cx="60" cy="38" rx="40" ry="6"/>
+    <path class="d-pot" d="M30 84 L24 96 L32 96 L38 86 Z M90 84 L96 96 L88 96 L82 86 Z"/>` },
+  pumpkin: { vb: '0 0 100 90', svg: `
+    <ellipse class="d-glow d-glow-orange" cx="50" cy="56" rx="48" ry="34"/>
+    <path class="d-stem" d="M46 20 Q44 8 52 2 L56 6 Q50 12 54 22 Z"/>
+    <ellipse class="d-pumpkin" cx="30" cy="54" rx="22" ry="30"/>
+    <ellipse class="d-pumpkin" cx="70" cy="54" rx="22" ry="30"/>
+    <ellipse class="d-pumpkin d-pumpkin-mid" cx="50" cy="54" rx="24" ry="33"/>
+    <path class="d-carve" d="M28 44 L38 36 L42 48 Z M72 44 L62 36 L58 48 Z M46 54 L50 48 L54 54 Z"/>
+    <path class="d-carve" d="M24 64 Q50 86 76 64 L70 64 L66 70 L60 64 L54 71 L48 64 L42 71 L36 64 L30 70 Z"/>` },
+  web: { vb: '0 0 100 100', svg: `
+    <path class="d-web" d="M100 0 L0 100 M100 0 L30 100 M100 0 L65 100 M100 0 L0 30 M100 0 L0 65
+      M100 20 Q84 16 80 0 M100 42 Q72 34 62 0 M100 64 Q58 52 44 0 M100 86 Q42 70 24 0"/>
+    <path class="d-web" d="M76 28 L76 44"/>
+    <circle class="d-spider" cx="76" cy="48" r="4.5"/>
+    <path class="d-web" d="M71 45 L66 42 M71 49 L65 50 M81 45 L86 42 M81 49 L87 50"/>` },
+  candles: { vb: '0 0 60 60', svg: `
+    <ellipse class="d-glow d-glow-orange" cx="30" cy="22" rx="26" ry="18"/>
+    <rect class="d-candle" x="12" y="30" width="9" height="26" rx="2"/>
+    <rect class="d-candle" x="26" y="22" width="9" height="34" rx="2"/>
+    <rect class="d-candle" x="40" y="34" width="8" height="22" rx="2"/>
+    <path class="d-flame" d="M16.5 30 Q12 24 16.5 18 Q21 24 16.5 30 Z"/>
+    <path class="d-flame d-flame-b" d="M30.5 22 Q26 16 30.5 10 Q35 16 30.5 22 Z"/>
+    <path class="d-flame d-flame-c" d="M44 34 Q40 28 44 22 Q48 28 44 34 Z"/>` },
+};
+
+function renderDecor(board) {
+  const view = slBoardView(board);
+  if (!view.decor.length) return '';
+  const items = view.decor.map(d => {
+    const sprite = SL_DECOR[d.kind];
+    if (!sprite) return '';
+    const [, , vw, vh] = sprite.vb.split(' ').map(Number);
+    // Szerokość w % szerokości sceny, a wysokość z proporcji rysunku (aspect-ratio) —
+    // dekoracja nie spłaszcza się, gdy plansza jest szersza albo węższa.
+    return `<svg class="sl-decor sl-decor-${d.kind}${d.flip ? ' is-flipped' : ''}" viewBox="${sprite.vb}"
+      style="left:${(d.at[0] / board.cols) * 100}%;top:${(d.at[1] / board.rows) * 100}%;width:${(d.size / board.cols) * 100}%;aspect-ratio:${vw}/${vh}"
+      aria-hidden="true">${sprite.svg}</svg>`;
+  }).join('');
+  return `<div class="sl-decor-layer" aria-hidden="true">${items}</div>`;
+}
+
+// Gładka krzywa (Catmull-Rom zamieniony na krzywe Béziera) przez punkty od `from` do `to`.
+// Styczne liczymy z SĄSIADÓW w pełnej liście — także spoza odcinka — więc dwa kawałki
+// tej samej drogi (patrz mostek niżej) stykają się bez załamania. Przy torze zamkniętym
+// sąsiedzi zawijają się przez metę na start.
+function slSmoothPath(pts, from, to, closed) {
+  const n = pts.length;
+  const at = (i) => closed ? pts[((i % n) + n) % n] : pts[Math.max(0, Math.min(n - 1, i))];
+  let d = `M ${at(from).x} ${at(from).y}`;
+  for (let i = from; i < to; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    d += ` C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
 // Droga pod kafelkami + przerywana strzałka pętli meta → start z podpisem.
 function renderTrack(board) {
+  const view = slBoardView(board);
   const pts = board.path.map((_, i) => tileCenter(i, board));
   const radius = 0.5 * Math.min(100 / board.cols, 100 / board.rows);
   const loopPts = slLoopPoints(board);
+  const lapTxt = board.lap_points ? ` +${board.lap_points} pkt` : '';
 
   // Podpis pętli: na środku najdłuższego POZIOMEGO odcinka (tam jest miejsce na tekst),
   // a gdy takiego nie ma — na środku najdłuższego w ogóle.
@@ -783,14 +953,36 @@ function renderTrack(board) {
     const score = (horiz ? 1000 : 0) + len;
     if (!best || score > best.score) best = { score, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
-  const lapTxt = board.lap_points ? ` +${board.lap_points} pkt` : '';
+  // Podpis w miejscu wskazanym przez plik sezonu jest zaczepiony LEWĄ krawędzią, nie
+  // środkiem: szerokość napisu jest w pikselach, a plansza skaluje się z ekranem, więc
+  // wyśrodkowany przy brzegu wystawałby poza nią na węższych monitorach.
+  if (view.loop_label) best = slGridPoint(board, view.loop_label[0], view.loop_label[1]);
+
+  let road;
+  if (view.road === 'smooth') {
+    // Droga w DWÓCH kawałkach rysowanych po kolei, każdy z własnym obrzeżem. Tam, gdzie
+    // tor przecina sam siebie (ósemka), drugi kawałek kładzie się obrzeżem NA pierwszy —
+    // wygląda to jak mostek nad drogą, a nie jak rozlana plama w miejscu skrzyżowania.
+    const n = pts.length;
+    const half = Math.floor(n / 2);
+    const end = view.closed ? n : n - 1; // przy torze zamkniętym ostatni odcinek wraca na start
+    road = [[0, half], [half, end]].map(([a, b]) => {
+      const d = slSmoothPath(pts, a, b, view.closed);
+      return `
+        <path class="sl-track-edge" d="${d}" />
+        <path class="sl-track-road" d="${d}" />
+        <path class="sl-track-dash" d="${d}" />`;
+    }).join('');
+  } else {
+    road = `<path class="sl-track-road" d="${slRoundedPath(pts, radius)}" />`;
+  }
 
   return `
     <svg class="sl-track" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      <path class="sl-track-road" d="${slRoundedPath(pts, radius)}" />
+      ${road}
       <path class="sl-track-loop" d="${slRoundedPath(loopPts, radius)}" />
     </svg>
-    <span class="sl-loop-label" style="left:${best.x}%;top:${best.y}%">↻ nowe okrążenie${lapTxt}</span>`;
+    <span class="sl-loop-label${view.loop_label ? ' is-anchored' : ''}" style="left:${best.x}%;top:${best.y}%">↻ nowe okrążenie${lapTxt}</span>`;
 }
 
 // Widoczne połączenia start→koniec dla KAŻDEGO węża i KAŻDEJ drabiny.
@@ -800,6 +992,7 @@ function renderTrack(board) {
 function renderConnectors(board) {
   const links = board.tiles.filter(t => t.kind === 'ladder' || t.kind === 'snake');
   if (!links.length) return '';
+  const drawn = slBoardView(board).links === 'drawn';
 
   const parts = links.map(t => {
     const a = tileCenter(t.position, board);
@@ -808,6 +1001,8 @@ function renderConnectors(board) {
     const title = t.kind === 'ladder'
       ? `Drabina: ${t.position} → ${t.target}`
       : `Wąż: ${t.position} → ${t.target}`;
+
+    if (drawn) return `<g class="${cls} is-drawn"><title>${title}</title>${t.kind === 'ladder' ? slDrawnLadder(a, b, board) : slDrawnSnake(a, b)}</g>`;
 
     let path;
     if (t.kind === 'ladder') {
@@ -831,6 +1026,52 @@ function renderConnectors(board) {
     + renderLinkDots(links, board);
 }
 
+// ── ŁĄCZNIKI „RYSOWANE" (links: 'drawn') ──
+// Warstwa SVG jest rozciągana (preserveAspectRatio="none"), więc „prostopadle" i „stała
+// szerokość" liczymy w jednostkach KRATEK, a dopiero potem przeliczamy na procenty sceny.
+// Inaczej drabina biegnąca w poprzek szerokiej planszy byłaby dwa razy grubsza niż pionowa.
+function slToCells(p, board) { return { x: (p.x / 100) * board.cols, y: (p.y / 100) * board.rows }; }
+function slToPct(p, board) { return { x: (p.x / board.cols) * 100, y: (p.y / board.rows) * 100 }; }
+
+// Drabina: dwie szyny i szczeble co ~0,45 kratki. Końce przycięte, żeby nie wchodziła
+// w środek pola, na którym stoi pionek.
+function slDrawnLadder(aPct, bPct, board) {
+  const a = slToCells(aPct, board), b = slToCells(bPct, board);
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+  const nx = -uy, ny = ux;
+  const W = 0.17, TRIM = 0.3;
+  const P = (along, side) => slToPct({ x: a.x + ux * along + nx * side, y: a.y + uy * along + ny * side }, board);
+  const rail = (side) => { const p = P(TRIM, side), q = P(len - TRIM, side); return `M ${p.x} ${p.y} L ${q.x} ${q.y}`; };
+  let rungs = '';
+  const count = Math.max(2, Math.floor((len - 2 * TRIM) / 0.45));
+  for (let i = 0; i <= count; i++) {
+    const along = TRIM + ((len - 2 * TRIM) * i) / count;
+    const p = P(along, -W), q = P(along, W);
+    rungs += ` M ${p.x} ${p.y} L ${q.x} ${q.y}`;
+  }
+  return `<path class="sl-ladder-rungs" d="${rungs}" /><path class="sl-ladder-rail" d="${rail(-W)} ${rail(W)}" />`;
+}
+
+// Wąż: fala wzdłuż odcinka, najszersza w środku i zwężająca się ku końcom (obwiednia
+// sin), żeby głowa i ogon trafiały dokładnie w pola. Rysowany dwa razy — gruby ciemny
+// „brzuch" pod spodem i cieńszy grzbiet w kolorze — daje to obrys bez filtrów SVG.
+function slDrawnSnake(aPct, bPct) {
+  const dx = bPct.x - aPct.x, dy = bPct.y - aPct.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len;
+  const waves = Math.max(1.5, Math.round(len / 9) + 0.5);
+  const amp = Math.min(2.4, 0.6 + len / 22);
+  const pts = [];
+  for (let i = 0; i <= 48; i++) {
+    const u = i / 48;
+    const off = amp * Math.sin(u * waves * 2 * Math.PI) * Math.sin(u * Math.PI);
+    pts.push(`${aPct.x + dx * u + nx * off} ${aPct.y + dy * u + ny * off}`);
+  }
+  const d = `M ${pts.join(' L ')}`;
+  return `<path class="sl-snake-belly" d="${d}" /><path class="sl-snake-back" d="${d}" />`;
+}
+
 // Kropki na początku i końcu każdego połączenia. Świadomie w HTML, nie w SVG:
 // warstwa SVG jest rozciągana (preserveAspectRatio="none"), więc <circle> zrobiłby się
 // elipsą, gdy kafelki są prostokątne. Element HTML pozycjonowany procentowo zostaje kołem.
@@ -846,24 +1087,47 @@ function renderLinkDots(links, board) {
   return `<div class="sl-link-dots" aria-hidden="true">${dots}</div>`;
 }
 
-function renderCell(idx, sp, players, posStyle, size) {
+function renderCell(idx, sp, players, posStyle, board) {
+  const size = board.size;
+  const marks = slMarks(board);
+  // Pole w układzie 'free' jest małe (ułamek kratki na gęstej siatce), więc napis
+  // „0 · START" by się nie zmieścił — tam start i meta dostają chorągiewkę NAD polem.
+  const free = slBoardView(board).layout === 'free';
   let cls = 'sl-cell';
+  let flag = '';
   // Start ma własny kolor: niżej nie da się spaść (serwer przycina ruch do pola 0).
   // Ostatnie pole to meta okrążenia — stąd pętla wraca na start.
   let idxLabel = String(idx);
-  if (idx === 0) { cls += ' sl-cell-start'; idxLabel = '0 · START'; }
-  else if (idx === size - 1) { cls += ' sl-cell-finish'; idxLabel = `${idx} 🏁`; }
+  if (idx === 0) {
+    cls += ' sl-cell-start';
+    if (free) flag = '<span class="sl-flag sl-flag-start">START</span>'; else idxLabel = '0 · START';
+  } else if (idx === size - 1) {
+    cls += ' sl-cell-finish';
+    if (free) flag = '<span class="sl-flag sl-flag-finish">🏁 META</span>'; else idxLabel = `${idx} 🏁`;
+  }
   let mark = '';
   if (sp) {
     cls += ` sl-${sp.kind}`;
-    if (sp.kind === 'ladder') mark = `<span class="sl-mark" title="Drabina → ${sp.target}">🪜</span>`;
-    else if (sp.kind === 'snake') mark = `<span class="sl-mark" title="Wąż → ${sp.target}">🐍</span>`;
-    else if (sp.kind === 'bonus') mark = `<span class="sl-mark" title="Bonus +${sp.value} pkt">⭐</span>`;
+    if (sp.kind === 'ladder') mark = `<span class="sl-mark" title="Drabina → ${sp.target}">${esc(marks.ladder)}</span>`;
+    else if (sp.kind === 'snake') mark = `<span class="sl-mark" title="Wąż → ${sp.target}">${esc(marks.snake)}</span>`;
+    else if (sp.kind === 'bonus') mark = `<span class="sl-mark" title="Bonus +${sp.value} pkt">${esc(marks.bonus)}</span>`;
   }
   // Pionek = okrągłe zdjęcie profilowe; serwer zwraca w `players` WYŁĄCZNIE graczy,
   // którzy je wgrali (bez zdjęcia = nie widać na planszy), więc avatar_url zawsze jest.
   // Nick pojawia się po najechaniu myszką (natywny tooltip z title).
-  const pawnsHtml = (players || []).map(p => {
+  // Małe pole (układ 'free') mieści najwyżej dwa pionki. Po zmianie sezonu WSZYSCY stoją
+  // na starcie, więc bez limitu kilkanaście awatarów wylałoby się słupkiem na sąsiednie
+  // pola. Przy tłoku widać jeden awatar (mój, jeśli tu stoję) i licznik „+N" z nickami
+  // reszty w podpowiedzi — razem mieszczą się w szerokości pola.
+  let shown = players || [];
+  let overflow = '';
+  if (free && shown.length > 2) {
+    const ordered = [...shown].sort((a, b) => Number(!!b.is_me) - Number(!!a.is_me));
+    shown = ordered.slice(0, 1);
+    const rest = ordered.slice(1);
+    overflow = `<span class="sl-pawn-more" title="${esc(rest.map(p => p.nickname).join(', '))}">+${rest.length}</span>`;
+  }
+  const pawnsHtml = shown.map(p => {
     const meCls = p.is_me ? ' sl-pawn-me' : '';
     const shieldCls = p.has_shield ? ' sl-pawn-shielded' : '';
     const pushCls = (state.pushFlash && state.pushFlash.has(p.player_id)) ? ' sl-pawn-pushed' : '';
@@ -875,9 +1139,10 @@ function renderCell(idx, sp, players, posStyle, size) {
         <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />
         ${shieldBadge}
       </span>`;
-  }).join('');
+  }).join('') + overflow;
   return `
     <div class="${cls}" style="${posStyle}">
+      ${flag}
       <span class="sl-idx">${idxLabel}</span>
       ${mark}
       <div class="sl-pawns">${pawnsHtml}</div>
@@ -885,13 +1150,16 @@ function renderCell(idx, sp, players, posStyle, size) {
 }
 
 function renderLegend(board) {
+  const m = slMarks(board);
+  // Na zamkniętym torze nie ma „góry" ani „dołu" — drabina to skrót do przodu, wąż cofa.
+  const closed = slBoardView(board).closed;
   return `
     <div class="sl-legend">
       <span class="sl-legend-start">■ start — niżej nie spadniesz</span>
       <span>🏁 meta — potem pętla na start (+${board.lap_points} pkt)</span>
-      <span class="sl-legend-ladder">━ 🪜 drabina — w górę</span>
-      <span class="sl-legend-snake">〜 🐍 wąż — w dół</span>
-      <span>⭐ bonus — punkty</span>
+      <span class="sl-legend-ladder">━ ${esc(m.ladder)} drabina — ${closed ? 'skrót do przodu' : 'w górę'}</span>
+      <span class="sl-legend-snake">〜 ${esc(m.snake)} wąż — ${closed ? 'cofa' : 'w dół'}</span>
+      <span>${esc(m.bonus)} bonus — punkty</span>
       <span>🛡️ gracz z tarczą</span>
       <span class="sl-legend-me">■ Twój pionek</span>
     </div>`;
@@ -1850,7 +2118,9 @@ function updateCountdown() {
 // ── CONFETTI ──
 function showConfetti() {
   const container = document.getElementById('confetti-container');
-  const icons = ['🎉', '⭐', '🐍', '🪜'];
+  // Sezon może mieć własne konfetti (np. dynie i duchy) — patrz `confetti` w pliku planszy.
+  const seasonal = state.game && state.game.board && slBoardView(state.game.board).confetti;
+  const icons = seasonal || ['🎉', '⭐', '🐍', '🪜'];
   for (let i = 0; i < 22; i++) {
     const el = document.createElement('div');
     el.className = 'confetti-piece';
