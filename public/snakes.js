@@ -713,13 +713,34 @@ function renderCostumes(g) {
   const tabs = c.slots.map(sl => `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}">${esc(sl.label)}</button>`).join('');
   const items = c.items.filter(i => i.slot === slCostumeTab).map(i => {
     let btn;
-    if (!i.owned) btn = `<button class="btn-primary costume-buy" data-item="${i.id}" ${g.me.balance >= i.price ? '' : 'disabled'}>Kup · ${i.price} coins</button>`;
+    // Kostium to rzecz, na którą się ODKŁADA — zamiast samego wyszarzonego przycisku
+    // pokazujemy, ile już uzbierałeś i ile brakuje.
+    let saving = '';
+    if (!i.owned) {
+      const have = Math.max(0, Number(g.me.balance) || 0);
+      const can = have >= i.price;
+      btn = `<button class="btn-primary costume-buy" data-item="${i.id}" ${can ? '' : 'disabled'}>Kup</button>`;
+      if (!can) {
+        saving = `<div class="costume-saving" title="Uzbierane ${have} z ${i.price} coins">
+            <span class="costume-saving-bar" style="width:${Math.round((have / i.price) * 100)}%"></span>
+          </div>
+          <span class="costume-missing">brakuje ${i.price - have} coins</span>`;
+      }
+    }
     else if (i.worn) btn = `<button class="btn-ghost costume-off" data-slot="${i.slot}">Zdejmij</button>`;
     else btn = `<button class="btn-primary costume-wear" data-slot="${i.slot}" data-item="${i.id}">Załóż</button>`;
+    // Nakładka zmienia kształt pionka, a tego emoji nie pokaże — w tej zakładce ikoną jest
+    // miniatura mojego pionka w danej nakładce (ta sama funkcja co na planszy). Bez „is-me",
+    // żeby obrys miał kolor nakładki, a nie ten sam akcent na każdej karcie.
+    const icon = i.slot === 'overlay' && g.me.avatar_url && SL_COSTUME_SHAPES[i.id]
+      ? `<span class="costume-mini">${slPawnHtml({ ...me, is_me: false, costume: { overlay: i.id } }, { noTip: true })}</span>`
+      : i.icon;
     return `
       <div class="costume-item${i.worn ? ' is-worn' : ''}${i.owned ? ' is-owned' : ''}">
-        <span class="costume-icon">${i.icon}</span>
+        <span class="costume-icon">${icon}</span>
         <span class="costume-name">${esc(i.name)}</span>
+        ${i.owned ? '<span class="costume-owned-tag">w szafie</span>' : `<span class="costume-price mono">${i.price} coins</span>`}
+        ${saving}
         ${btn}
       </div>`;
   }).join('');
@@ -818,7 +839,35 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   closeWardrobe();
   slToggleCoopPop(false);
+  slBoardPeek(false);
 });
+
+// ── PODGLĄD PLANSZY NA TELEFONIE ── (CSS: .board-sheet)
+// Otwarcie przełącza tylko klasę na <body>. Tam, gdzie się da (Android), prosimy dodatkowo
+// o pełny ekran i blokadę orientacji w poziomie — wtedy obrót z CSS nie jest potrzebny, bo
+// ekran sam jest poziomy. iOS tego nie obsługuje i zostaje przy obrocie z CSS; błędy są
+// ignorowane, bo to tylko wygoda, nie warunek działania.
+function slBoardPeek(open) {
+  const was = document.body.classList.contains('board-open');
+  if (open === was) return;
+  document.body.classList.toggle('board-open', open);
+  slTipHide();
+  const sheet = document.getElementById('board-sheet');
+  if (open) {
+    if (sheet.requestFullscreen && window.matchMedia('(pointer: coarse)').matches) {
+      sheet.requestFullscreen({ navigationUI: 'hide' })
+        .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+        .catch(() => {});
+    }
+  } else if (document.fullscreenElement) {
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+    document.exitFullscreen().catch(() => {});
+  }
+}
+document.getElementById('btn-board-peek').addEventListener('click', () => slBoardPeek(true));
+document.getElementById('board-sheet-close').addEventListener('click', () => slBoardPeek(false));
+// Wyjście z pełnego ekranu gestem systemowym (wstecz) zamyka też podgląd.
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) slBoardPeek(false); });
 
 document.getElementById('costume-shop').addEventListener('click', async e => {
   const tab = e.target.closest('.costume-tab');
@@ -837,7 +886,7 @@ document.getElementById('costume-shop').addEventListener('click', async e => {
     renderAll();
     if (buy) {
       const it = res.state.costumes.items.find(i => i.id === res.item);
-      showToast(`🎭 Kupiono i założono: ${it ? `${it.icon} ${it.name}` : 'kostium'} (-${res.price} coins)`);
+      showToast(`🪞 Kupiono i założono: ${it ? `${it.icon} ${it.name}` : 'kostium'} (-${res.price} coins)`);
       loadActivity(document.getElementById('activity-date').value || null);
     }
   } catch (err) {
@@ -988,10 +1037,13 @@ function slEventTiles(ev) {
     out[ev.cauldron.ladle] = { kind: 'ladle', icon: '🥄', title: `Chochla: zgarniasz cały kocioł — teraz ${ev.cauldron.pot} coins` };
   }
   if (ev.trick_or_treat) {
-    const days = ev.trick_or_treat.weekdays.map(d => ['pon', 'wt', 'śr', 'czw', 'pt'][d - 1]).join(' i ');
+    // Bez `weekdays` drzwi są otwarte codziennie — wtedy nie ma czego wypisywać.
+    const days = (ev.trick_or_treat.weekdays || []).map(d => ['pon', 'wt', 'śr', 'czw', 'pt'][d - 1]).join(' i ');
+    const st = ev.trick_or_treat.stakes;
+    const odds = st ? `cukierek (+${st.treat} pkt albo 🍬) lub psikus (−${st.trick} coins albo duch cofa)` : 'punkty albo psikus';
     ev.trick_or_treat.tiles.forEach(t => {
       out[t] = ev.trick_or_treat.active
-        ? { kind: 'door', active: true, icon: '🚪', title: 'Cukierek albo psikus! Dziś drzwi są otwarte: 50/50 punkty albo psikus.' }
+        ? { kind: 'door', active: true, icon: '🚪', title: `Cukierek albo psikus! 50/50: ${odds}.` }
         : { kind: 'door', active: false, icon: '🚪', title: `Cukierek albo psikus — drzwi otwierają się tylko w: ${days}.` };
     });
   }
@@ -1001,20 +1053,28 @@ function slEventTiles(ev) {
   return out;
 }
 
-// Chatka garderoby na planszy (view.shop_at = środek w kratkach). Klik → openWardrobe.
+// Garderoba na planszy (view.shop_at = środek w kratkach): gotycka szafa z lustrem na
+// lewych drzwiach i uchylonymi prawymi, zza których widać wiszący strój. Klik → openWardrobe.
 function renderShopHut(board) {
   const at = slBoardView(board).shop_at;
   if (!at) return '';
   return `<button class="sl-shop-hut" style="left:${(at[0] / board.cols) * 100}%;top:${(at[1] / board.rows) * 100}%" title="Garderoba — kostiumy dla Twojego pionka">
     <svg viewBox="0 0 80 80" aria-hidden="true">
-      <ellipse class="hut-glow" cx="40" cy="52" rx="38" ry="24"/>
-      <path class="hut-roof" d="M6 38 L40 6 Q44 2 47 8 L74 38 Z"/>
-      <path class="hut-hat" d="M40 6 L52 -4 Q56 -7 58 -2 Q52 -2 50 4 Z"/>
-      <rect class="hut-wall" x="14" y="36" width="52" height="36" rx="3"/>
-      <rect class="hut-window" x="20" y="44" width="12" height="11" rx="2"/>
-      <path class="hut-door" d="M42 72 L42 52 Q49 44 56 52 L56 72 Z"/>
-      <rect class="hut-sign" x="12" y="24" width="56" height="12" rx="3"/>
-      <text class="hut-sign-text" x="40" y="33" text-anchor="middle">KOSTIUMY</text>
+      <ellipse class="wr-glow" cx="40" cy="50" rx="38" ry="26"/>
+      <path class="wr-body" d="M14 74 L14 22 Q14 8 40 4 Q66 8 66 22 L66 74 Z"/>
+      <path class="wr-crest" d="M34 7 Q40 -2 46 7 Q40 4 34 7 Z"/>
+      <path class="wr-inside" d="M41 20 L63 20 L63 70 L41 70 Z"/>
+      <path class="wr-hanger" d="M52 24 Q52 21 54 21 Q56 21 56 23 M46 29 L54 25 L62 29"/>
+      <path class="wr-dress" d="M48 29 L60 29 L58 36 L63 62 L45 62 L50 36 Z"/>
+      <path class="wr-door" d="M17 20 L39 20 L39 70 L17 70 Z"/>
+      <ellipse class="wr-mirror" cx="28" cy="40" rx="7.5" ry="12.5"/>
+      <path class="wr-shine" d="M24 33 Q25 29 28 28"/>
+      <path class="wr-door-open" d="M63 20 L74 15 L74 75 L63 70 Z"/>
+      <circle class="wr-knob" cx="36" cy="46" r="1.3"/>
+      <rect class="wr-foot" x="15" y="73" width="7" height="4" rx="1"/>
+      <rect class="wr-foot" x="58" y="73" width="7" height="4" rx="1"/>
+      <rect class="wr-sign" x="10" y="62" width="60" height="11" rx="3"/>
+      <text class="wr-sign-text" x="40" y="70.2" text-anchor="middle">GARDEROBA</text>
     </svg>
   </button>`;
 }
@@ -1364,6 +1424,10 @@ function slPawnHtml(p, opts = {}) {
   // Nakładka zmienia samo zdjęcie (filtr), więc idzie klasą na opakowanie; duch ma
   // pierwszeństwo — nieaktywny gracz straszy prześcieradłem, a nie kostiumem.
   if (costume.overlay && !ghost && SL_COSTUME_ART.overlay[costume.overlay]) cls.push(`ov-${costume.overlay}`);
+  // Nakładka zmienia też KSZTAŁT zdjęcia (czaszka, trumna, dynia…) — samo dorysowanie
+  // czegoś na okrągłym zdjęciu nie odróżniało kostiumów od siebie.
+  const shapeId = costume.overlay && !ghost && SL_COSTUME_SHAPES[costume.overlay] ? costume.overlay : null;
+  if (shapeId) cls.push('has-shape');
 
   const wingKind = costume.wings && SL_COSTUME_ART.wings[costume.wings] ? costume.wings : (opts.batDefault ? 'bat_wings' : null);
   if (wingKind) cls.push('has-wings', `wings-${wingKind}`);
@@ -1375,7 +1439,14 @@ function slPawnHtml(p, opts = {}) {
         <svg class="sl-pawn-wing is-left w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path d="${wingPath}"/></svg>
         <svg class="sl-pawn-wing is-right w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path transform="matrix(-1 0 0 1 40 0)" d="${wingPath}"/></svg>` : '';
   const overlayArt = costume.overlay && !ghost ? (SL_COSTUME_ART.overlay[costume.overlay] || '') : '';
-  const overlay = overlayArt ? `<svg class="sl-costume-overlay" viewBox="0 0 40 40" aria-hidden="true">${overlayArt}</svg>` : '';
+  // Obrys kształtu leży w tej samej warstwie co rysunek nakładki. Warstwa ma inset −8%,
+  // więc pionek (0..1) zajmuje w jej viewBoxie 2,76..37,24 — stąd translate + scale.
+  // Obramowanie zdjęcia (to „is-me" i tarcza) musi przejść na obrys, bo clip-path by je ściął.
+  const shapeTf = 'transform="translate(2.759 2.759) scale(34.483)" vector-effect="non-scaling-stroke"';
+  const shapeLine = shapeId
+    ? `<path class="c-shape-glow" ${shapeTf} d="${SL_COSTUME_SHAPES[shapeId]}"/><path class="c-shape-line" ${shapeTf} d="${SL_COSTUME_SHAPES[shapeId]}"/>` : '';
+  const overlay = overlayArt ? `<svg class="sl-costume-overlay" viewBox="0 0 40 40" aria-hidden="true">${shapeLine}${overlayArt}</svg>` : '';
+  const clip = shapeId ? ` style="clip-path:url(#sl-shape-${shapeId});-webkit-clip-path:url(#sl-shape-${shapeId})"` : '';
   const hatArt = costume.hat && SL_COSTUME_ART.hat[costume.hat];
   const hat = hatArt ? `<svg class="sl-costume-hat h-${costume.hat}" viewBox="0 0 40 32" aria-hidden="true">${hatArt}</svg>` : '';
   const gadgetArt = costume.gadget && SL_COSTUME_ART.gadget[costume.gadget];
@@ -1389,7 +1460,7 @@ function slPawnHtml(p, opts = {}) {
   const tip = opts.noTip ? '' : ` data-tip-player="${p.player_id}"`;
   return `
       <span class="${cls.join(' ')}"${tip}${ghostTitle}>${wings}
-        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy" />${overlay}${sheet}${hat}${gadget}
+        <img class="sl-pawn-avatar" src="${p.avatar_url}" alt="${esc(p.nickname)}" loading="lazy"${clip} />${overlay}${sheet}${hat}${gadget}
         ${shield}
       </span>`;
 }
@@ -1418,13 +1489,47 @@ const SL_COSTUME_ART = {
     spider: '<path class="c-thread" d="M15 0 L15 22"/><ellipse class="c-spider" cx="15" cy="28" rx="5" ry="6"/><circle class="c-spider" cx="15" cy="21" r="3.5"/><path class="c-legs" d="M11 25 L4 20 L2 24 M11 29 L3 29 L1 34 M19 25 L26 20 L28 24 M19 29 L27 29 L29 34 M12 32 L6 37 M18 32 L24 37"/><circle class="c-eye" cx="13.6" cy="20.5" r=".9"/><circle class="c-eye" cx="16.4" cy="20.5" r=".9"/>',
   },
   // Nakładki: filtr zdjęcia robi CSS (klasa ov-*), a tu jest to, co leży NA zdjęciu.
+  // Pionek zajmuje w tym viewBoxie 2,76..37,24 (warstwa ma inset −8%). Rysunki celowo
+  // wychodzą poza zdjęcie (kołnierz, piszczele, śluz): nakładka ma być widoczna z daleka,
+  // na małym polu planszy, a nie tylko w podglądzie w garderobie.
   overlay: {
-    zombie: '<path class="c-stitch" d="M7 13 L19 17 M9 11 L8 15 M12 12 L11 16 M15 13 L14 17 M24 27 L33 24 M27 23 L28 28 M30 22 L31 27"/>',
-    vampire: '<path class="c-fang" d="M15 29 L17.2 29 L16.1 34 Z M22.8 29 L25 29 L23.9 34 Z"/>',
-    skeleton: '<circle class="c-bone-ring" cx="20" cy="20" r="18.5"/>',
-    pumpkin_frame: '<circle class="c-pumpkin-ring" cx="20" cy="20" r="18.5"/><path class="c-rib" d="M20 1.5 L20 5 M20 35 L20 38.5 M1.5 20 L5 20 M35 20 L38.5 20 M7 7 L9.5 9.5 M33 7 L30.5 9.5 M7 33 L9.5 30.5 M33 33 L30.5 30.5"/><path class="c-stem" d="M18.5 2 Q18 -2 21.5 -3 L22.5 -1.5 Q20.5 -0.5 21 2 Z"/>',
+    zombie: '<path class="c-goo" d="M9 33.5 Q10.5 38 11.5 34 Q12.5 41.5 14.5 35 Q16 39 17.5 35.5 L17 33 Z M25 34.5 Q26.5 40.5 28 35 Q29.5 37.5 30.5 33 L29 32 Z"/>'
+      + '<path class="c-bandage" d="M1.5 15.5 L15.5 1 L19.5 5 L5.5 19.5 Z"/><path class="c-bandage-line" d="M5 12 L8.5 15.5 M8.5 8.5 L12 12 M12 5 L15.5 8.5"/>'
+      + '<path class="c-stitch" d="M21 11 L34 16 M24 9.5 L23 13.5 M27.5 11 L26.5 15 M31 12.5 L30 16.5 M8 27 L20 31 M11 25.5 L10 29.5 M14.5 27 L13.5 31 M17.5 28 L16.5 32"/>',
+    vampire: '<path class="c-collar" d="M12.5 38 L2.5 24.5 L-3.5 7.5 L5.5 14 L9 28 Z M27.5 38 L37.5 24.5 L43.5 7.5 L34.5 14 L31 28 Z"/>'
+      + '<path class="c-collar-in" d="M11.5 35.5 L4 24.5 L0 12 L6 16.5 L9 28 Z M28.5 35.5 L36 24.5 L40 12 L34 16.5 L31 28 Z"/>'
+      + '<path class="c-fang" d="M14.2 28 L17.8 28 L16 36 Z M22.2 28 L25.8 28 L24 36 Z"/>'
+      + '<path class="c-blood" d="M16 36.3 Q14.6 38.4 16 39.3 Q17.4 38.4 16 36.3 Z M24 36.3 Q22.6 38.4 24 39.3 Q25.4 38.4 24 36.3 Z"/>',
+    skeleton: '<g class="c-bones"><path d="M1 32 L39 42.5 M39 32 L1 42.5"/></g>'
+      + '<g class="c-bone-ends"><circle cx="0" cy="30.8" r="2.2"/><circle cx="1.8" cy="33.6" r="2.2"/><circle cx="40" cy="30.8" r="2.2"/><circle cx="38.2" cy="33.6" r="2.2"/>'
+      + '<circle cx="0" cy="43.7" r="2.2"/><circle cx="1.8" cy="40.9" r="2.2"/><circle cx="40" cy="43.7" r="2.2"/><circle cx="38.2" cy="40.9" r="2.2"/></g>'
+      + '<path class="c-bone-crack" d="M20 3.2 L18 7.5 L21 10.5 L19.5 14 M31.5 9 L28.5 11 L29.5 14"/>',
+    pumpkin_frame: '<path class="c-pumpkin-rib" d="M12.5 6.5 Q5.5 20 12.5 36 M27.5 6.5 Q34.5 20 27.5 36 M17 6.2 Q14 20 17 37 M23 6.2 Q26 20 23 37"/>'
+      + '<path class="c-vine" d="M22 3 Q27 -1 30 2 Q32 5 29 6 Q27 6 28 4"/>'
+      + '<path class="c-leaf" d="M21.5 4 Q14 -3 9 2 Q15 6.5 21.5 4 Z"/>'
+      + '<path class="c-stem" d="M18 8 Q17 0.5 21.8 -1.8 L23.6 0.4 Q20.8 2.2 21.4 8 Z"/>',
   },
 };
+
+// Kształty nakładek w jednostkach pionka (0..1). JEDNO źródło dla przycięcia zdjęcia
+// (clipPath z clipPathUnits="objectBoundingBox" wstrzykiwany raz niżej) i dla obrysu
+// w slPawnHtml, więc obrys nie może się rozjechać z krawędzią zdjęcia.
+const SL_COSTUME_SHAPES = {
+  // Czaszka: kopuła, kości policzkowe i węższa szczęka z zębami.
+  skeleton: 'M0.5 0 C0.8 0 1 0.2 1 0.46 C1 0.62 0.93 0.7 0.86 0.74 L0.84 0.88 Q0.84 0.97 0.74 0.97 L0.68 0.97 L0.66 0.91 L0.62 0.97 L0.56 0.97 L0.53 0.91 L0.5 0.97 L0.47 0.91 L0.44 0.97 L0.38 0.97 L0.34 0.91 L0.32 0.97 L0.26 0.97 Q0.16 0.97 0.16 0.88 L0.14 0.74 C0.07 0.7 0 0.62 0 0.46 C0 0.2 0.2 0 0.5 0 Z',
+  // Trumna: najszersza na wysokości ramion, zwęża się ku stopom.
+  vampire: 'M0.32 0 L0.68 0 L0.96 0.26 L0.7 1 L0.3 1 L0.04 0.26 Z',
+  // Poszarpana twarz z odgryzionym kawałkiem w prawym górnym rogu.
+  zombie: 'M0.5 0 L0.603 0.047 L0.69 0.105 L0.679 0.275 L0.748 0.302 L0.868 0.323 L0.987 0.389 L0.96 0.5 L0.968 0.607 L0.905 0.695 L0.883 0.806 L0.793 0.867 L0.697 0.91 L0.608 0.973 L0.5 0.965 L0.389 0.987 L0.3 0.914 L0.201 0.875 L0.133 0.793 L0.095 0.695 L0.022 0.609 L0.035 0.5 L0.032 0.393 L0.09 0.303 L0.109 0.188 L0.207 0.133 L0.29 0.063 L0.398 0.052 Z',
+  // Dynia: szersza niż wyższa, z wcięciami między żebrami u góry i u dołu.
+  pumpkin_frame: 'M0.5 0.13 C0.6 0.04 0.72 0.07 0.77 0.14 C0.93 0.12 1 0.32 1 0.53 C1 0.77 0.9 0.95 0.75 0.92 C0.68 0.99 0.58 1 0.5 0.95 C0.42 1 0.32 0.99 0.25 0.92 C0.1 0.95 0 0.77 0 0.53 C0 0.32 0.07 0.12 0.23 0.14 C0.28 0.07 0.4 0.04 0.5 0.13 Z',
+};
+(function slInjectCostumeShapes() {
+  const defs = Object.entries(SL_COSTUME_SHAPES)
+    .map(([id, d]) => `<clipPath id="sl-shape-${id}" clipPathUnits="objectBoundingBox"><path d="${d}"/></clipPath>`).join('');
+  document.body.insertAdjacentHTML('beforeend',
+    `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>${defs}</defs></svg>`);
+})();
 
 
 function renderCell(idx, sp, players, posStyle, board, ev = null) {
@@ -1504,7 +1609,7 @@ function renderLegend(board, ev = null) {
         : `<span>${esc(m.bonus)} bonus — punkty</span>`}
       ${board.tiles.some(t => t.kind === 'fork') ? '<span class="sl-legend-ladder">🎲 rozwidlona drabina — rzut decyduje, którą odnogą</span>' : ''}
       ${ev && ev.cauldron ? `<span>🧪 kocioł −${ev.cauldron.amount} coins · 🥄 chochla zgarnia pulę</span>` : ''}
-      ${ev && ev.trick_or_treat ? `<span>🚪 cukierek albo psikus${ev.trick_or_treat.active ? ' — dziś otwarte!' : ''}</span>` : ''}
+      ${ev && ev.trick_or_treat ? `<span>🚪 cukierek albo psikus${ev.trick_or_treat.active && ev.trick_or_treat.weekdays ? ' — dziś otwarte!' : ''}</span>` : ''}
       ${ev && ev.candy ? '<span>🍬 cukierek do zebrania</span>' : ''}
       <span>🛡️ gracz z tarczą</span>
       <span class="sl-legend-me">■ Twój pionek</span>
@@ -2252,11 +2357,15 @@ function renderCoop(g) {
     `<input type="number" id="coop-amount" min="1" step="1" max="${g.me.balance}" placeholder="coins" />
      <button class="btn-primary" id="btn-coop-give" ${g.me.balance > 0 ? '' : 'disabled'}>Wpłać</button>`;
 
-  const prevHtml = slCoopPrevBossHtml(c.previous_result);
+  // Boss sezonu (np. Dynia Zagłady) jest JEDYNYM bossem całego sezonu — sekcja „poprzedni
+  // boss" pokazywałaby walkę sprzed sezonu (albo zamkniętą przy jego włączeniu), która
+  // z tym sezonem nie ma nic wspólnego. Znika, dopóki boss sezonu trwa.
+  const seasonBoss = c.special_boss && c.special_boss.active ? c.special_boss : null;
+  const prevHtml = seasonBoss ? '' : slCoopPrevBossHtml(c.previous_result);
 
   el.innerHTML = `
     <div class="coop-row-main">
-      <span class="coop-emoji">👹</span>
+      <span class="coop-emoji">${seasonBoss ? esc(seasonBoss.emoji) : '👹'}</span>
       <span class="coop-name">${esc(b.name)}</span>
       <div class="coop-bar-flex">
         <div class="boss-hp${hit ? ' is-hit' : ''}" title="HP bossa — znaczniki to kamienie milowe">

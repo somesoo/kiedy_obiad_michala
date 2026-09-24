@@ -68,8 +68,14 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
 - Pole w układzie 'free' jest małe: przy więcej niż 2 pionkach pokazuje jeden (mój,
   jeśli tam stoję) i licznik „+N". To ważne zaraz po zmianie sezonu — wszyscy stoją
   wtedy na starcie.
-- Na wąskim ekranie plansza 'free' ma minimalną szerokość i przewija się w bok, zamiast
-  ściskać pola do kilkunastu pikseli.
+- **Telefon (≤700px albo niski ekran dotykowy): plansza jest schowana za przyciskiem
+  „🗺️ Podgląd planszy"** i otwiera się na pełnym ekranie, a w pionie obrócona o 90°
+  (`.board-sheet` w CSS, `slBoardPeek` w `snakes.js`). `#board-area` NIE jest kopiowana —
+  przycisk przełącza tylko `body.board-open`, więc odświeżanie co 10 s podglądu nie zamyka.
+  Na komputerze opakowania mają `display: contents` i nie wpływają na układ. Zakres
+  701–1000px zostaje przy przewijaniu w bok.
+- Garderoba na planszy (`shop_at`) ma rozmiar liczony od WYSOKOŚCI planszy — plansza 'free'
+  jest ~2× szersza niż wysoka i kwadrat liczony od szerokości nachodził na pola.
 
 ## Boss sezonu (`special_boss` w pliku planszy)
 
@@ -80,6 +86,21 @@ a wpłacone w nią coins wracają wierszem `season_refund` w `sl_boss_payouts` (
 widzi, bo czyta rejestr). HP = `hp_per_workday` × dni robocze do `attack_at`; termin zawsze
 `attack_at`. Daty w pliku są bez roku, a klucz edycji (`sl_coop.special` =
 `'halloween-2026'`) pilnuje, żeby po wygranej/przegranej boss nie wrócił w tym samym roku.
+
+## Ekonomia planszy — dlaczego Noc Duchów ma 40 pól
+
+Analiza z września 2026 (symulacja 12 aktywnych graczy × 3 rzuty dziennie, kostka 1–6):
+na 48 polach akcja trafiała się w co trzecim rzucie, a punkty szły prawie wyłącznie z oczek
+i postępu. **Portfele opróżniało przede wszystkim zbijanie**: przy −20 coins każdy był zbijany
+ponad raz dziennie i połowa jego zarobku przechodziła na innych graczy. Dlatego:
+
+- Noc Duchów ma **40 pól, ~70% z akcją**, a każda akcja jest mała (dynie 3–8 pkt, drzwi
+  8/3/8, kocioł −5, okrążenie +30 przez `lap_points`). Dochód wynosi ~40 coins dziennie,
+  prawie jak wcześniej, więc HP bossa sezonu się nie zmieniło.
+- **Mniej pól = więcej zbić** (+22% przy 40 polach), dlatego `SL_KNOCKBACK_COIN_STEAL` = 10.
+  Kto skraca planszę, musi to przeliczyć razem.
+- Kostiumy kosztują 150–450 coins (4–11 dni zbierania). To ma być rzecz premium, a nie zakup
+  „przy okazji”.
 
 ## Mechaniki sezonowe — kocioł, drzwi, cukierki
 
@@ -100,8 +121,11 @@ dwóch rzeczy naraz.
   wyjęcia powiększyłoby pulę, czyli wydrukowało coins dla następnego.
 - Polowanie na cukierki **nie ma osobnego rankingu**: `candies` idzie w wierszu rankingu
   (`seasonal.candyMap()`), `null` = sezon bez cukierków i kolumny w ogóle nie ma.
-- Dzień drzwi z `hide_bonuses` wyłącza pola bonusowe (`seasonal.bonusesOff()` w
-  `slResolveTileEffect`) — drzwi ZASTĘPUJĄ dynie, a nie dokładają się do nich.
+- Drzwi bez `weekdays` są otwarte codziennie (tak jest na Nocy Duchów). Z `weekdays`
+  działają tylko w te dni, a `hide_bonuses` wyłącza wtedy pola bonusowe
+  (`seasonal.bonusesOff()` w `slResolveTileEffect`) — drzwi ZASTĘPUJĄ dynie. Noc Duchów
+  tego nie używa: dynie i drzwi działają obok siebie. Stawki drzwi (`treat_points`,
+  `candy_points`, `trick_coins`) mogą przyjść z pliku planszy.
 - Kocioł i psikus zabierają coins **bez przycinania** (można zejść na minus, jak po
   bossie). Cukierek z drzwi daje **tylko punkty** — kategoria `season` w rozbiciu.
 

@@ -384,17 +384,17 @@
   font-size: clamp(11px, 1.6vh, 16px);
 }
 .sl-board-free .sl-pawns { gap: 2px; flex-wrap: nowrap; }
-.sl-board-free .sl-pawn-wrap + .sl-pawn-wrap { margin-left: -9px; }
-.sl-board-free .sl-pawn-wrap + .sl-pawn-more { margin-left: -12px; }
+.sl-board-free .sl-pawn-wrap + .sl-pawn-wrap { margin-left: -13px; }
+.sl-board-free .sl-pawn-wrap + .sl-pawn-more { margin-left: -15px; }
 .sl-pawn-more {
   position: relative;
   z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 4px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
   align-self: center;
   border-radius: 999px;
   background: var(--surface-alt);
@@ -406,8 +406,10 @@
   cursor: default;
 }
 .sl-board-free .sl-pawn-wrap {
-  width: clamp(18px, 3vh, 30px);
-  height: clamp(18px, 3vh, 30px);
+  /* Pionek jest większy od pola i może z niego wystawać — to zdjęcie gracza, ma być
+     rozpoznawalne. Pole trzyma najwyżej dwa (reszta idzie w „+N"). */
+  width: clamp(26px, 4.6vh, 44px);
+  height: clamp(26px, 4.6vh, 44px);
 }
 .sl-flag {
   position: absolute;
@@ -589,14 +591,40 @@
   pointer-events: none;
   overflow: visible;
 }
-.ov-zombie .sl-pawn-avatar { filter: sepia(0.6) hue-rotate(55deg) saturate(1.7) brightness(0.92); }
-.ov-vampire .sl-pawn-avatar { filter: saturate(0.35) brightness(1.18) contrast(1.1); }
-.ov-vampire:not(.sl-pawn-me) .sl-pawn-avatar { border-color: #B3122B; box-shadow: 0 0 6px rgba(179, 18, 43, 0.9); }
-.ov-skeleton .sl-pawn-avatar { filter: grayscale(1) contrast(1.8) brightness(1.1); }
-.c-stitch { stroke: #1A1A1A; stroke-width: 1.3; fill: none; stroke-linecap: round; }
+.ov-zombie .sl-pawn-avatar { filter: sepia(0.8) hue-rotate(58deg) saturate(2.4) brightness(0.82) contrast(1.15); }
+.ov-vampire .sl-pawn-avatar { filter: grayscale(0.6) brightness(1.3) contrast(1.2); }
+.ov-pumpkin_frame .sl-pawn-avatar { filter: sepia(1) saturate(2.6) hue-rotate(-12deg) brightness(1.05); }
+/* Szkielet jako prześwietlenie: negatyw w szarości — od razu widać, że to nie zwykłe zdjęcie. */
+.ov-skeleton .sl-pawn-avatar { filter: grayscale(1) invert(1) contrast(1.6) brightness(1.05); }
+.c-stitch { stroke: #1A1A1A; stroke-width: 1.8; fill: none; stroke-linecap: round; }
 .c-fang { fill: #FFFFFF; stroke: #B3122B; stroke-width: .6; }
-.c-bone-ring { fill: none; stroke: #EDEDED; stroke-width: 2.6; stroke-dasharray: 5 2.5; }
-.c-pumpkin-ring { fill: none; stroke: #FF8A1F; stroke-width: 3.4; }
+/* Nakładka z kształtem: zdjęcie przycina clip-path (inline w slPawnHtml), więc okrągła
+   ramka i cień by się ścięły — zamiast nich obrys c-shape-line w warstwie nakładki,
+   który przejmuje kolory „to ja" i tarczy. */
+.has-shape .sl-pawn-avatar,
+.has-shape.sl-pawn-me .sl-pawn-avatar,
+.has-shape.sl-pawn-shielded .sl-pawn-avatar { border: none; border-radius: 0; box-shadow: none; }
+/* Kolor nakładki idzie przez `color`, a obrys i poświata biorą go jako currentColor.
+   Poświata zostaje w kolorze kostiumu także u mnie — akcent „to ja" dostaje sam obrys. */
+.ov-skeleton { color: #EDEDED; }
+.ov-vampire { color: #D0142F; }
+.ov-zombie { color: #7FC241; }
+.ov-pumpkin_frame { color: #FF8A1F; }
+.c-shape-line { fill: none; stroke: currentColor; stroke-width: 2.5px; stroke-linejoin: round; }
+.c-shape-glow { fill: none; stroke: currentColor; stroke-width: 8px; stroke-linejoin: round; opacity: 0.4; }
+.c-collar { fill: #140812; stroke: #D0142F; stroke-width: .8; stroke-linejoin: round; }
+.c-collar-in { fill: #8E0F22; }
+.c-blood { fill: #D0142F; }
+.c-goo { fill: #7FC241; stroke: #3F6A1C; stroke-width: .6; }
+.c-bandage { fill: #E8DFC8; stroke: #9C8E6A; stroke-width: .6; }
+.c-bandage-line { stroke: #B5A77F; stroke-width: .7; }
+.c-bones path { stroke: #EDEDED; stroke-width: 3.2; stroke-linecap: round; }
+.c-bone-ends circle { fill: #EDEDED; }
+.c-vine { fill: none; stroke: #4E8A2A; stroke-width: 1.1; stroke-linecap: round; }
+.sl-pawn-shielded .c-shape-line { stroke: #7fd3ff; }
+.sl-pawn-me .c-shape-line { stroke: var(--accent); stroke-width: 3px; }
+.c-bone-crack { fill: none; stroke: #0A0A0A; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.c-pumpkin-rib { fill: none; stroke: rgba(150, 60, 0, 0.6); stroke-width: 1.5; }
 @media (prefers-reduced-motion: reduce) {
   .sl-pawn-wing, .sl-costume-gadget.g-spider { animation: none; }
 }
@@ -664,19 +692,48 @@
   border: 1px solid var(--muted);
   text-align: center;
 }
+/* Kostium to rzecz premium: nie posiadany ma złotą obwódkę i plakietkę z ceną. */
+.costume-item:not(.is-owned) {
+  border-color: rgba(255, 196, 64, 0.45);
+  background: linear-gradient(180deg, rgba(255, 196, 64, 0.08), transparent 70%), var(--surface-alt);
+}
 .costume-item.is-worn { border-color: var(--accent); background: rgba(200, 241, 53, 0.08); }
+.costume-price {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #FFD978, #E0A21E);
+  color: #2A1A00;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.costume-owned-tag { font-size: 11px; color: var(--text-muted); }
+.costume-saving {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.costume-saving-bar { display: block; height: 100%; background: var(--gold); border-radius: inherit; }
+.costume-missing { font-size: 11px; color: var(--text-muted); }
 .costume-icon { font-size: 30px; line-height: 1; }
+.costume-mini { display: inline-flex; padding: 2px 8px; }
+.costume-mini .sl-pawn-wrap { width: 40px; height: 40px; }
 .costume-name { font-size: 12px; }
 .costume-item button { font-size: 11px; padding: 4px 10px; }
 
-/* Chatka garderoby na planszy (view.shop_at). */
+/* Garderoba na planszy (view.shop_at): szafa z lustrem. */
 .sl-shop-hut {
   position: absolute;
   transform: translate(-50%, -50%);
   z-index: 4;
-  width: 9%;
-  min-width: 64px;
-  aspect-ratio: 1;
+  /* Rozmiar z WYSOKOŚCI planszy, nie z szerokości: plansza 'free' jest ~2× szersza niż
+     wysoka, więc kwadrat liczony od szerokości zajmował prawie trzy rzędy i nachodził na
+     pola (zwłaszcza w podglądzie na telefonie). */
+  height: 21%;
+  min-height: 52px;
+  aspect-ratio: 0.9;
   padding: 0;
   border: none;
   background: none;
@@ -685,14 +742,20 @@
 }
 .sl-shop-hut:hover { transform: translate(-50%, -50%) scale(1.08); }
 .sl-shop-hut svg { width: 100%; height: 100%; overflow: visible; }
-.hut-glow { fill: rgba(255, 138, 31, 0.18); }
-.hut-roof { fill: #2A1740; stroke: #7B3FC4; stroke-width: 1.5; }
-.hut-hat { fill: #2A1740; stroke: #7B3FC4; stroke-width: 1.2; }
-.hut-wall { fill: #3A2A22; stroke: #1A120D; stroke-width: 1.5; }
-.hut-window { fill: #FFB347; }
-.hut-door { fill: #1A120D; }
-.hut-sign { fill: #FF8A1F; stroke: #7A3A08; stroke-width: 1; }
-.hut-sign-text { font: 700 8px 'JetBrains Mono', monospace; fill: #1A0A00; letter-spacing: 0.5px; }
+.wr-glow { fill: rgba(255, 138, 31, 0.18); }
+.wr-body { fill: #2A1740; stroke: #7B3FC4; stroke-width: 1.5; }
+.wr-crest { fill: #FF8A1F; }
+.wr-inside { fill: #120A1C; }
+.wr-hanger { fill: none; stroke: #C9B8E0; stroke-width: 1.2; stroke-linecap: round; }
+.wr-dress { fill: #FF8A1F; stroke: #7A3A08; stroke-width: 0.8; }
+.wr-door { fill: #3A2356; stroke: #1A0E28; stroke-width: 1; }
+.wr-door-open { fill: #3A2356; stroke: #7B3FC4; stroke-width: 1; }
+.wr-mirror { fill: #9FC7E8; stroke: #FFB347; stroke-width: 1.6; }
+.wr-shine { fill: none; stroke: rgba(255, 255, 255, 0.8); stroke-width: 1.2; stroke-linecap: round; }
+.wr-knob { fill: #FFB347; }
+.wr-foot { fill: #1A0E28; }
+.wr-sign { fill: #FF8A1F; stroke: #7A3A08; stroke-width: 1; }
+.wr-sign-text { font: 700 8px 'JetBrains Mono', monospace; fill: #1A0A00; letter-spacing: 0.5px; }
 
 /* ── BOSS: kafelek w pasku + okienko z pełnym panelem ── */
 .boss-chip {
@@ -761,8 +824,8 @@
 .sl-pawn-wrap {
   position: relative;
   display: inline-flex;
-  width: clamp(20px, 3.4vh, 34px);
-  height: clamp(20px, 3.4vh, 34px);
+  width: clamp(26px, 4.6vh, 46px);
+  height: clamp(26px, 4.6vh, 46px);
   flex: 0 0 auto;
 }
 .sl-pawn-avatar {
@@ -786,7 +849,7 @@
   position: absolute;
   bottom: -3px;
   right: -3px;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
 }
 
@@ -908,6 +971,68 @@
   .sl-idx { font-size: 10px; }
   .sl-mark { font-size: 14px; }
   .sl-pawn { font-size: 12px; padding: 2px 5px; }
+}
+
+/* ── TELEFON: plansza za przyciskiem „Podgląd planszy" ──
+   Wąski ekran (albo telefon trzymany poziomo — niski i dotykowy) nie pokazuje planszy
+   w treści strony. Poziomy scroll przez planszę 20×11 był niewygodny, a ściśnięta
+   dawała pola po kilkanaście pikseli. Zamiast tego plansza otwiera się na pełnym ekranie;
+   gdy telefon stoi pionowo, scena jest obrócona o 90°, żeby plansza szła wzdłuż
+   dłuższego boku. Opakowania są przezroczyste dla układu na komputerze. */
+.board-peek, .board-sheet-close { display: none; }
+.board-sheet, .board-sheet-stage { display: contents; }
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
+  .board-peek { display: block; width: 100%; margin-bottom: 10px; }
+  .board-sheet { display: none; }
+  #board-area { overflow: visible; }
+  .sl-board-wrap, .sl-board-wrap.is-free { min-width: 0; min-height: 0; }
+  body.board-open { overflow: hidden; }
+  body.board-open .board-sheet {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    /* Pod dymkami pionków (200), oknami (.overlay 200+, garderoba 240) i toastem. */
+    z-index: 190;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg, #0b0b0f);
+  }
+  body.board-open .board-sheet-stage {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    padding: 28px 12px 10px;
+    box-sizing: border-box;
+  }
+  body.board-open #board-area { flex: 1; min-width: 0; }
+  /* W podglądzie liczy się plansza — legenda ściśnięta, żeby nie zjadała jednej czwartej ekranu. */
+  body.board-open .sl-legend { gap: 4px 10px; margin-top: 4px; font-size: 9px; }
+  body.board-open .board-sheet-close {
+    display: block;
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--muted);
+    background: var(--surface-alt);
+    color: var(--text-primary);
+    font-size: 16px;
+  }
+}
+@media (max-width: 700px) and (orientation: portrait) {
+  /* Obrót: scena ma wymiary ekranu zamienione miejscami i obraca się wokół środka —
+     flex nakładki ją centruje, więc po obrocie wypełnia ekran co do piksela. */
+  body.board-open .board-sheet-stage {
+    width: 100vh;
+    width: 100dvh;
+    height: 100vw;
+    transform: rotate(90deg);
+  }
 }
 
 /* ── DOPASOWANIE DO EKRANU ──

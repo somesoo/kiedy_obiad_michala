@@ -8,10 +8,16 @@
 //
 // Pola nie leżą w kratkach (layout 'free'): stoją w równych odstępach NA krzywej,
 // liczonych po długości łuku, więc droga jest gładka, a nie schodkowa.
+//
+// EKONOMIA (analiza z września 2026, symulacja 12 graczy × 3 rzuty dziennie): przy 48
+// polach akcja trafiała się w co trzecim rzucie, a punkty szły prawie wyłącznie z oczek
+// i postępu. Dlatego plansza ma 40 pól, z których ~70% coś robi, a każda akcja jest
+// MAŁA. Kostka zostaje 1–6. Mniej pól znaczy częstsze zbicia, więc razem z tą zmianą
+// zbicie zabiera 10 coins zamiast 20 (SL_KNOCKBACK_COIN_STEAL w server.js).
 
 const COLS = 20;
 const ROWS = 11;
-const TILES = 48;
+const TILES = 40;
 
 // Ósemka Lissajous 1:2: x = A·sin t, y = B·sin 2t. Przecina się w środku dla t = 0 i t = π.
 const A = 8.7;
@@ -78,55 +84,66 @@ module.exports = {
   effects: ['bats', 'fog'],
   grid: { cols: COLS, rows: ROWS },
   layout: 'free',
-  tile: 0.86,
+  // Przy 40 polach odstęp środków to ≥ 1,2 kratki, więc pole może być prawie pełną kratką.
+  tile: 0.95,
   road: 'smooth',
   closed: true,
   links: 'drawn',
   path: buildPath(),
 
-  // Z mety (pole 47) na start (0) droga idzie sama, bo tor jest zamknięty — kropkowana
+  // Z mety (pole 39) na start (0) droga idzie sama, bo tor jest zamknięty — kropkowana
   // linia okrążenia to tylko krótka „linia mety" między nimi. Podpis stoi w lewym górnym
   // rogu (zaczepiony lewą krawędzią), nad chorągiewką META: nad samym startem przycinałaby
   // go górna krawędź planszy.
   loop: [],
   loop_label: [-0.3, -0.18],
 
-  // Łączniki wybrane tak, żeby żaden nie przechodził przez inne pole ani przez mostek.
-  ladders: [[10, 26], [33, 41]],
-  // ROZWIDLONA drabina nad przewężeniem. Zwykła 4 → 28 omijała cały dół prawej pętli
-  // (+24 pola) i była za mocna. Teraz wejście na 4 to dodatkowy rzut: 3 albo 6 = górą
-  // na 28, cokolwiek innego = krótsza odnoga na 7, tuż za mostek. Średnio ~+10 zamiast +24.
-  // Krótsza odnoga NIE idzie na 11: pole 11 leży na tym samym ramieniu drogi co 7–10, więc
-  // drabina do niego biegłaby wzdłuż drogi, po pionkach. Węzeł [9.7, 2.2] to jedyne miejsce,
-  // z którego pień i obie odnogi mijają wszystkie pola (luz ~0,7 kratki) i mostek.
-  forks: [[4, 28, 7, [3, 6], [9.7, 2.2]]],
-  // Pajęcza nić (29 → 9) spada tuż przy mostku, zaraz po tym, jak ktoś wszedł drabiną 10.
-  snakes: [[25, 12], [29, 9], [44, 31]],
-  // Dynie zamiast gwiazdek. Celowo skromniej niż na klasycznej planszy (5 dyń, razem
-  // 90 pkt wobec 125): przy siedmiu bonusy ważyły za dużo w stosunku do samych rzutów.
-  // Droga powrotna lewej pętli (37–47) nie ma żadnej — tam rządzi wąż 44 → 31.
-  bonuses: [[2, 10], [14, 20], [19, 25], [23, 15], [36, 20]],
+  // Okrążenie daje mniej niż na klasycznej planszy (50): przy 40 polach wypada częściej,
+  // a przy 50 byłoby jedną piątą całego zarobku i ważyłoby więcej niż wszystkie akcje razem.
+  lap_points: 30,
 
-  // Mechaniki sezonowe (logika: lib/seasonal.js).
+  // Łączniki wybrane tak, żeby żaden nie przechodził przez inne pole ani przez mostek
+  // (luz ≥ 0,7 kratki — sprawdzone skryptem liczącym odległość odcinka od środków pól).
+  ladders: [[9, 22], [28, 34]],
+  // ROZWIDLONA drabina nad przewężeniem. Zwykła 3 → 23 omijałaby cały dół prawej pętli
+  // (+20 pól) i byłaby za mocna. Wejście na 3 to dodatkowy rzut: 3 albo 6 = górą na 23,
+  // cokolwiek innego = krótsza odnoga na 6, tuż za mostek. Średnio ~+8 zamiast +20.
+  // Węzeł [9.6, 2.4] to miejsce, z którego pień i obie odnogi mijają wszystkie pola
+  // i mostek z największym zapasem (~0,7 kratki).
+  forks: [[3, 23, 6, [3, 6], [9.6, 2.4]]],
+  // Pajęcza nić (24 → 7) spada pionowo tuż przy mostku, zaraz obok szczytu drabiny 9 → 22.
+  snakes: [[21, 10], [24, 7], [37, 26]],
+  // Dynie zamiast gwiazdek: DUŻO i MAŁO. Dziesięć dyń po 3–8 pkt (razem 45) zamiast pięciu
+  // po 10–25 (90) — akcja ma się trafiać często, ale żadne pole nie może ważyć więcej niż
+  // jeden dobry rzut. Dynie nie stoją na celach łączników (pilnuje walidacja).
+  bonuses: [[2, 4], [5, 3], [11, 5], [14, 4], [17, 6], [19, 3], [27, 8], [31, 5], [35, 4], [39, 3]],
+
+  // Mechaniki sezonowe (logika: lib/seasonal.js). Działają CODZIENNIE i obok siebie:
+  // wcześniej drzwi były tylko we wtorki i czwartki i zdejmowały wtedy dynie, więc w te
+  // dni akcji na planszy było MNIEJ, a nie więcej.
   events: {
-    // KOCIOŁ: na polach `drop` zabiera 10 coins (także na minus), chochla na 35 — tuż
+    // KOCIOŁ: na polach `drop` zabiera 5 coins (także na minus), chochla na 30 — tuż
     // przy namalowanym kotle — zgarnia wszystko, co się uzbierało.
-    cauldron: { drop: [8, 21, 42], ladle: 35, amount: 10 },
-    // CUKIEREK ALBO PSIKUS: drzwi czynne tylko we wtorki i czwartki (2, 4). W te dni
-    // dynie-bonusy są zdjęte z planszy — drzwi je zastępują, a nie dokładają się do nich.
-    trick_or_treat: { tiles: [13, 17, 27, 45], weekdays: [2, 4], hide_bonuses: true },
-    // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach, najwyżej 6 naraz.
+    cauldron: { drop: [8, 16, 25, 36], ladle: 30, amount: 5 },
+    // CUKIEREK ALBO PSIKUS: bez `weekdays` = drzwi otwarte codziennie. Stawki mniejsze niż
+    // domyślne (15/5/15), bo drzwi stoją na sześciu polach, a nie na czterech co drugi dzień.
+    // Pola 7 i 23 to cele łączników — tam drzwi mogą stać (to zdarzenie, nie pole specjalne).
+    trick_or_treat: { tiles: [7, 13, 23, 29, 33, 38], treat_points: 8, candy_points: 3, trick_coins: 8 },
+    // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach (zostało ich 12),
+    // najwyżej 6 naraz.
     candy: { per_day: 3, max_on_board: 6 },
   },
 
   // BOSS SEZONU: Dynia Zagłady jest JEDYNYM bossem całej Nocy Duchów — pojawia się od razu
   // po włączeniu sezonu i trwa do nocy Halloween (31.10, 20:00). HP = 1100 × dni robocze do
   // ataku: ekipa robi dziś ~1000 HP dziennie przy sporych wpłatach, więc bez wpłat się nie
-  // da, a z nimi — na styk. Sezon włączony 1.10 → 22 dni robocze → 24 200 HP.
+  // da, a z nimi — na styk. Przejście na 40 pól tego nie zmienia: kostka dalej 1–6, więc
+  // obrażenia z rzutów są te same, a dochód w coins (~40 dziennie)
+  // prawie ten sam. Sezon włączony 1.10 → 22 dni robocze → 24 200 HP.
   special_boss: { name: 'Dynia Zagłady', emoji: '🎃', attack_at: '10-31 20', hp_per_workday: 1100 },
 
-  // Garderoba (sklep z kostiumami) jako chatka czarownicy w lewym dolnym rogu.
-  shop_at: [1.25, 9.75],
+  // Garderoba (sklep z kostiumami) jako szafa z lustrem w lewym dolnym rogu.
+  shop_at: [0.75, 10.0],
 
   marks: { ladder: '🪜', snake: '🐍', bonus: '🎃' },
   confetti: ['🎃', '👻', '🦇', '🍬', '🕸️'],

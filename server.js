@@ -1342,7 +1342,10 @@ let slBoard = seasons.get(seasons.DEFAULT_ID);
 function slBoardSize() { return slBoard.size; }
 const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
 const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
-const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie
+const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie (domyślny)
+// Plik sezonu może nadpisać premię za okrążenie (`lap_points`) — krótsza droga znaczy
+// częstsze okrążenia, a przy 50 pkt premia zaczynała ważyć więcej niż akcje na polach.
+function slLapPoints() { return slBoard.lap_points != null ? slBoard.lap_points : SL_POINTS_PER_LAP; }
 
 // Koszty power-upów (w coins). Shield jest najdroższy, bo to kontra na cudzy atak —
 // ma kosztować więcej niż sam atak, ale zostaje w zasięgu kilku dni zbierania (dzienny
@@ -1452,8 +1455,13 @@ function slCurseAdjustRoll(variant, roll) {
 // Tutaj zostaje wyłącznie punkt podpięcia (szukaj "const boss = createBossModule").
 
 // ── KNOCKBACK (wypychanie z zajętego pola) ──
-// Ile monet traci wypchnięty gracz na rzecz tego, kto go zbił.
-const SL_KNOCKBACK_COIN_STEAL = 20;
+// Ile coins traci wypchnięty gracz na rzecz tego, kto go zbił.
+// Było 20. Symulacja 12 aktywnych graczy (wrzesień 2026) pokazała, że każdy jest zbijany
+// średnio ponad raz dziennie, a przy 20 coins zbicia przelewały między graczami POŁOWĘ
+// tego, co ktoś w ogóle zarobił (najgorsze 10% — trzy czwarte). Dla ekipy to zero, ale
+// pojedynczy gracz wiecznie stał przy pustym portfelu i nie mógł na nic odłożyć. Na
+// mniejszej planszy (Noc Duchów, 40 pól) zbić jest jeszcze więcej, stąd 10.
+const SL_KNOCKBACK_COIN_STEAL = 10;
 // O ile pól cofa się wypchnięty gracz — losowo z tego zakresu, osobne losowanie dla
 // KAŻDEJ ofiary (także w kaskadzie), z twardym progiem na polu 0 bieżącego okrążenia
 // (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
@@ -2573,7 +2581,7 @@ function slBoardPayload() {
     size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
     path: slBoard.path, loop: slBoard.loop, tiles,
     view: slBoard.view,
-    lap_points: SL_POINTS_PER_LAP
+    lap_points: slLapPoints()
   };
 }
 
@@ -3178,7 +3186,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
     const progressPoints = distance * SL_POINTS_PER_TILE;
     const oldLaps = Math.floor(from_abs / slBoardSize());
     const newLaps = Math.floor(abs / slBoardSize());
-    const lapPoints = Math.max(0, newLaps - oldLaps) * SL_POINTS_PER_LAP;
+    const lapPoints = Math.max(0, newLaps - oldLaps) * slLapPoints();
     let earned = pipPoints + progressPoints + lapPoints + tilePoints;
 
     if (curseVariant === 4) earned = Math.floor(earned / 2); // CHCIWOŚĆ: połowa zdobyczy przepada
