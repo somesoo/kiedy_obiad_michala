@@ -1501,6 +1501,12 @@ function slCurseAdjustRoll(variant, roll) {
 // pojedynczy gracz wiecznie stał przy pustym portfelu i nie mógł na nic odłożyć. Na
 // mniejszej planszy (Noc Duchów, 40 pól) zbić jest jeszcze więcej, stąd 10.
 const SL_KNOCKBACK_COIN_STEAL = 10;
+// Ile punktów RANKINGU dostaje zbijający — osobno od coins. Dawniej punkty były równe
+// zabranym coins, więc zbicie gracza z pustym portfelem albo w długu (po bossie) nie dawało
+// nic do rankingu, a to przypadek, nie zasługa zbijającego. Teraz: coins to przelew między
+// graczami (zależny od portfela ofiary, gra ich nie drukuje), punkty to stała nagroda za
+// samo zbicie. Obie liczby da się stroić niezależnie.
+const SL_KNOCKBACK_POINTS = 10;
 // O ile pól cofa się wypchnięty gracz — losowo z tego zakresu, osobne losowanie dla
 // KAŻDEJ ofiary (także w kaskadzie), z twardym progiem na polu 0 bieżącego okrążenia
 // (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
@@ -1968,6 +1974,70 @@ function slPointsBreakdown(totalPoints, raw) {
   return out;
 }
 
+// ── ROZBICIE NA SEZONY ──
+// Granica sezonu to ID wiersza, a nie data: `season_points_floor` = ostatni wiersz
+// sl_points_log sprzed przełączenia sezonu. Wszystko powyżej należy do bieżącego sezonu.
+// Dzięki temu nie trzeba dopisywać kolumny ani dogrywać starych wierszy, a każda ścieżka
+// cofania, która kasuje wiersze rozbicia, automatycznie poprawia też sezon. Reset gry
+// granicy nie rusza: AUTOINCREMENT nie oddaje starych ID, więc nowe wiersze i tak lądują
+// powyżej niej. Brak granicy = sezonu jeszcze nikt nie przełączał i cała gra to „ten sezon".
+function slSeasonPointsFloor() {
+  const v = slMetaGet('season_points_floor');
+  return v == null ? null : Number(v);
+}
+
+function slMarkSeasonStart() {
+  const last = db.prepare('SELECT MAX(id) AS m FROM sl_points_log').get().m;
+  slMetaSet('season_points_floor', String(last == null ? 0 : Number(last)));
+  slMetaSet('season_started_on', todayWaw());
+}
+
+// Jak slPointsBreakdownMap, ale tylko wiersze bieżącego sezonu. null = brak granicy.
+function slSeasonPointsMap() {
+  const floor = slSeasonPointsFloor();
+  if (floor == null) return null;
+  const rows = db.prepare(
+    'SELECT player_id, category, SUM(points) AS pts FROM sl_points_log WHERE id > ? GROUP BY player_id, category'
+  ).all(floor);
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.player_id)) map.set(r.player_id, {});
+    map.get(r.player_id)[r.category] = Number(r.pts);
+  }
+  return map;
+}
+
+// Rozbicie gracza na „ten sezon" i „wcześniej". „Wcześniej" jest RESZTĄ (całość minus
+// sezon), więc pula „sprzed podziału" i ręczne korekty z panelu lądują tam, a obie części
+// zawsze sumują się do total_points. null, gdy sezonu jeszcze nie przełączano — wtedy
+// front pokazuje samo rozbicie całościowe, jak dawniej.
+function slPointsSeasonSplit(totalPoints, rawAll, rawSeason, seasonMap) {
+  if (!seasonMap) return null;
+  const all = slPointsBreakdown(totalPoints, rawAll);
+  const season = {};
+  const prior = {};
+  let seasonSum = 0;
+  let priorSum = 0;
+  for (const cat of SL_POINT_CATEGORIES) {
+    season[cat] = Math.max(0, Number((rawSeason || {})[cat]) || 0);
+    prior[cat] = Math.max(0, all[cat] - season[cat]);
+    seasonSum += season[cat];
+    priorSum += prior[cat];
+  }
+  season.total = seasonSum;
+  prior.total = Math.max(0, Math.round(Number(totalPoints) || 0) - seasonSum);
+  prior.pre_split = Math.max(0, prior.total - priorSum);
+  return { season, prior };
+}
+
+// Etykieta granicy dla UI: „09.26" = miesiąc i rok, w którym ruszył bieżący sezon.
+function slSeasonSinceLabel() {
+  const d = slMetaGet('season_started_on');
+  if (!d || slSeasonPointsFloor() == null) return null;
+  const [y, m] = d.split('-');
+  return `${m}.${y.slice(2)}`;
+}
+
 function slLogActivity(playerId, type, detail, ref = null) {
   db.prepare('INSERT INTO sl_activity (player_id, type, detail, day, ref) VALUES (?, ?, ?, ?, ?)')
     .run(playerId, type, detail, todayWaw(), ref);
@@ -2207,10 +2277,14 @@ function slSeasonMoveFloor() {
 }
 
 // Ustawia sezon jako aktywny (baza + pamięć). resetPositions = wszyscy na start.
-function slInstallBoard(season, resetPositions) {
+// newSeason = admin ŚWIADOMIE zaczyna sezon (także ponownie ten sam) — wtedy od tego miejsca
+// liczy się rozbicie punktów „ten sezon". Reset pozycji przy starcie po edycji pliku
+// planszy sezonu nie zaczyna.
+function slInstallBoard(season, resetPositions, newSeason = false) {
   const moved = transaction(() => {
     slSeedBoardRows(season);
     const n = resetPositions ? slResetPositionsToStart(season.size) : 0;
+    if (newSeason) slMarkSeasonStart();
     slMetaSet('active_board', season.id);
     slMetaSet('board_size', season.size);
     return n;
@@ -2421,10 +2495,9 @@ function slFindOccupant(tile, excludeIds) {
 // — ale najdalej na pole 0 BIEŻĄCEGO okrążenia: cofnięcie nigdy nie przenosi
 // ofiary na poprzednią pętlę ani nie odbiera jej okrążenia. Do tego zabiera mu
 // SL_KNOCKBACK_COIN_STEAL
-// monet (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
-// TO konkretne wypchnięcie — tak samo jak każdy inny zarobek w grze (rzut kostką, nagroda
-// za bossa, pole bonusowe), skradzione monety liczą się RÓWNIEŻ jako punkty do rankingu,
-// nie tylko saldo do wydania w sklepie. Przy kaskadzie zbijający to nie zawsze roller:
+// coins (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
+// TO konkretne wypchnięcie. Punkty do rankingu idą OSOBNO: stałe SL_KNOCKBACK_POINTS,
+// niezależnie od tego, ile dało się zabrać. Przy kaskadzie zbijający to nie zawsze roller:
 // gdy wypchnięty gracz sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej
 // ofiary w łańcuchu.
 // Pole, na które trafia ofiara, odpala węża/drabinę/bonus normalnie (slResolveTileEffect)
@@ -2487,13 +2560,12 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
     // nie rzucał, tylko został tam przesunięty.
     slLogPoints(occ.player_id, 'bonus', bonusPoints);
 
-    if (stolen > 0) {
-      db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
-        .run(stolen, stolen, pusherId);
-      // Łup ze zbicia liczy się do rankingu (patrz komentarz o kradzieży wyżej), więc ma
-      // własną kategorię — to jedyne punkty, które gracz zdobywa cudzym kosztem.
-      slLogPoints(pusherId, 'knockback', stolen);
-    }
+    // Coins: przelew od ofiary (przycięty do jej portfela). Punkty: stała nagroda za zbicie,
+    // także gdy portfel ofiary był pusty — patrz SL_KNOCKBACK_POINTS.
+    const pointsWon = SL_KNOCKBACK_POINTS;
+    db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
+      .run(stolen, pointsWon, pusherId);
+    slLogPoints(pusherId, 'knockback', pointsWon);
 
     // Pole, na które gracz REALNIE został cofnięty — zanim zadziałała drabina/wąż.
     // Bez tego dziennik sklejał dwa różne ruchy w jeden i wychodziło „z pola 7 → 17
@@ -2509,6 +2581,7 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
       tile_effect: resolved.note,
       bonus_points: bonusPoints,
       coins_stolen: stolen,
+      points_won: pointsWon,
       stolen_by: pusherNickname
     };
     chain.push(entry);
@@ -2521,8 +2594,8 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
     // przez `detail LIKE '%Wypchnięty%'` na wpisach typu knockback (patrz /admin/day/rollback)
     // i policzyłoby zbijającego jako kogoś, kogo trzeba ręcznie przestawić na planszy.
     slLogActivity(pusherId, 'knockback', stolen > 0
-      ? `💰 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} i zgarnąłeś ${stolen} coins!`
-      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile} — nie miał ani jednego coina do zabrania.`, turnRef);
+      ? `💰 Zbiłeś ${occ.nickname} z pola ${entry.from_tile}: +${pointsWon} pkt i ${stolen} coins zabranych!`
+      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile}: +${pointsWon} pkt — coins do zabrania nie miał.`, turnRef);
 
     const bits = [`z pola ${entry.from_tile} → ${knockedTile} (-${tilesBack} ${slTilesWord(tilesBack)})`];
     if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
@@ -2620,7 +2693,9 @@ function slBoardPayload() {
     size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
     path: slBoard.path, loop: slBoard.loop, tiles,
     view: slBoard.view,
-    lap_points: slLapPoints()
+    lap_points: slLapPoints(),
+    // Od kiedy liczy się „ten sezon" w dymku z rozbiciem punktów (null = od początku gry).
+    season_since: slSeasonSinceLabel()
   };
 }
 
@@ -2662,6 +2737,7 @@ function slPlayersPayload(meId) {
   ).all().map(r => r.id));
   // Też jednym zapytaniem na wszystkich — inaczej byłoby N+1 przy kilkunastu pionkach.
   const breakdown = slPointsBreakdownMap();
+  const seasonPts = slSeasonPointsMap();
   const worn = costumes.slWornMap();
   return rows.map(r => {
     const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
@@ -2678,6 +2754,7 @@ function slPlayersPayload(meId) {
       total_points: Number(r.total_points),
       // Rozbicie punktów na kategorie — do dymka po najechaniu na pionek.
       points_breakdown: slPointsBreakdown(r.total_points, breakdown.get(r.player_id)),
+      points_split: slPointsSeasonSplit(r.total_points, breakdown.get(r.player_id), seasonPts && seasonPts.get(r.player_id), seasonPts),
       moved_today: rollsUsedToday >= dailyRolls,
       rolls_used_today: rollsUsedToday,
       rolls_remaining_today: Math.max(0, dailyRolls - rollsUsedToday),
@@ -2697,6 +2774,7 @@ function slLeaderboard(meId) {
     ORDER BY s.total_points DESC, s.laps DESC, s.abs_pos DESC
   `).all();
   const breakdown = slPointsBreakdownMap();
+  const seasonPts = slSeasonPointsMap();
   // Polowanie na cukierki (sezon z events.candy) nie ma osobnego rankingu — liczba 🍬
   // stoi w wierszu gracza obok punktów. null = sezon bez cukierków.
   const candies = seasonal.candyMap();
@@ -2707,6 +2785,7 @@ function slLeaderboard(meId) {
     nickname: r.nickname,
     total_points: Number(r.total_points),
     points_breakdown: slPointsBreakdown(r.total_points, breakdown.get(r.player_id)),
+    points_split: slPointsSeasonSplit(r.total_points, breakdown.get(r.player_id), seasonPts && seasonPts.get(r.player_id), seasonPts),
     laps: Number(r.laps),
     tile: slTileOf(r.abs_pos),
     is_me: meId ? r.player_id === meId : false
@@ -3361,7 +3440,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       const extraFor = k => (k.tile_effect === 'ladder' || k.tile_effect === 'fork_win' || k.tile_effect === 'fork_lose' ? `, a stamtąd 🪜 drabiną na **${k.to_tile}**`
         : k.tile_effect === 'snake' ? `, a stamtąd 🐍 wężem na **${k.to_tile}**`
         : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
-        : '') + (k.coins_stolen ? ` 💰 -${k.coins_stolen} coins na rzecz ${k.stolen_by}` : '');
+        : '') + ` 💰 ${k.stolen_by}: +${k.points_won} pkt${k.coins_stolen ? ` i ${k.coins_stolen} coins zabranych` : ''}`;
       slEmit('knockback', () => result.knockback.map((k, i) => i === 0
         ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.knocked_tile}**${extraFor(k)}.`
         : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.knocked_tile}**${extraFor(k)}.`
@@ -3814,7 +3893,7 @@ app.post('/api/snakes/admin/season', (req, res) => {
   if (!season) return res.status(404).json({ error: 'Nie ma takiego sezonu (albo jego plik ma błąd — patrz logi serwera).' });
 
   const previous = slBoard.id;
-  const moved = slInstallBoard(season, true);
+  const moved = slInstallBoard(season, true, true);
   console.log(`Snakes/Admin: sezon ${previous} → ${season.id} (${season.size} pól), ${moved} graczy na polu 0`);
   // Sezon z własnym bossem (special_boss) wystawia go OD RAZU, a nie przy kolejnej edycji.
   boss.slEnsureSpecialBoss();

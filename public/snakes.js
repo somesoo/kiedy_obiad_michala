@@ -266,16 +266,20 @@ document.getElementById('avatar-overlay-close').addEventListener('click', () => 
   if (!avatarOverlayMandatory) hideAvatarOverlay();
 });
 
-// ── WIĘKSZY PODGLĄD ZDJĘCIA NA HOVER ──
+// ── WIĘKSZY PODGLĄD PIONKA NA HOVER ──
 // Delegacja na document (nie na poszczególnych <img>) — pionki i miniatury w wyborze
 // celu są re-renderowane co chwilę, więc listenery wpięte bezpośrednio w nie
-// znikałyby przy każdym odświeżeniu. Działa dla każdego .sl-pawn-avatar / .target-avatar,
-// niezależnie kiedy powstał.
+// znikałyby przy każdym odświeżeniu.
+// Podgląd pokazuje CAŁY pionek — kształt nakładki, czapkę, skrzydła, gadżet — a nie gołe
+// kwadratowe zdjęcie. Składa go ta sama slPawnHtml co planszę, z danych gracza, ale BEZ
+// ducha: prześcieradło nieaktywnego chowa nakładkę, a podgląd ma pokazać pełny kostium.
+// Pionek bez gracza w danych (przymiarka w garderobie) jest po prostu klonowany.
 const AVATAR_HOVER_SELECTOR = '.sl-pawn-avatar, .target-avatar, .my-avatar-thumb, img.activity-face';
+const AVATAR_HOVER_W = 260, AVATAR_HOVER_H = 210;
 
 function positionAvatarHoverPreview(x, y) {
   const el = document.getElementById('avatar-hover-preview');
-  const pad = 18, w = 180, h = 180;
+  const pad = 18, w = AVATAR_HOVER_W, h = AVATAR_HOVER_H;
   let left = x + pad, top = y + pad;
   if (left + w > window.innerWidth) left = x - w - pad;
   if (top + h > window.innerHeight) top = y - h - pad;
@@ -283,16 +287,41 @@ function positionAvatarHoverPreview(x, y) {
   el.style.top = Math.max(4, top) + 'px';
 }
 
+// Id gracza, do którego należy miniatura — każde miejsce trzyma je trochę inaczej.
+function avatarHoverPlayerId(img) {
+  if (img.matches('.my-avatar-thumb')) return state.playerId;
+  const holder = img.closest('[data-tip-player], .target-row[data-id], [data-player-id]');
+  if (!holder) return null;
+  return Number(holder.dataset.tipPlayer || holder.dataset.id || holder.dataset.playerId) || null;
+}
+
+function avatarHoverHtml(img) {
+  const g = state.game;
+  const id = avatarHoverPlayerId(img);
+  const p = g && id && (g.players || []).find(x => x.player_id === id);
+  if (p) return slPawnHtml(p, { noTip: true, batDefault: g.board ? slBoardView(g.board).pawn === 'bat' : false });
+  const wrap = img.closest('.sl-pawn-wrap');
+  if (!wrap) return null;
+  const clone = wrap.cloneNode(true);
+  clone.removeAttribute('title');
+  return clone.outerHTML;
+}
+
 document.addEventListener('mouseover', e => {
   const img = e.target.closest(AVATAR_HOVER_SELECTOR);
   if (!img || !img.src) return;
-  document.getElementById('avatar-hover-img').src = img.src;
+  // Duży podgląd w garderobie jest już duży — drugi nad nim tylko zasłaniałby przyciski.
+  if (img.closest('.costume-preview')) return;
+  const box = document.getElementById('avatar-hover-preview');
+  const pawn = avatarHoverHtml(img);
+  // Gracz spoza listy (np. bez zdjęcia na planszy) — zostaje samo zdjęcie, ale okrągłe.
+  box.innerHTML = pawn || `<span class="sl-pawn-wrap"><img class="sl-pawn-avatar" src="${esc(img.src)}" alt="" /></span>`;
   positionAvatarHoverPreview(e.clientX, e.clientY);
-  document.getElementById('avatar-hover-preview').style.display = 'block';
+  box.style.display = 'flex';
 });
 document.addEventListener('mousemove', e => {
   const preview = document.getElementById('avatar-hover-preview');
-  if (preview.style.display === 'block') positionAvatarHoverPreview(e.clientX, e.clientY);
+  if (preview.style.display !== 'none') positionAvatarHoverPreview(e.clientX, e.clientY);
 });
 document.addEventListener('mouseout', e => {
   if (!e.target.closest(AVATAR_HOVER_SELECTOR)) return;
@@ -483,7 +512,7 @@ function renderActivity(data) {
     const faces = people.slice(0, MAX).map(p => {
       const cls = `activity-face${isMe(p.player_id) ? ' is-me' : ''}`;
       return p.avatar_url
-        ? `<img class="${cls}" src="${esc(p.avatar_url)}" alt="${esc(p.nickname)}" title="${esc(p.nickname)}" loading="lazy" />`
+        ? `<img class="${cls}" src="${esc(p.avatar_url)}" alt="${esc(p.nickname)}" title="${esc(p.nickname)}" data-player-id="${Number(p.player_id)}" loading="lazy" />`
         : `<span class="${cls} is-initial" title="${esc(p.nickname)}">${esc(String(p.nickname || '?').charAt(0).toUpperCase())}</span>`;
     }).join('');
     const more = people.length > MAX ? `<span class="activity-face is-more">+${people.length - MAX}</span>` : '';
@@ -1812,8 +1841,12 @@ function showRollResult(m) {
   }
   if (m.knockback && m.knockback.length) {
     const names = m.knockback.map(k => esc(k.nickname)).join(', ');
-    const coins = m.knockback.reduce((a, k) => a + (k.coins_stolen || 0), 0);
-    noteTxt.push(`💥 wypchnąłeś: ${names}!${coins > 0 ? ` (+${coins} 💰 zabranych)` : ''}`);
+    // Łup liczymy tylko z PIERWSZEGO zbicia — dalsze w kaskadzie robią wypchnięci, nie ja,
+    // i to oni dostają swoje punkty i coins.
+    const mine = m.knockback[0];
+    const coins = mine.coins_stolen || 0;
+    const pts = mine.points_won || 0;
+    noteTxt.push(`💥 wypchnąłeś: ${names}!${pts > 0 ? ` (+${pts} pkt${coins > 0 ? `, +${coins} 💰 zabranych` : ''})` : ''}`);
   }
   if (m.boss_hit) {
     noteTxt.push(m.boss_hit.defeated
@@ -2554,9 +2587,28 @@ function slTipFor(playerId) {
            || (g.players || []).find(p => p.player_id === playerId);
   if (!src || !src.points_breakdown) return null;
 
-  const b = src.points_breakdown;
   const total = Number(src.total_points) || 0;
-  const rows = SL_POINT_CATEGORY_LABELS
+  const head = `<div class="sl-tip-head">${esc(src.nickname)}<span class="sl-tip-total mono">${total} pkt</span></div>`;
+  const split = src.points_split;
+  // Sezonu jeszcze nikt nie przełączał — cała gra to jeden kawałek, rozbicie jak dawniej.
+  if (!split) return head + (slTipRows(src.points_breakdown, total) || '<div class="sl-tip-empty">Jeszcze bez punktów.</div>');
+
+  // Najpierw bieżący sezon (o to się teraz gra), pod nim wszystko sprzed niego. Procenty
+  // liczą się w obrębie sekcji — „40% z kostki" ma znaczyć 40% tego sezonu.
+  const board = g.board || {};
+  const since = board.season_since;
+  const seasonName = board.name ? esc(board.name) : 'Ten sezon';
+  return head
+    + `<div class="sl-tip-sec">${seasonName}${since ? ` <span class="sl-tip-since">od ${esc(since)}</span>` : ''}<span class="sl-tip-sec-total mono">${split.season.total} pkt</span></div>`
+    + (slTipRows(split.season, split.season.total) || '<div class="sl-tip-empty">W tym sezonie jeszcze bez punktów.</div>')
+    + (split.prior.total > 0
+      ? `<div class="sl-tip-sec">Wcześniej${since ? ` <span class="sl-tip-since">do ${esc(since)}</span>` : ''}<span class="sl-tip-sec-total mono">${split.prior.total} pkt</span></div>`
+        + slTipRows(split.prior, split.prior.total)
+      : '');
+}
+
+function slTipRows(b, total) {
+  return SL_POINT_CATEGORY_LABELS
     // Pustych kategorii nie pokazujemy — dymek ma być listą tego, co gracz faktycznie
     // zdobył, a nie tabelą zer. „Sprzed podziału" znika sama, gdy wyzeruje się historia.
     .filter(([key]) => (b[key] || 0) > 0)
@@ -2570,9 +2622,6 @@ function slTipFor(playerId) {
         <span class="sl-tip-pct mono">${pct}%</span>
       </div>`;
     }).join('');
-
-  return `<div class="sl-tip-head">${esc(src.nickname)}<span class="sl-tip-total mono">${total} pkt</span></div>`
-    + (rows || '<div class="sl-tip-empty">Jeszcze bez punktów.</div>');
 }
 
 function slTipShow(target, playerId) {

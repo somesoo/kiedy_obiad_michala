@@ -99,6 +99,9 @@ ponad raz dziennie i połowa jego zarobku przechodziła na innych graczy. Dlateg
   prawie jak wcześniej, więc HP bossa sezonu się nie zmieniło.
 - **Mniej pól = więcej zbić** (+22% przy 40 polach), dlatego `SL_KNOCKBACK_COIN_STEAL` = 10.
   Kto skraca planszę, musi to przeliczyć razem.
+- **Zbicie ma dwie osobne stawki**: coins (`SL_KNOCKBACK_COIN_STEAL`, przelew od ofiary,
+  przycięty do jej portfela) i punkty (`SL_KNOCKBACK_POINTS`, stałe, dawane zawsze). Dawniej
+  punkty = zabrane coins, więc zbicie gracza bez coins albo z długiem nic nie dawało do rankingu.
 - Kostiumy kosztują 150–450 coins (4–11 dni zbierania). To ma być rzecz premium, a nie zakup
   „przy okazji”.
 - **Extra Move: 2 dziennie zostają, ale cena zależy od BIEŻĄCEGO miejsca w rankingu**,
@@ -280,6 +283,13 @@ Dodając cokolwiek, co zapisuje punkty lub coins, sprawdź wszystkie pięć:
 Dotyczy to zwłaszcza `sl_points_log` (rozbicie punktów na kategorie). Licznik trzymany
 na `sl_state` rozjechałby się po cichu — dlatego jest osobna tabela kasowalna po dniu
 i po ruchu.
+
+**Rozbicie „ten sezon / wcześniej"** w dymku gracza liczy się z granicy
+`sl_meta.season_points_floor` (ostatnie `id` z `sl_points_log` przed przełączeniem sezonu
+w panelu). Granica to ID, a nie kolumna, więc każda ścieżka cofania, która kasuje wiersze
+rozbicia, poprawia też sezon sama z siebie. „Wcześniej" to reszta do `total_points`
+(razem z pulą „sprzed podziału" i ręcznymi korektami). Brak granicy = sezonu jeszcze nikt
+nie przełączał i dymek pokazuje jedno rozbicie, jak dawniej.
 
 **Boss ma własny rejestr: `sl_boss_payouts`.** Każda wypłata i każda kara ma tam wiersz
 (`kind`, `points`, `coins`, `day`, `cycle`). Cofanie **CZYTA ten rejestr, nigdy nie
