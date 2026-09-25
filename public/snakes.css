@@ -890,6 +890,11 @@
    klątwa, a nie zmiana cennika. Widzi to wyłącznie przeklęty gracz. */
 .shop-cost-old { color: var(--text-muted); opacity: 0.7; margin-right: 2px; }
 .shop-cost-up { color: var(--danger); font-weight: 600; }
+/* Extra Move: cena z miejsca w rankingu — zielona taniej niż zwykle, czerwona drożej.
+   Wyjaśnienie w dymku (slExtraMovePriceTip), stąd kursor pomocy i kropkowane podkreślenie. */
+.shop-cost-rank { cursor: help; border-bottom: 1px dotted currentColor; outline: none; }
+.shop-cost-rank.is-cheaper { color: #4ADE80; }
+.shop-cost-rank.is-pricier { color: var(--danger); }
 .shop-curse-note {
   background: rgba(232, 93, 74, 0.12);
   border: 1px solid var(--danger);
@@ -1719,6 +1724,9 @@
 .sl-tip-val { flex: 0 0 auto; color: var(--text-primary); }
 .sl-tip-pct { flex: 0 0 34px; text-align: right; color: var(--text-muted); font-size: 10px; }
 .sl-tip-empty { color: var(--text-muted); }
+.sl-tip-row.is-mine .sl-tip-lbl,
+.sl-tip-row.is-mine .sl-tip-val { color: var(--accent); font-weight: 600; }
+.sl-tip-head + .sl-tip-row ~ .sl-tip-empty { margin-top: 6px; max-width: 240px; font-size: 11px; }
 
 /* ── OKNO ROZWIDLONEJ DRABINY: duża kostka + przycisk rzutu ── */
 /* Tło lżejsze niż zwykła nakładka i bez rozmycia — pod spodem ma być widać planszę
@@ -1815,7 +1823,3 @@
 .special-boss-teaser ~ .boss-chip { margin-left: 0; }
 @keyframes special-teaser { 50% { box-shadow: 0 0 12px rgba(255, 138, 31, 0.55); } }
 @media (prefers-reduced-motion: reduce) { .special-boss-teaser { animation: none; } }
-
-/* Extra Move: skąd cena (miejsce w rankingu z rana). */
-.shop-rank-note { margin: 4px 0 2px; font-size: 11px; line-height: 1.35; color: var(--text-primary); }
-.shop-rank-note .text-muted { display: block; font-size: 10px; }

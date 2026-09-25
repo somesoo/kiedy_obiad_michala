@@ -1858,9 +1858,16 @@ function renderShop(g) {
     const canBuy = g.me.balance >= item.cost && !full;
     const canUse = owned > 0;
     const bumped = item.base_cost != null && item.cost > item.base_cost;
-    const costHtml = bumped
+    let costHtml = bumped
       ? `<s class="shop-cost-old">${item.base_cost}</s> <span class="shop-cost-up">${item.cost}</span> coins`
       : `${item.cost} coins`;
+    // Extra Move: cena z miejsca w rankingu. Kolor mówi, czy taniej (zielona), czy drożej
+    // (czerwona) niż zwykle; wyjaśnienie jest w dymku, a nie w opisie karty.
+    if (item.rank_prices) {
+      const base = item.rank_prices.mid;
+      const tone = item.base_cost < base ? 'is-cheaper' : item.base_cost > base ? 'is-pricier' : '';
+      costHtml = `<span class="shop-cost-rank ${tone}" tabindex="0" data-price-tip="double_move">${costHtml}</span>`;
+    }
     return `
       <div class="shop-item">
         <div class="shop-top">
@@ -1868,7 +1875,6 @@ function renderShop(g) {
           <span class="shop-cost mono">${costHtml}</span>
         </div>
         <div class="shop-desc text-muted small">${meta.desc}</div>
-        ${slExtraMovePriceNote(item)}
         <div class="shop-actions">
           <button class="btn-ghost shop-buy" data-type="${item.type}" ${canBuy ? '' : 'disabled'}${full ? ` title="Masz już ${item.max_owned} — więcej nie da się trzymać"` : ''}>Kup</button>
           <button class="btn-primary shop-use" data-type="${item.type}" ${canUse ? '' : 'disabled'}>Użyj${owned ? ` (${owned})` : ''}</button>
@@ -1877,17 +1883,24 @@ function renderShop(g) {
   }).join('');
 }
 
-// Extra Move kosztuje tyle, ile wynika z BIEŻĄCEGO miejsca w rankingu (serwer:
-// slPowerupBaseCost). Bez wyjaśnienia skacząca cena wyglądałaby na błąd.
-function slExtraMovePriceNote(item) {
+// Dymek przy cenie Extra Move: skąd ta kwota. Cena wynika z BIEŻĄCEGO miejsca w rankingu
+// (serwer: slPowerupBaseCost) — bez wyjaśnienia skacząca cena wyglądałaby na błąd.
+function slExtraMovePriceTip() {
+  const item = state.game && state.game.shop ? state.game.shop.find(i => i.type === 'double_move') : null;
+  if (!item || !item.rank_prices) return '';
   const rp = item.rank_prices;
-  if (!rp) return '';
-  const tiers = rp.top.map((c, i) => `${i + 1}. — ${c}`).join(' · ')
-    + ` · 4.–${rp.mid_until}. — ${rp.mid} · ${rp.mid_until + 1}.+ — ${rp.low}`;
-  const where = item.rank ? `Jesteś <strong>${item.rank}.</strong> w rankingu` : 'Jesteś nowy w rankingu';
-  return `<div class="shop-rank-note small" title="Cena Extra Move według bieżącego miejsca w rankingu: ${tiers}">
-      ${where} — czołówka płaci więcej, goniący mniej. <span class="text-muted">(${tiers})</span>
-    </div>`;
+  const tiers = [
+    ...rp.top.map((c, i) => [i + 1, `${i + 1}. miejsce`, c]),
+    [4, `4.–${rp.mid_until}. miejsce`, rp.mid],
+    [rp.mid_until + 1, `${rp.mid_until + 1}. i dalej`, rp.low],
+  ];
+  const mine = (from) => item.rank && (from === item.rank || (from === 4 && item.rank >= 4 && item.rank <= rp.mid_until) || (from === rp.mid_until + 1 && item.rank > rp.mid_until));
+  const rows = tiers.map(([from, label, c]) =>
+    `<div class="sl-tip-row${mine(from) ? ' is-mine' : ''}"><span class="sl-tip-lbl">${label}</span><span class="sl-tip-val mono">${c} coins</span></div>`).join('');
+  const verdict = item.base_cost < rp.mid ? 'goniącym jest taniej' : item.base_cost > rp.mid ? 'czołówka płaci więcej' : 'cena zwykła';
+  return `<div class="sl-tip-head">Extra Move · ${item.rank ? `jesteś ${item.rank}.` : 'nowy gracz'}<span class="sl-tip-total mono">${verdict}</span></div>`
+    + rows
+    + `<div class="sl-tip-empty">Cena zależy od bieżącego miejsca w rankingu — żeby łatwiej było gonić liderów. Awansujesz, a następna sztuka kosztuje więcej.</div>`;
 }
 
 document.getElementById('shop-list').addEventListener('click', e => {
@@ -2563,7 +2576,10 @@ function slTipFor(playerId) {
 }
 
 function slTipShow(target, playerId) {
-  const html = slTipFor(playerId);
+  slTipShowHtml(target, slTipFor(playerId));
+}
+
+function slTipShowHtml(target, html) {
   if (!html) return;
   if (!slTipEl) {
     slTipEl = document.createElement('div');
@@ -2597,6 +2613,22 @@ document.addEventListener('mouseover', e => {
 document.addEventListener('mouseout', e => {
   const el = e.target.closest && e.target.closest('[data-tip-player]');
   if (el && !el.contains(e.relatedTarget)) slTipHide();
+});
+// Dymek przy cenie Extra Move: najechanie myszą albo fokus (tapnięcie na telefonie).
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest && e.target.closest('[data-price-tip]');
+  if (el) slTipShowHtml(el, slExtraMovePriceTip());
+});
+document.addEventListener('mouseout', e => {
+  const el = e.target.closest && e.target.closest('[data-price-tip]');
+  if (el && !el.contains(e.relatedTarget)) slTipHide();
+});
+document.addEventListener('focusin', e => {
+  const el = e.target.closest && e.target.closest('[data-price-tip]');
+  if (el) slTipShowHtml(el, slExtraMovePriceTip());
+});
+document.addEventListener('focusout', e => {
+  if (e.target.closest && e.target.closest('[data-price-tip]')) slTipHide();
 });
 // Przewinięcie odkleiłoby dymek od pionka — prościej go schować niż przeliczać pozycję.
 window.addEventListener('scroll', slTipHide, true);
