@@ -2,7 +2,7 @@
 //
 // Kształt: znak NIESKOŃCZONOŚCI ∞. Gra od początku jest „nieskończoną pętlą", więc tu
 // pętla jest dosłowna: jedna zamknięta droga w ósemkę, która przecina się pośrodku na
-// mostku. Meta stoi tuż przed startem, a droga z mety płynnie wjeżdża z powrotem na start.
+// rozstajach. Meta stoi tuż przed startem, a droga z mety płynnie wjeżdża z powrotem na start.
 // Zamiast serpentyny (w prawo, w górę, w lewo…) ruch obiega dwie pętle: lewą wokół
 // cmentarza i prawą wokół nawiedzonego domu.
 //
@@ -25,14 +25,17 @@ const B = 4.4;
 const curve = (t) => ({ x: COLS / 2 + A * Math.sin(t), y: ROWS / 2 + B * Math.sin(2 * t) });
 
 // Start na szczycie lewej pętli (t = −π/4), ruch zgodnie z rosnącym t: najpierw w dół
-// do mostka, potem dołem prawej pętli, jej szczytem z powrotem przez mostek, dołem
+// do rozstajów, potem dołem prawej pętli, jej szczytem z powrotem przez rozstaje, dołem
 // i lewym brzegiem lewej pętli aż do mety tuż przed startem.
 const START_T = -Math.PI / 4;
 
-// Na skrzyżowaniu obie nitki drogi mijają się pod kątem ~90°. Gdyby pola stały tuż przy
-// nim, pola z dwóch nitek nachodziłyby na siebie — dlatego wokół obu przejść przez środek
-// zostawiamy przerwę (mostek) o tej długości, a pola rozkładamy równo na reszcie drogi.
-const BRIDGE_GAP = 2.0;
+// ROZSTAJE: droga przecina się pośrodku dwa razy na okrążeniu (t = 0 i t = π), a obie
+// chwile dzielą dokładnie pół długości łuku (druga połowa ósemki to lustro pierwszej).
+// Pola stoją więc RÓWNO co 1/40 drogi, przesunięte tak, żeby pole 6 wypadło dokładnie na
+// skrzyżowaniu — wtedy pole 26 trafia tam samo. To dwa numery w JEDNYM miejscu (`shared`):
+// kto stanie na 6, zbija tego z 26 i odwrotnie. Dawniej wokół skrzyżowania była przerwa
+// (mostek bez pól), bo pola z dwóch nitek nachodziły na siebie.
+const SHARED = [6, 26];
 
 function buildPath() {
   const STEPS = 40000;
@@ -46,40 +49,36 @@ function buildPath() {
     samples.push({ t, s: len, x: p.x, y: p.y });
     prev = p;
   }
-  // Długość łuku w chwilach przejścia przez środek (t = 0 oraz t = π).
-  const arcAt = (target) => {
-    let best = samples[0];
-    let bestD = Infinity;
-    for (const smp of samples) {
-      let d = ((smp.t - target) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-      d = Math.min(d, 2 * Math.PI - d);
-      if (d < bestD) { bestD = d; best = smp; }
-    }
-    return best.s;
-  };
-  const crossings = [arcAt(0), arcAt(Math.PI)];
-  const onBridge = (s) => crossings.some(c => [c - len, c, c + len].some(cc => Math.abs(s - cc) < BRIDGE_GAP / 2));
+  // Długość łuku w chwili pierwszego przejścia przez środek (t = 0).
+  let cross = samples[0];
+  for (const smp of samples) if (Math.abs(smp.t) < Math.abs(cross.t)) cross = smp;
 
-  const step = (len - crossings.length * BRIDGE_GAP) / TILES;
-  const out = [];
-  let walked = 0;
-  let next = 0;
-  for (let i = 1; i < samples.length && out.length < TILES; i++) {
-    const a = samples[i - 1], b = samples[i];
-    if (onBridge((a.s + b.s) / 2)) continue;
-    walked += b.s - a.s;
-    if (walked >= next) {
-      // Pole to kwadrat 1×1 zaczepiony w lewym górnym rogu — tak jak kratka w siatce —
-      // więc środek krzywej przesuwamy o pół pola.
-      out.push([+(b.x - 0.5).toFixed(3), +(b.y - 0.5).toFixed(3)]);
-      next += step;
-    }
-  }
-  return out;
+  const step = len / TILES;
+  const offset = cross.s - SHARED[0] * step; // start przesuwa się o ułamek pola
+  const at = (s) => {
+    const want = ((s % len) + len) % len;
+    let lo = 0, hi = samples.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (samples[mid].s < want) lo = mid + 1; else hi = mid; }
+    return samples[lo];
+  };
+  return Array.from({ length: TILES }, (_, i) => {
+    // Oba numery rozstajów dostają IDENTYCZNY punkt (środek krzyżówki), a nie dwa
+    // prawie-równe z próbkowania — front rysuje je jako jedno pole.
+    const p = SHARED.includes(i) ? { x: COLS / 2, y: ROWS / 2 } : at(offset + i * step);
+    // Pole to kwadrat 1×1 zaczepiony w lewym górnym rogu — tak jak kratka w siatce —
+    // więc środek krzywej przesuwamy o pół pola.
+    return [+(p.x - 0.5).toFixed(3), +(p.y - 0.5).toFixed(3)];
+  });
 }
 
 module.exports = {
   name: 'Noc Duchów 🎃',
+  // SEZON W TESTACH (do premiery ok. 2.10.2026). Póki to `true`, liczbę pól, numery
+  // i ekonomię wolno zmieniać do woli — restart przy zmianie liczby pól i tak cofa
+  // wszystkich na start, a na produkcji nikt jeszcze na tej planszy nie grał. Po premierze
+  // przestaw na `false`: od tej chwili zmiana liczby pól albo przenumerowanie to ruszanie
+  // żywej gry (pozycje graczy, rozbicie punktów, cukierki na polach) i wymaga migracji.
+  testing: true,
   theme: 'halloween',
   effects: ['bats', 'fog'],
   grid: { cols: COLS, rows: ROWS },
@@ -102,21 +101,30 @@ module.exports = {
   // a przy 50 byłoby jedną piątą całego zarobku i ważyłoby więcej niż wszystkie akcje razem.
   lap_points: 30,
 
-  // Łączniki wybrane tak, żeby żaden nie przechodził przez inne pole ani przez mostek
+  // Rozstaje: 6 i 26 to jedno miejsce na skrzyżowaniu (patrz SHARED wyżej).
+  shared: [SHARED],
+
+  // Łączniki wybrane tak, żeby żaden nie przechodził przez inne pole ani przez rozstaje
   // (luz ≥ 0,7 kratki — sprawdzone skryptem liczącym odległość odcinka od środków pól).
-  ladders: [[9, 22], [28, 34]],
+  // Numeracja po dodaniu rozstajów (wrzesień 2026): w każdej połówce jedno puste pole
+  // zniknęło (dawne 15 i 32), więc wszystko między startem a nim przesunęło się o +1.
+  ladders: [[10, 22], [29, 34]],
   // ROZWIDLONA drabina nad przewężeniem. Zwykła 3 → 23 omijałaby cały dół prawej pętli
   // (+20 pól) i byłaby za mocna. Wejście na 3 to dodatkowy rzut: 3 albo 6 = górą na 23,
-  // cokolwiek innego = krótsza odnoga na 6, tuż za mostek. Średnio ~+8 zamiast +20.
+  // cokolwiek innego = krótsza odnoga na 5, tuż przed rozstajami. Średnio ~+8 zamiast +20.
+  // Odnoga NIE idzie za rozstaje (na 7): między polem 25, krzyżówką i pajęczą nicią nie ma
+  // przejścia — drabina szła po rogu pola 6/26.
   // Węzeł [9.6, 2.4] to miejsce, z którego pień i obie odnogi mijają wszystkie pola
-  // i mostek z największym zapasem (~0,7 kratki).
-  forks: [[3, 23, 6, [3, 6], [9.6, 2.4]]],
-  // Pajęcza nić (24 → 7) spada pionowo tuż przy mostku, zaraz obok szczytu drabiny 9 → 22.
-  snakes: [[21, 10], [24, 7], [37, 26]],
+  // z zapasem ~1 kratki.
+  forks: [[3, 23, 5, [3, 6], [9.6, 2.4]]],
+  // Pajęcza nić (24 → 8) spada pionowo tuż przy rozstajach, zaraz obok szczytu drabiny 10 → 22.
+  snakes: [[21, 11], [24, 8], [37, 27]],
   // Dynie zamiast gwiazdek: DUŻO i MAŁO. Dziesięć dyń po 3–8 pkt (razem 45) zamiast pięciu
   // po 10–25 (90) — akcja ma się trafiać często, ale żadne pole nie może ważyć więcej niż
   // jeden dobry rzut. Dynie nie stoją na celach łączników (pilnuje walidacja).
-  bonuses: [[2, 4], [5, 3], [11, 5], [14, 4], [17, 6], [19, 3], [27, 8], [31, 5], [35, 4], [39, 3]],
+  // Rozstaje (6 i 26) też są dynią za 5: najbardziej zatłoczone miejsce planszy, więc
+  // punkty za wejście idą w parze z największą szansą, że ktoś cię stamtąd zbije.
+  bonuses: [[2, 4], [4, 3], [6, 5], [12, 5], [15, 4], [17, 6], [19, 3], [26, 5], [28, 8], [32, 5], [35, 4], [39, 3]],
 
   // Mechaniki sezonowe (logika: lib/seasonal.js). Działają CODZIENNIE i obok siebie:
   // wcześniej drzwi były tylko we wtorki i czwartki i zdejmowały wtedy dynie, więc w te
@@ -124,12 +132,12 @@ module.exports = {
   events: {
     // KOCIOŁ: na polach `drop` zabiera 5 coins (także na minus), chochla na 30 — tuż
     // przy namalowanym kotle — zgarnia wszystko, co się uzbierało.
-    cauldron: { drop: [8, 16, 25, 36], ladle: 30, amount: 5 },
+    cauldron: { drop: [9, 16, 25, 36], ladle: 31, amount: 5 },
     // CUKIEREK ALBO PSIKUS: bez `weekdays` = drzwi otwarte codziennie. Stawki mniejsze niż
     // domyślne (15/5/15), bo drzwi stoją na sześciu polach, a nie na czterech co drugi dzień.
-    // Pola 7 i 23 to cele łączników — tam drzwi mogą stać (to zdarzenie, nie pole specjalne).
-    trick_or_treat: { tiles: [7, 13, 23, 29, 33, 38], treat_points: 8, candy_points: 3, trick_coins: 8 },
-    // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach (zostało ich 12),
+    // Pola 8 i 23 to cele łączników — tam drzwi mogą stać (to zdarzenie, nie pole specjalne).
+    trick_or_treat: { tiles: [8, 14, 23, 30, 33, 38], treat_points: 8, candy_points: 3, trick_coins: 8 },
+    // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach (zostało ich 10),
     // najwyżej 6 naraz.
     candy: { per_day: 3, max_on_board: 6 },
   },

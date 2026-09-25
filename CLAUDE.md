@@ -36,6 +36,15 @@ Kształt planszy, drabiny, węże, bonusy i motyw żyją w `boards/<id>.js` (for
 go odpalić ponownie. Admin przełącza sezon w panelu (`POST /api/snakes/admin/season`),
 a aktywny siedzi w `sl_meta.active_board`.
 
+**Stan wdrożenia (wrzesień 2026):** produkcja gra na `default` (klasyczna 7×7, w UI jako
+pierwszy sezon „Snakes Game"). **Noc Duchów jest jeszcze w testach** — `testing: true`
+w `boards/halloween.js`. Dopóki ta flaga stoi, liczbę pól, numerację i ekonomię tej
+planszy wolno zmieniać do woli, bez migracji: nikt na niej naprawdę nie grał. Premiera
+ok. 2.10.2026 razem z nazwą „Snakes Game" i migracją; **po niej flaga idzie na `false`**
+i od tej chwili każda zmiana liczby pól albo numerów to ruszanie żywej gry (pozycje,
+cukierki na polach, historia ruchów) — potrzebna migracja. Serwer przy starcie krzyczy
+w logu, gdy liczba pól sezonu bez `testing` się zmieniła.
+
 - **Liczba pól jest zmienna** — rozmiar zawsze przez `slBoardSize()`, nigdy ze stałej.
 - `sl_board` to **lustro** aktywnego pliku, reseedowane przy każdym starcie. Poprawka w pliku
   wchodzi po restarcie. Plik z błędem nie trafia na listę, powód jest w logu.
@@ -63,8 +72,14 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
 - `decor` niesie tylko `kind` + pozycję. Rysunki SVG siedzą w `SL_DECOR` w `snakes.js`,
   a payload **nigdy** nie niesie znaczników — nieznany `kind` jest pomijany.
 - Tor zamknięty, który przecina sam siebie, rysuje drogę w **dwóch kawałkach** z własnym
-  obrzeżem — drugi kładzie się na pierwszy jak mostek. Pola trzymają się z dala od
-  skrzyżowania (`BRIDGE_GAP` w pliku planszy).
+  obrzeżem — drugi kładzie się na pierwszy jak mostek.
+- **Rozstaje (`shared: [[a, b]]`)**: dwa numery pól w JEDNYM miejscu, na skrzyżowaniu
+  (Noc Duchów: 6 i 26). Oba mają identyczny punkt w `path`, walidacja przepuszcza tylko
+  tę parę mimo `FREE_MIN_GAP`. Serwer porównuje MIEJSCA, nie numery (`slSpotOf` w
+  `slFindOccupant`) — kto stanie na 6, zbija tego z 26, a ofiara cofa się po swojej nitce.
+  Front rysuje jeden kafelek „6/26" z pionkami z obu numerów. Rozstaje mogą być tylko
+  zwykłym polem albo bonusem o tej samej wartości na obu numerach (bez łączników, zdarzeń
+  i cukierków), bo to jedno miejsce i musi działać tak samo z obu stron.
 - Pole w układzie 'free' jest małe: przy więcej niż 2 pionkach pokazuje jeden (mój,
   jeśli tam stoję) i licznik „+N". To ważne zaraz po zmianie sezonu — wszyscy stoją
   wtedy na starcie.

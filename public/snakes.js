@@ -1022,6 +1022,15 @@ function renderBoard(g) {
   board.tiles.forEach(t => { if (!(bonusesOff && t.kind === 'bonus')) special[t.position] = t; });
   const pawns = {};
   g.players.forEach(p => { (pawns[p.tile] = pawns[p.tile] || []).push(p); });
+  // Rozstaje: dwa numery w jednym miejscu. Rysujemy JEDNO pole (pod mniejszym numerem)
+  // z pionkami z obu, a drugi numer pomijamy — inaczej dwa kafelki leżałyby na sobie.
+  const sharedWith = {};
+  for (const [a, b] of board.shared || []) {
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    sharedWith[lo] = hi;
+    sharedWith[hi] = null; // null = nie rysuj
+    pawns[lo] = [...(pawns[lo] || []), ...(pawns[hi] || [])];
+  }
 
   const view = slBoardView(board);
   const free = view.layout === 'free';
@@ -1036,7 +1045,8 @@ function renderBoard(g) {
       ? `left:${((c + (1 - view.tile) / 2) / board.cols) * 100}%;top:${((r + (1 - view.tile) / 2) / board.rows) * 100}%;`
         + `width:${(view.tile / board.cols) * 100}%;height:${(view.tile / board.rows) * 100}%`
       : `grid-column:${c + 1};grid-row:${r + 1}`;
-    cells += renderCell(idx, special[idx], pawns[idx], pos, board, events[idx]);
+    if (sharedWith[idx] === null) return;
+    cells += renderCell(idx, special[idx], pawns[idx], pos, board, events[idx], sharedWith[idx]);
   });
 
   area.innerHTML = `
@@ -1561,7 +1571,7 @@ const SL_COSTUME_SHAPES = {
 })();
 
 
-function renderCell(idx, sp, players, posStyle, board, ev = null) {
+function renderCell(idx, sp, players, posStyle, board, ev = null, twin = null) {
   const size = board.size;
   const marks = slMarks(board);
   // Pole w układzie 'free' jest małe (ułamek kratki na gęstej siatce), więc napis
@@ -1572,6 +1582,11 @@ function renderCell(idx, sp, players, posStyle, board, ev = null) {
   // Start ma własny kolor: niżej nie da się spaść (serwer przycina ruch do pola 0).
   // Ostatnie pole to meta okrążenia — stąd pętla wraca na start.
   let idxLabel = String(idx);
+  // Rozstaje: podpis „6/26" — to pole, na które wchodzi się z obu nitek drogi.
+  if (twin != null) {
+    cls += ' sl-cell-shared';
+    idxLabel = `${idx}/${twin}`;
+  }
   if (idx === 0) {
     cls += ' sl-cell-start';
     if (free) flag = '<span class="sl-flag sl-flag-start">START</span>'; else idxLabel = '0 · START';
@@ -1589,7 +1604,7 @@ function renderCell(idx, sp, players, posStyle, board, ev = null) {
     if (sp.kind === 'ladder') mark = `<span class="sl-mark" title="Drabina → ${sp.target}">${esc(marks.ladder)}</span>`;
     else if (sp.kind === 'fork') mark = `<span class="sl-mark" title="${esc(slForkTitle(sp))}">🎲</span>`;
     else if (sp.kind === 'snake') mark = `<span class="sl-mark" title="Wąż → ${sp.target}">${esc(marks.snake)}</span>`;
-    else if (sp.kind === 'bonus') mark = `<span class="sl-mark" title="Bonus +${sp.value} pkt">${esc(marks.bonus)}</span>`;
+    else if (sp.kind === 'bonus') mark = `<span class="sl-mark" title="${twin != null ? `Rozstaje — pole ${idx} i ${twin} to jedno miejsce, stąd zbijasz z obu stron. ` : ''}Bonus +${sp.value} pkt">${esc(marks.bonus)}</span>`;
   }
   // Pionek = okrągłe zdjęcie profilowe; serwer zwraca w `players` WYŁĄCZNIE graczy,
   // którzy je wgrali (bez zdjęcia = nie widać na planszy), więc avatar_url zawsze jest.

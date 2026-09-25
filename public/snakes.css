@@ -371,6 +371,10 @@
   align-items: center;
   justify-content: center;
 }
+/* Rozstaje: jedno pole pod dwoma numerami („6/26") na skrzyżowaniu drogi. Poświata
+   odróżnia je od zwykłych pól — to najgorętsze miejsce na planszy. */
+.sl-cell-shared { box-shadow: 0 0 0 2px rgba(255, 190, 90, 0.75), 0 0 14px rgba(255, 150, 40, 0.55); z-index: 2; }
+.sl-cell-shared .sl-idx { white-space: nowrap; letter-spacing: -0.02em; }
 .sl-board-free .sl-idx {
   top: 3px;
   left: 50%;

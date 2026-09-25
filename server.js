@@ -2307,7 +2307,14 @@ function slInstallBoard(season, resetPositions, newSeason = false) {
   const changed = storedSize != null && (season.id !== wanted || Number(storedSize) !== season.size);
   const moved = slInstallBoard(season, changed);
   console.log(`Snakes & Ladders: sezon "${season.id}" (${season.name}) — ${season.size} pól, siatka ${season.cols}×${season.rows}`
+    + (season.testing ? ' [W TESTACH]' : '')
     + (changed ? `; plansza się zmieniła, ${moved} graczy wraca na pole 0` : ''));
+  // Sezon po premierze (bez `testing`) nie powinien zmieniać liczby pól bez migracji:
+  // reset pozycji to jeszcze nic, ale rozbicie punktów, cukierki na polach i historia
+  // ruchów odnoszą się do starych numerów. Głośno w logu, żeby nie przeszło niezauważone.
+  if (changed && !season.testing) {
+    console.error(`Snakes & Ladders: UWAGA — liczba pól sezonu "${season.id}" zmieniła się po premierze (${storedSize} → ${season.size}). Czy była do tego migracja?`);
+  }
 })();
 
 // Wiersz sl_board w kształcie dla logiki i frontu: `faces` z tekstu "3,6" na listę liczb.
@@ -2477,14 +2484,25 @@ function slStepMove(absBefore, roll, board, invertBoard = false) {
 }
 
 // ── KNOCKBACK ──
-// Znajduje gracza (poza wykluczonymi) stojącego na danym polu — po numerze pola
-// (abs_pos modulo rozmiar planszy), bo to WSPÓLNA, zapętlona plansza.
+// MIEJSCE na planszy, a nie numer pola. Zwykle to jedno i to samo, ale rozstaje (`shared`
+// w pliku sezonu, np. 6 i 26 na ósemce Nocy Duchów) to dwa numery w jednym miejscu — kto
+// stoi na 6, stoi też „na 26" i da się go stamtąd zbić. Kanoniczny jest mniejszy numer.
+function slSpotOf(tile) {
+  for (const [a, b] of slBoard.shared || []) if (tile === a || tile === b) return Math.min(a, b);
+  return tile;
+}
+
+// Znajduje gracza (poza wykluczonymi) stojącego w danym miejscu — po numerze pola
+// (abs_pos modulo rozmiar planszy), bo to WSPÓLNA, zapętlona plansza, i po rozstajach
+// (slSpotOf). Wypchnięta ofiara cofa się potem po SWOJEJ nitce drogi, bo liczymy od jej
+// własnego abs_pos, nie od numeru, na którym stanął zbijający.
 function slFindOccupant(tile, excludeIds) {
   const rows = db.prepare(`
     SELECT s.player_id, s.abs_pos, p.nickname
     FROM sl_state s JOIN players p ON p.id = s.player_id
   `).all();
-  return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
+  const spot = slSpotOf(tile);
+  return rows.find(r => !excludeIds.has(r.player_id) && slSpotOf(slTileOf(r.abs_pos)) === spot) || null;
 }
 
 // Gracz, który ląduje na zajętym polu, wypycha okupanta o losowe
@@ -2690,6 +2708,8 @@ function slBoardPayload() {
     size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
     path: slBoard.path, loop: slBoard.loop, tiles,
     view: slBoard.view,
+    // Rozstaje — front rysuje każdą parę jako JEDNO pole z pionkami z obu numerów.
+    shared: slBoard.shared || [],
     lap_points: slLapPoints(),
     season_prior_label: slMetaGet('season_prior_label') || SL_FIRST_SEASON_NAME
   };

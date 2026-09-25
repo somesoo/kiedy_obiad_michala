@@ -396,11 +396,11 @@
       const data = await api('GET', `/api/snakes/admin/seasons?password=${encodeURIComponent(pass)}`);
       const active = data.seasons.find(x => x.id === data.active);
       document.getElementById('season-info').innerHTML = active
-        ? `Aktywny: <strong>${esc(active.name)}</strong> (${esc(active.id)}) · ${active.size} pól na siatce ${active.cols}×${active.rows}`
+        ? `Aktywny: <strong>${esc(active.name)}</strong> (${esc(active.id)}) · ${active.size} pól na siatce ${active.cols}×${active.rows}${active.testing ? ' · <strong>w testach</strong>' : ''}`
         : `Aktywny: ${esc(data.active)}`;
       const sel = document.getElementById('season-select');
       sel.innerHTML = data.seasons.map(x =>
-        `<option value="${esc(x.id)}"${x.id === data.active ? ' selected' : ''}>${esc(x.name)} — ${x.size} pól${x.id === data.active ? ' (aktywny)' : ''}</option>`
+        `<option value="${esc(x.id)}"${x.id === data.active ? ' selected' : ''}>${esc(x.name)} — ${x.size} pól${x.testing ? ' · w testach' : ''}${x.id === data.active ? ' (aktywny)' : ''}</option>`
       ).join('');
     }
 
