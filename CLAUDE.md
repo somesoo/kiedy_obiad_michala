@@ -288,7 +288,9 @@ i po ruchu.
 `sl_meta.season_points_floor` (ostatnie `id` z `sl_points_log` przed przełączeniem sezonu
 w panelu). Granica to ID, a nie kolumna, więc każda ścieżka cofania, która kasuje wiersze
 rozbicia, poprawia też sezon sama z siebie. „Wcześniej" to reszta do `total_points`
-(razem z pulą „sprzed podziału" i ręcznymi korektami). Brak granicy = sezonu jeszcze nikt
+(razem z pulą „sprzed podziału" i ręcznymi korektami) i w dymku idzie JEDNĄ sumą bez
+kategorii, pod nazwą pierwszego sezonu „Snakes Game" (`SL_FIRST_SEASON_NAME`; od drugiego
+przełączenia — „Poprzednie sezony"). Brak granicy = sezonu jeszcze nikt
 nie przełączał i dymek pokazuje jedno rozbicie, jak dawniej.
 
 **Boss ma własny rejestr: `sl_boss_payouts`.** Każda wypłata i każda kara ma tam wiersz

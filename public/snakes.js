@@ -2593,17 +2593,15 @@ function slTipFor(playerId) {
   // Sezonu jeszcze nikt nie przełączał — cała gra to jeden kawałek, rozbicie jak dawniej.
   if (!split) return head + (slTipRows(src.points_breakdown, total) || '<div class="sl-tip-empty">Jeszcze bez punktów.</div>');
 
-  // Najpierw bieżący sezon (o to się teraz gra), pod nim wszystko sprzed niego. Procenty
-  // liczą się w obrębie sekcji — „40% z kostki" ma znaczyć 40% tego sezonu.
+  // Najpierw bieżący sezon z rozbiciem (o to się teraz gra; procenty w obrębie sezonu),
+  // pod nim poprzednie sezony jako JEDNA suma — ich kategorie nikogo już nie obchodzą.
   const board = g.board || {};
-  const since = board.season_since;
   const seasonName = board.name ? esc(board.name) : 'Ten sezon';
   return head
-    + `<div class="sl-tip-sec">${seasonName}${since ? ` <span class="sl-tip-since">od ${esc(since)}</span>` : ''}<span class="sl-tip-sec-total mono">${split.season.total} pkt</span></div>`
+    + `<div class="sl-tip-sec">${seasonName}<span class="sl-tip-sec-total mono">${split.season.total} pkt</span></div>`
     + (slTipRows(split.season, split.season.total) || '<div class="sl-tip-empty">W tym sezonie jeszcze bez punktów.</div>')
     + (split.prior.total > 0
-      ? `<div class="sl-tip-sec">Wcześniej${since ? ` <span class="sl-tip-since">do ${esc(since)}</span>` : ''}<span class="sl-tip-sec-total mono">${split.prior.total} pkt</span></div>`
-        + slTipRows(split.prior, split.prior.total)
+      ? `<div class="sl-tip-sec">${esc(board.season_prior_label || 'Wcześniej')}<span class="sl-tip-sec-total mono">${split.prior.total} pkt</span></div>`
       : '');
 }
 

@@ -1986,10 +1986,15 @@ function slSeasonPointsFloor() {
   return v == null ? null : Number(v);
 }
 
+// Nazwa tego, co było PRZED bieżącym sezonem — w dymku jedna suma, bez rozbicia. Pierwszy
+// sezon (sprzed planszy-z-pliku) nazywa się „Snakes Game". Od drugiego przełączenia
+// „wcześniej" to już kilka sezonów naraz, a ich nazw nigdzie nie trzymamy.
+const SL_FIRST_SEASON_NAME = 'Snakes Game';
+
 function slMarkSeasonStart() {
+  if (slSeasonPointsFloor() != null) slMetaSet('season_prior_label', 'Poprzednie sezony');
   const last = db.prepare('SELECT MAX(id) AS m FROM sl_points_log').get().m;
   slMetaSet('season_points_floor', String(last == null ? 0 : Number(last)));
-  slMetaSet('season_started_on', todayWaw());
 }
 
 // Jak slPointsBreakdownMap, ale tylko wiersze bieżącego sezonu. null = brak granicy.
@@ -2028,14 +2033,6 @@ function slPointsSeasonSplit(totalPoints, rawAll, rawSeason, seasonMap) {
   prior.total = Math.max(0, Math.round(Number(totalPoints) || 0) - seasonSum);
   prior.pre_split = Math.max(0, prior.total - priorSum);
   return { season, prior };
-}
-
-// Etykieta granicy dla UI: „09.26" = miesiąc i rok, w którym ruszył bieżący sezon.
-function slSeasonSinceLabel() {
-  const d = slMetaGet('season_started_on');
-  if (!d || slSeasonPointsFloor() == null) return null;
-  const [y, m] = d.split('-');
-  return `${m}.${y.slice(2)}`;
 }
 
 function slLogActivity(playerId, type, detail, ref = null) {
@@ -2694,8 +2691,7 @@ function slBoardPayload() {
     path: slBoard.path, loop: slBoard.loop, tiles,
     view: slBoard.view,
     lap_points: slLapPoints(),
-    // Od kiedy liczy się „ten sezon" w dymku z rozbiciem punktów (null = od początku gry).
-    season_since: slSeasonSinceLabel()
+    season_prior_label: slMetaGet('season_prior_label') || SL_FIRST_SEASON_NAME
   };
 }
 

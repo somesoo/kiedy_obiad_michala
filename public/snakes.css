@@ -1717,7 +1717,7 @@
   border-bottom: 1px solid var(--muted);
 }
 .sl-tip-total { color: var(--accent); }
-/* Nagłówek sekcji w dymku: „Noc Duchów od 09.26" i „Wcześniej do 09.26". */
+/* Nagłówek sekcji w dymku: „Noc Duchów" i „Snakes Game". */
 .sl-tip-sec {
   display: flex;
   align-items: baseline;
@@ -1730,7 +1730,6 @@
   color: var(--text-primary);
 }
 .sl-tip-head + .sl-tip-sec { margin-top: 0; }
-.sl-tip-since { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
 .sl-tip-sec-total { margin-left: auto; font-weight: 400; color: var(--text-muted); }
 .sl-tip-row { display: flex; align-items: baseline; gap: 6px; }
 .sl-tip-ico { flex: 0 0 auto; }
