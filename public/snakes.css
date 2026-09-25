@@ -1815,3 +1815,7 @@
 .special-boss-teaser ~ .boss-chip { margin-left: 0; }
 @keyframes special-teaser { 50% { box-shadow: 0 0 12px rgba(255, 138, 31, 0.55); } }
 @media (prefers-reduced-motion: reduce) { .special-boss-teaser { animation: none; } }
+
+/* Extra Move: skąd cena (miejsce w rankingu z rana). */
+.shop-rank-note { margin: 4px 0 2px; font-size: 11px; line-height: 1.35; color: var(--text-primary); }
+.shop-rank-note .text-muted { display: block; font-size: 10px; }

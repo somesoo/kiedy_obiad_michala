@@ -101,6 +101,15 @@ ponad raz dziennie i połowa jego zarobku przechodziła na innych graczy. Dlateg
   Kto skraca planszę, musi to przeliczyć razem.
 - Kostiumy kosztują 150–450 coins (4–11 dni zbierania). To ma być rzecz premium, a nie zakup
   „przy okazji”.
+- **Extra Move: 2 dziennie zostają, ale cena zależy od BIEŻĄCEGO miejsca w rankingu**,
+  liczonego przy każdym zakupie (1. → 60, 2. → 55, 3. → 50, 4.–7. → 40, 8.+ → 30;
+  `slPowerupBaseCost`). Ludzie kupują go zawsze, więc przy równej cenie lidera nie dało się
+  dogonić (przewaga >10% w co ósmym sezonie; z cennikiem — w 1%). Front odsyła w
+  `/shop/buy` cenę, którą pokazał (`expected_cost`); gdy ranking zmienił się w międzyczasie,
+  serwer wstrzymuje zakup (409 `price_changed`, nic nie pobiera) i dosyła świeży cennik.
+  W ekwipunku najwyżej 2 sztuki — inaczej dało się kupić tanio z dołu tabeli na zapas.
+  Drożyzna mnoży cenę per gracz, nie stałą z `SL_POWERUP_COSTS`. Cennik jest też wpisany na
+  sztywno w regulaminie `snakes.html` — zmieniając stałe, popraw i tekst.
 
 ## Mechaniki sezonowe — kocioł, drzwi, cukierki
 

@@ -1854,7 +1854,8 @@ function renderShop(g) {
   list.innerHTML = g.shop.map(item => {
     const meta = POWERUP_META[item.type];
     const owned = g.inventory[item.type] || 0;
-    const canBuy = g.me.balance >= item.cost;
+    const full = item.max_owned != null && owned >= item.max_owned;
+    const canBuy = g.me.balance >= item.cost && !full;
     const canUse = owned > 0;
     const bumped = item.base_cost != null && item.cost > item.base_cost;
     const costHtml = bumped
@@ -1867,12 +1868,26 @@ function renderShop(g) {
           <span class="shop-cost mono">${costHtml}</span>
         </div>
         <div class="shop-desc text-muted small">${meta.desc}</div>
+        ${slExtraMovePriceNote(item)}
         <div class="shop-actions">
-          <button class="btn-ghost shop-buy" data-type="${item.type}" ${canBuy ? '' : 'disabled'}>Kup</button>
+          <button class="btn-ghost shop-buy" data-type="${item.type}" ${canBuy ? '' : 'disabled'}${full ? ` title="Masz już ${item.max_owned} — więcej nie da się trzymać"` : ''}>Kup</button>
           <button class="btn-primary shop-use" data-type="${item.type}" ${canUse ? '' : 'disabled'}>Użyj${owned ? ` (${owned})` : ''}</button>
         </div>
       </div>`;
   }).join('');
+}
+
+// Extra Move kosztuje tyle, ile wynika z BIEŻĄCEGO miejsca w rankingu (serwer:
+// slPowerupBaseCost). Bez wyjaśnienia skacząca cena wyglądałaby na błąd.
+function slExtraMovePriceNote(item) {
+  const rp = item.rank_prices;
+  if (!rp) return '';
+  const tiers = rp.top.map((c, i) => `${i + 1}. — ${c}`).join(' · ')
+    + ` · 4.–${rp.mid_until}. — ${rp.mid} · ${rp.mid_until + 1}.+ — ${rp.low}`;
+  const where = item.rank ? `Jesteś <strong>${item.rank}.</strong> w rankingu` : 'Jesteś nowy w rankingu';
+  return `<div class="shop-rank-note small" title="Cena Extra Move według bieżącego miejsca w rankingu: ${tiers}">
+      ${where} — czołówka płaci więcej, goniący mniej. <span class="text-muted">(${tiers})</span>
+    </div>`;
 }
 
 document.getElementById('shop-list').addEventListener('click', e => {
@@ -1886,7 +1901,10 @@ async function buyPowerup(type) {
   if (state.busy) return;
   state.busy = true;
   try {
-    const res = await api('POST', '/api/snakes/shop/buy', { type });
+    // Cena, którą gracz widzi — serwer wstrzyma zakup, jeśli policzy inną (Extra Move
+    // kosztuje tyle, ile wynika z BIEŻĄCEGO miejsca w rankingu).
+    const shown = state.game && state.game.shop ? state.game.shop.find(i => i.type === type) : null;
+    const res = await api('POST', '/api/snakes/shop/buy', { type, expected_cost: shown ? shown.cost : undefined });
     state.game = res.state;
     renderAll();
     showToast(res.price_curse
@@ -1897,7 +1915,7 @@ async function buyPowerup(type) {
     // Zakup wstrzymany przez świeżo odsłoniętą Drożyznę — NIC nie zostało kupione ani
     // pobrane z konta. Serwer dosyła świeży stan z podniesionymi cenami: przerysowujemy
     // sklep, żeby gracz zobaczył nowe kwoty, i zostawiamy mu decyzję jeszcze raz.
-    if (e.data && e.data.price_curse_revealed) {
+    if (e.data && (e.data.price_curse_revealed || e.data.price_changed)) {
       state.game = e.data.state;
       renderAll();
       showToast(e.data.error);

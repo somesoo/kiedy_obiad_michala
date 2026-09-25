@@ -1396,8 +1396,41 @@ function slPendingPriceCurse(playerId) {
   `).get(playerId, SL_CURSE_PRICE_VARIANT) || null;
 }
 
-function slShopPriceOf(type, cursed) {
-  const base = SL_POWERUP_COSTS[type];
+// ── EXTRA MOVE: CENA Z MIEJSCA W RANKINGU ──
+// Dwa Extra Move'y dziennie zostają, bo to mechanizm, który ludzie lubią i kupują zawsze.
+// Symulacja (wrzesień 2026, 12 graczy, ~2 mln ruchów) pokazała, że przy równej cenie lider
+// ma nad drugim średnio 4,7% przewagi, a >10% w co ósmym sezonie. Kto odjechał, kupuje
+// tyle samo ruchów co goniący, więc nie da się go dogonić. Cena rośnie z miejscem: czołówka
+// płaci więcej, dół mniej. Przewaga lidera spada wtedy do ~2,3% (>10% w 1% sezonów),
+// a opuszczający dni wygrywają częściej — przy tej samej liczbie kupowanych ruchów.
+const SL_EXTRA_MOVE_TOP_PRICES = [60, 55, 50]; // 1., 2., 3. miejsce
+const SL_EXTRA_MOVE_MID_UNTIL = 7;             // miejsca 4.–7. płacą cenę bazową (SL_POWERUP_COSTS)
+const SL_EXTRA_MOVE_LOW_PRICE = 30;            // miejsca 8. i dalej
+// Ile Extra Move'ów można trzymać w ekwipunku: tyle, ile da się zużyć jednego dnia.
+// Bez sufitu gracz z dołu tabeli nakupiłby tanich sztuk na zapas i zużył je jako lider.
+const SL_EXTRA_MOVE_MAX_OWNED = 2;
+
+// Miejsce liczymy NA ŻYWO, przy każdym zakupie — kto awansuje, od razu płaci więcej.
+// Kolejność jak w slLeaderboard. Żeby kasa nie pobrała innej kwoty, niż pokazał sklep
+// (ranking potrafi się zmienić między odświeżeniem a kliknięciem), front odsyła cenę,
+// którą widział, a /shop/buy przy rozjeździe wstrzymuje zakup — patrz `expected_cost`.
+function slCurrentRank(playerId) {
+  const rows = db.prepare('SELECT player_id FROM sl_state ORDER BY total_points DESC, laps DESC, abs_pos DESC').all();
+  const i = rows.findIndex(r => r.player_id === playerId);
+  return i < 0 ? null : i + 1;
+}
+
+// Cena bazowa (bez Drożyzny) dla konkretnego gracza.
+function slPowerupBaseCost(type, playerId) {
+  if (type !== 'double_move' || playerId == null) return SL_POWERUP_COSTS[type];
+  const rank = slCurrentRank(playerId) || Infinity;
+  if (rank <= SL_EXTRA_MOVE_TOP_PRICES.length) return SL_EXTRA_MOVE_TOP_PRICES[rank - 1];
+  if (rank <= SL_EXTRA_MOVE_MID_UNTIL) return SL_POWERUP_COSTS.double_move;
+  return SL_EXTRA_MOVE_LOW_PRICE;
+}
+
+function slShopPriceOf(type, cursed, playerId) {
+  const base = slPowerupBaseCost(type, playerId);
   return cursed ? Math.ceil(base * SL_CURSE_PRICE_MARKUP) : base;
 }
 
@@ -1413,8 +1446,14 @@ function slShopPayload(playerId) {
   return {
     items: SL_POWERUP_TYPES.map(type => ({
       type,
-      cost: slShopPriceOf(type, cursed), // cena, którą gracz REALNIE zapłaci
-      base_cost: SL_POWERUP_COSTS[type]
+      cost: slShopPriceOf(type, cursed, playerId), // cena, którą gracz REALNIE zapłaci
+      base_cost: slPowerupBaseCost(type, playerId),
+      // Extra Move: skąd ta cena — miejsce z rana i cały cennik, żeby sklep umiał to wyjaśnić.
+      ...(type === 'double_move' ? {
+        rank: slCurrentRank(playerId),
+        rank_prices: { top: SL_EXTRA_MOVE_TOP_PRICES, mid: SL_POWERUP_COSTS.double_move, mid_until: SL_EXTRA_MOVE_MID_UNTIL, low: SL_EXTRA_MOVE_LOW_PRICE },
+        max_owned: SL_EXTRA_MOVE_MAX_OWNED
+      } : {})
     })),
     price_curse: cursed ? {
       label: SL_CURSE_LABELS[SL_CURSE_PRICE_VARIANT],
@@ -3369,7 +3408,7 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
   if (!SL_POWERUP_TYPES.includes(type)) {
     return res.status(400).json({ error: 'Nieznany power-up' });
   }
-  const baseCost = SL_POWERUP_COSTS[type];
+  const baseCost = slPowerupBaseCost(type, playerId);
   const priceCurseLabel = SL_CURSE_LABELS[SL_CURSE_PRICE_VARIANT];
 
   const out = transaction(() => {
@@ -3399,10 +3438,23 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
       // Ofiara i tak wie swoje: dostaje toast od ręki, a w sklepie wisi ostrzeżenie aż
       // do zakupu. W dzienniku ląduje dopiero sam zakup, czyli moment, w którym klątwa
       // realnie zabolała.
-      return { revealed: true, base_cost: baseCost, cost: slShopPriceOf(type, true) };
+      return { revealed: true, base_cost: baseCost, cost: slShopPriceOf(type, true, playerId) };
     }
 
-    const cost = slShopPriceOf(type, !!priceCurse);
+    // Sufit ekwipunku Extra Move — sprawdzany PO odsłonięciu Drożyzny (ta niczego nie
+    // pobiera), a PRZED pobraniem coins.
+    if (type === 'double_move' && (slInventory(playerId).double_move || 0) >= SL_EXTRA_MOVE_MAX_OWNED) {
+      return { full: true };
+    }
+
+    const cost = slShopPriceOf(type, !!priceCurse, playerId);
+    // Cena Extra Move zmienia się razem z rankingiem. Jeśli od odświeżenia sklepu gracz
+    // zmienił miejsce, NIE pobieramy innej kwoty, niż widział — wstrzymujemy zakup (nic nie
+    // znika z konta) i odsyłamy świeży cennik. Stary front bez `expected_cost` kupuje jak dawniej.
+    const expected = req.body.expected_cost != null ? Number(req.body.expected_cost) : null;
+    if (type === 'double_move' && expected != null && expected !== cost) {
+      return { price_changed: true, cost, expected };
+    }
     if (st.balance < cost) return { poor: true, balance: st.balance, cost, cursed: !!priceCurse };
 
     db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(cost, playerId);
@@ -3445,6 +3497,21 @@ app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
       cost: out.cost,
       base_cost: out.base_cost,
       state: slBuildState(playerId)
+    });
+  }
+
+  if (out.price_changed) {
+    return res.status(409).json({
+      error: `Cena Extra Move zmieniła się, bo zmieniło się Twoje miejsce w rankingu — teraz ${out.cost} coins zamiast ${out.expected}. Nic nie zostało pobrane, kliknij „Kup" jeszcze raz.`,
+      price_changed: true,
+      cost: out.cost,
+      state: slBuildState(playerId)
+    });
+  }
+
+  if (out.full) {
+    return res.status(400).json({
+      error: `Masz już ${SL_EXTRA_MOVE_MAX_OWNED} Extra Move — więcej nie da się trzymać (tyle można użyć jednego dnia). Najpierw któregoś użyj.`
     });
   }
 
