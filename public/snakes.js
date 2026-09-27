@@ -731,7 +731,7 @@ let slCostumeTab = 'hat';
 // gry odświeżanym co 10 s). Raz pokazany zostaje odsłonięty do przeładowania strony.
 let slSupporterPhone = null;
 
-// Karta skina wsparcia (zakładka „Wsparcie"): nie ma ceny w coins, tylko instrukcję BLIK.
+// Karta skina wsparcia (zakładka „Golden Carrot"): nie ma ceny w coins, tylko instrukcję BLIK.
 function slSupporterCard(i, c) {
   const season = i.season_active
     ? `<span class="costume-season">🗓️ Skin sezonowy · ${esc(i.season_name)}</span>`
@@ -777,7 +777,7 @@ function renderCostumes(g) {
     return `<div class="wardrobe-worn-row"><span class="text-muted">${esc(sl.label)}</span><span>${it ? `${it.icon} ${esc(it.name)}` : '—'}</span></div>`;
   }).join('');
   const tabs = c.slots.map(sl => `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}">${esc(sl.label)}</button>`).join('')
-    + (hasSupporter ? `<button class="costume-tab costume-tab-supporter${slCostumeTab === 'supporter' ? ' is-active' : ''}" data-slot="supporter">💛 Wsparcie</button>` : '');
+    + (hasSupporter ? `<button class="costume-tab costume-tab-supporter${slCostumeTab === 'supporter' ? ' is-active' : ''}" data-slot="supporter">Golden Carrot</button>` : '');
   // Skiny wsparcia mieszkają tylko w swojej zakładce (nie w „Czapce"), żeby nie mieszać
   // ceny w coins z ceną w złotówkach na jednej liście.
   const items = slCostumeTab === 'supporter'
