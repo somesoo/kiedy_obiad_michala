@@ -507,7 +507,7 @@
 }
 .sl-pawn-wing.is-left  { right: 68%; transform-origin: 100% 30%; }
 .sl-pawn-wing.is-right { left: 68%; transform-origin: 0% 30%; animation-name: sl-wing-r; }
-.sl-pawn-wing.w-demon_wings { fill: #5A0F16; stroke: #FF5A4A; }
+.sl-pawn-wing.w-demon_wings { fill: #A50E1C; stroke: #4A0309; }
 /* Mój pionek: skrzydła w kolorze „to ja", jak wszystko inne, co moje. */
 .sl-pawn-me .sl-pawn-wing {
   fill: rgba(200, 241, 53, 0.35);
