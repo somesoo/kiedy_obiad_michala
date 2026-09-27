@@ -3000,9 +3000,14 @@ function slSpecialBossNow() {
 
 // ── KOSTIUMY ── czysta kosmetyka pionka za coins (lib/costumes.js). Ta sama fabryka co
 // boss: helpery przychodzą w deps, jeden uchwyt bazy.
-const costumes = require('./lib/costumes')({ db, transaction, slLogActivity, slEnsureState });
+const costumes = require('./lib/costumes')({
+  db, transaction, slLogActivity, slEnsureState, slMetaGet, slMetaSet,
+  activeSeasonId: () => slBoard.id,
+  // Pierwszy sezon w UI nazywa się „Snakes Game", nie jak plik planszy (patrz dymek gracza).
+  seasonLabel: id => id === seasons.DEFAULT_ID ? SL_FIRST_SEASON_NAME : ((seasons.get(id) || {}).name || id),
+});
 costumes.initSchema();
-costumes.registerRoutes(app, { authPlayer, buildState: playerId => slBuildState(playerId) });
+costumes.registerRoutes(app, { authPlayer, checkAdmin, buildState: playerId => slBuildState(playerId) });
 
 // ── MECHANIKI SEZONOWE ── kocioł, cukierek albo psikus, cukierki (lib/seasonal.js).
 // Aktywną planszę podajemy funkcją, nie wartością — admin może zmienić sezon w locie.
@@ -3880,7 +3885,7 @@ app.post('/api/snakes/admin/reset', (req, res) => {
     // ŚCIEŻKA COFANIA #4 — wszystko po bossie (cykle, obrażenia, rejestr wypłat) kasuje
     // moduł, żeby lista tabel do wyczyszczenia mieszkała tam, gdzie te tabele powstają.
     boss.slResetBossData();
-    costumes.slResetCostumes(); // reset = zerowe konto, więc i szafa pusta
+    costumes.slResetCostumes(); // reset = zerowe konto, więc i szafa pusta (poza skinami wsparcia)
     seasonal.resetAll();
     // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
     // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).

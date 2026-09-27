@@ -727,11 +727,48 @@ function renderSeasonEffects(effects) {
 // Zakładka slotu jest stanem strony (nie serwera) — przeżywa odświeżanie co 10 s, bo
 // renderCostumes czyta ją stąd, zamiast zaczynać zawsze od „Czapki".
 let slCostumeTab = 'hat';
+// Numer do BLIK-a: dociągany dopiero po kliknięciu „Pokaż numer" (nie jedzie w stanie
+// gry odświeżanym co 10 s). Raz pokazany zostaje odsłonięty do przeładowania strony.
+let slSupporterPhone = null;
+
+// Karta skina wsparcia (zakładka „Wsparcie"): nie ma ceny w coins, tylko instrukcję BLIK.
+function slSupporterCard(i, c) {
+  const season = i.season_active
+    ? `<span class="costume-season">🗓️ Skin sezonowy · ${esc(i.season_name)}</span>`
+    : `<span class="costume-season is-past">🗓️ Sezon ${esc(i.season_name)} · już niedostępny</span>`;
+  let body;
+  if (i.owned) {
+    body = `<span class="costume-owned-tag">w szafie · dzięki za wsparcie! 💛</span>`
+      + (i.worn
+        ? `<button class="btn-ghost costume-off" data-slot="${i.slot}">Zdejmij</button>`
+        : `<button class="btn-primary costume-wear" data-slot="${i.slot}" data-item="${i.id}">Załóż</button>`);
+  } else if (!c.supporter_open) {
+    body = `<span class="costume-missing">Wsparcie jeszcze nieuruchomione.</span>`;
+  } else {
+    const phone = slSupporterPhone
+      ? `<span class="supporter-phone mono">${esc(slSupporterPhone)}</span>`
+      : `<button class="btn-ghost supporter-reveal">👁️ Pokaż numer</button>`;
+    body = `<span class="costume-price costume-price-pln mono">${i.pln} zł · BLIK</span>
+      <div class="supporter-howto">
+        Wyślij BLIK-a na ${i.pln} zł na numer: ${phone}
+        <span class="text-muted">W tytule wpisz swój nick. Twórca dopisze skin ręcznie, gdy zobaczy przelew.</span>
+      </div>`;
+  }
+  return `
+      <div class="costume-item is-supporter${i.worn ? ' is-worn' : ''}${i.owned ? ' is-owned' : ''}">
+        <span class="costume-icon">${i.icon}</span>
+        <span class="costume-name">${esc(i.name)}</span>
+        ${season}
+        ${body}
+      </div>`;
+}
 
 function renderCostumes(g) {
   const box = document.getElementById('costume-shop');
   if (!box || !g.costumes) return;
   const c = g.costumes;
+  const hasSupporter = c.items.some(i => i.supporter);
+  if (slCostumeTab === 'supporter' && !hasSupporter) slCostumeTab = 'hat';
   // Podgląd = mój pionek złożony TĄ SAMĄ funkcją co na planszy (slPawnHtml), tylko duży —
   // wszystkie dodatki są w procentach boku pionka, więc skalują się razem z nim.
   const me = { player_id: g.me.player_id, nickname: 'Ty', avatar_url: g.me.avatar_url, is_me: true, costume: c.worn };
@@ -739,8 +776,14 @@ function renderCostumes(g) {
     const it = c.items.find(i => i.slot === sl.id && i.worn);
     return `<div class="wardrobe-worn-row"><span class="text-muted">${esc(sl.label)}</span><span>${it ? `${it.icon} ${esc(it.name)}` : '—'}</span></div>`;
   }).join('');
-  const tabs = c.slots.map(sl => `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}">${esc(sl.label)}</button>`).join('');
-  const items = c.items.filter(i => i.slot === slCostumeTab).map(i => {
+  const tabs = c.slots.map(sl => `<button class="costume-tab${sl.id === slCostumeTab ? ' is-active' : ''}" data-slot="${sl.id}">${esc(sl.label)}</button>`).join('')
+    + (hasSupporter ? `<button class="costume-tab costume-tab-supporter${slCostumeTab === 'supporter' ? ' is-active' : ''}" data-slot="supporter">💛 Wsparcie</button>` : '');
+  // Skiny wsparcia mieszkają tylko w swojej zakładce (nie w „Czapce"), żeby nie mieszać
+  // ceny w coins z ceną w złotówkach na jednej liście.
+  const items = slCostumeTab === 'supporter'
+    ? `<div class="supporter-intro">Skin za wsparcie twórcy gry — jeden na sezon, tylko wygląd, w grze nic nie daje.</div>`
+      + c.items.filter(i => i.supporter).map(i => slSupporterCard(i, c)).join('')
+    : c.items.filter(i => i.slot === slCostumeTab && !i.supporter).map(i => {
     let btn;
     // Kostium to rzecz, na którą się ODKŁADA — zamiast samego wyszarzonego przycisku
     // pokazujemy, ile już uzbierałeś i ile brakuje.
@@ -901,6 +944,15 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 document.getElementById('costume-shop').addEventListener('click', async e => {
   const tab = e.target.closest('.costume-tab');
   if (tab) { slCostumeTab = tab.dataset.slot; if (state.game) renderCostumes(state.game); return; }
+  if (e.target.closest('.supporter-reveal')) {
+    try {
+      slSupporterPhone = (await api('GET', '/api/snakes/costumes/supporter-phone')).phone;
+      if (state.game) renderCostumes(state.game);
+    } catch (err) {
+      showToast(err.message);
+    }
+    return;
+  }
   const buy = e.target.closest('.costume-buy');
   const wear = e.target.closest('.costume-wear');
   const off = e.target.closest('.costume-off');
@@ -1513,6 +1565,18 @@ const SL_COSTUME_ART = {
     pumpkin_hat: '<ellipse class="c-pumpkin" cx="20" cy="22" rx="13" ry="9"/><path class="c-rib" d="M20 13 L20 31 M13.5 14.5 Q10 22 13.5 29.5 M26.5 14.5 Q30 22 26.5 29.5"/><path class="c-stem" d="M19 14 Q18 8 22 6 L23.5 8 Q21 10 21.5 14 Z"/><path class="c-leaf" d="M22 9 Q28 4 32 9 Q26 12 22 9 Z"/>',
     horns: '<path class="c-horn" d="M7 31 Q2 17 10 5 Q10 17 16 27 Z"/><path class="c-horn" d="M33 31 Q38 17 30 5 Q30 17 24 27 Z"/>',
     top_hat: '<rect class="c-tophat" x="11" y="3" width="18" height="22" rx="2"/><rect class="c-band-red" x="11" y="17" width="18" height="4"/><ellipse class="c-tophat" cx="20" cy="26" rx="16" ry="3.5"/>',
+    // Skiny wsparcia (BLIK) — po jednym na sezon; iskierka mruga (c-sparkle), żeby było
+    // widać z daleka, że to coś innego niż czapka za coins.
+    supporter_crown: '<path class="c-crown" d="M6 28 L4 10 L12 18 L20 5 L28 18 L36 10 L34 28 Z"/><rect class="c-crown-band" x="5.5" y="23" width="29" height="5" rx="1"/>'
+      + '<circle class="c-gem" cx="4" cy="10" r="2.2"/><circle class="c-gem" cx="20" cy="5" r="2.6"/><circle class="c-gem" cx="36" cy="10" r="2.2"/>'
+      + '<circle class="c-gem-b" cx="13" cy="25.5" r="1.4"/><circle class="c-gem" cx="20" cy="25.5" r="1.6"/><circle class="c-gem-b" cx="27" cy="25.5" r="1.4"/>'
+      + '<path class="c-sparkle" d="M31 0 L32 3 L35 4 L32 5 L31 8 L30 5 L27 4 L30 3 Z"/>',
+    pumpkin_king_crown: '<path class="c-kcrown" d="M5 28 L3 9 L10 16 L13 5 L20 12 L27 5 L30 16 L37 9 L35 28 Z"/><rect class="c-kband" x="4.5" y="24" width="31" height="4" rx="1"/>'
+      + '<circle class="c-kgem" cx="3" cy="9" r="2"/><circle class="c-kgem" cx="13" cy="5" r="2"/><circle class="c-kgem" cx="27" cy="5" r="2"/><circle class="c-kgem" cx="37" cy="9" r="2"/>'
+      + '<ellipse class="c-pumpkin" cx="20" cy="19.5" rx="6" ry="4.6"/><path class="c-rib" d="M20 15 L20 24 M16.8 15.6 Q15.2 19.5 16.8 23.4 M23.2 15.6 Q24.8 19.5 23.2 23.4"/>'
+      + '<path class="c-stem" d="M19.4 15.4 Q19 12.6 21 11.8 L21.8 12.8 Q20.6 13.6 20.8 15.4 Z"/>'
+      + '<path class="c-kcarve" d="M17 18.6 L18.6 17.2 L19 19.2 Z M23 18.6 L21.4 17.2 L21 19.2 Z M17.4 21 Q20 23.2 22.6 21 Z"/>'
+      + '<path class="c-sparkle" d="M33 0 L34 3 L37 4 L34 5 L33 8 L32 5 L29 4 L32 3 Z"/>',
   },
   // Skrzydła: kształt LEWEGO skrzydła. Prawe to jego lustro zrobione w samym SVG (matrix),
   // a nie w CSS — dzięki temu animacja machania nie musi odbijać elementu i oba skrzydła

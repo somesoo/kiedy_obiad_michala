@@ -217,6 +217,27 @@
       </div>
 
       <div class="adm-card">
+        <h3>💛 SKINY WSPARCIA (BLIK)</h3>
+        <div class="adm-note">
+          Gracz widzi w garderobie (zakładka „Wsparcie") skin <strong>aktywnego sezonu</strong>
+          i instrukcję: BLIK na numer niżej, w tytule nick. Numer jest schowany, dopóki gracz
+          go nie kliknie. Pusty numer = wsparcie wyłączone. Po odebraniu BLIK-a wybierz, od kogo
+          jest, i przydziel skin — od razu ląduje na pionku. Skinów wsparcia <strong>nie kasuje</strong>
+          ani reset gry, ani usunięcie gracza ze Snakes; odebrać można tylko tutaj.
+        </div>
+        <div class="adm-actions">
+          <input type="tel" id="supporter-phone" placeholder="np. 600 123 456" style="width:180px" />
+          <button class="btn-ghost" id="btn-supporter-phone">Zapisz numer</button>
+        </div>
+        <div class="adm-actions">
+          <select id="supporter-player" style="width:180px"></select>
+          <select id="supporter-item" style="width:240px"></select>
+          <button class="btn-primary" id="btn-supporter-grant">Przydziel skin</button>
+        </div>
+        <div id="supporter-owners" style="margin-top:12px"></div>
+      </div>
+
+      <div class="adm-card">
         <h3>📜 HISTORIA I WIDOCZNOŚĆ</h3>
         <div class="adm-note">
           <strong>Dziennik</strong> to log widoczny dla graczy — tu decydujesz, co z niego
@@ -389,8 +410,73 @@
       renderInfo();
       await loadSeasons();
       await loadPlayers();
+      await loadSupporter();
       await loadHistory();
     }
+
+    // ── SKINY WSPARCIA ──
+    async function loadSupporter() {
+      renderSupporter(await api('GET', `/api/snakes/admin/supporter?password=${encodeURIComponent(pass)}`));
+    }
+
+    function renderSupporter(data) {
+      setIfIdle('supporter-phone', data.phone || '');
+      const sel = document.getElementById('supporter-item');
+      const keep = sel.value;
+      // Domyślnie skin aktywnego sezonu — to ten, który gracze widzą w sklepie.
+      sel.innerHTML = data.items.map(i =>
+        `<option value="${esc(i.id)}"${i.season_active ? ' selected' : ''}>${esc(i.icon)} ${esc(i.name)} — ${esc(i.season_name)}${i.season_active ? ' (aktywny)' : ''}</option>`
+      ).join('');
+      if (keep && sel.querySelector(`option[value="${keep}"]`)) sel.value = keep;
+      const box = document.getElementById('supporter-owners');
+      box.innerHTML = data.owners.length
+        ? data.owners.map(o => `
+            <div class="pl-row" style="display:flex;gap:10px;align-items:center">
+              <span class="pl-name">${esc(o.nickname)}</span>
+              <span class="pl-stats">${esc(o.item_name)} · ${esc(fmtDate(o.granted_at))}</span>
+              <span class="pl-actions"><button class="btn-danger supporter-revoke" data-player="${o.player_id}" data-item="${esc(o.item)}" data-label="${esc(o.nickname)} — ${esc(o.item_name)}">Odbierz</button></span>
+            </div>`).join('')
+        : '<div class="adm-note">Nikt jeszcze nie ma skina wsparcia.</div>';
+    }
+
+    document.getElementById('btn-supporter-phone').addEventListener('click', async () => {
+      try {
+        const res = await api('POST', '/api/snakes/admin/supporter/phone', { password: pass, phone: document.getElementById('supporter-phone').value });
+        document.getElementById('supporter-phone').value = res.phone || '';
+        renderSupporter(res);
+        showToast(res.phone ? `💛 Numer zapisany: ${res.phone}` : '💛 Numer usunięty — wsparcie wyłączone.');
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-supporter-grant').addEventListener('click', async () => {
+      const pl = document.getElementById('supporter-player');
+      const it = document.getElementById('supporter-item');
+      if (!pl.value || !it.value) return showToast('Wybierz gracza i skin.');
+      const who = pl.options[pl.selectedIndex].text;
+      const what = it.options[it.selectedIndex].text;
+      if (!confirm(`Przydzielić ${what} graczowi ${who}?\n\nRób to dopiero po sprawdzeniu, że BLIK doszedł.`)) return;
+      try {
+        const res = await api('POST', '/api/snakes/admin/supporter/grant', { password: pass, player_id: pl.value, item: it.value });
+        renderSupporter(res);
+        showToast(`💛 Przydzielono: ${res.nickname} — ${res.item_name}.`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('supporter-owners').addEventListener('click', async e => {
+      const btn = e.target.closest('.supporter-revoke');
+      if (!btn) return;
+      if (!confirm(`Odebrać skin: ${btn.dataset.label}?`)) return;
+      try {
+        renderSupporter(await api('POST', '/api/snakes/admin/supporter/revoke', { password: pass, player_id: btn.dataset.player, item: btn.dataset.item }));
+        showToast('Skin odebrany.');
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
 
     async function loadSeasons() {
       const data = await api('GET', `/api/snakes/admin/seasons?password=${encodeURIComponent(pass)}`);
@@ -431,6 +517,7 @@
 
     function renderPlayers(players) {
       renderDamagePlayerSelect(players);
+      fillSelect('supporter-player', players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`), '— od kogo BLIK? —');
       histPlayers = players;
       fillSelect('hist-player', players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`), '— wszyscy gracze —');
       const list = document.getElementById('players-list');

@@ -169,6 +169,15 @@ Kostium to odpływ coins, który **nie rusza równowagi gry**. Zakup nie jest ru
 cofanie ruchu i dnia go nie dotyczy (jak zakupów power-upów); reset gry i wyczyszczenie
 gracza kasują szafę (`slResetCostumes`, `slClearPlayerCostumes`).
 
+**Skiny wsparcia (BLIK 5 zł)** — pozycje z `supporter: true, season: '<id planszy>'`
+w katalogu, po jednej na sezon. Nie ma bramki płatności: gracz robi BLIK-a na numer
+z `sl_meta.supporter_blik_phone` (ustawiany w panelu, pusty = wyłączone), twórca sprawdza
+przelew i nadaje skin w panelu (`/admin/supporter/grant`, odebranie: `/revoke`). Za coins
+się ich nie kupi. Sklep pokazuje tylko skin aktywnego sezonu, ale skin z innego sezonu,
+który ktoś już ma, dalej da się nosić. Numer **nie jedzie** w stanie gry, front dociąga
+go dopiero po kliknięciu (`/costumes/supporter-phone`). **Reset gry i wyczyszczenie
+gracza NIE kasują skinów wsparcia** — są zapłacone złotówkami, a nie coins.
+
 ## Dwie waluty — to jest fundament, nie szczegół
 
 - `sl_state.total_points` — **ranking**, nie da się ich wydać.

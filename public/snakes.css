@@ -555,6 +555,19 @@
 .c-horn { fill: #D8322A; stroke: #7A0E0E; stroke-width: 1; }
 .c-tophat { fill: #111; stroke: #444; stroke-width: .8; }
 .c-band-red { fill: #B3122B; }
+/* Skiny wsparcia: korony z poświatą i mrugającą iskierką. */
+.sl-costume-hat.h-supporter_crown    { filter: drop-shadow(0 0 3px rgba(255, 210, 80, 0.85)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
+.sl-costume-hat.h-pumpkin_king_crown { filter: drop-shadow(0 0 3px rgba(255, 138, 31, 0.85)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
+.c-crown { fill: #FFC93C; stroke: #A8700A; stroke-width: 1; stroke-linejoin: round; }
+.c-crown-band { fill: #E0A21E; stroke: #A8700A; stroke-width: .8; }
+.c-gem { fill: #E0284B; stroke: #7A0E22; stroke-width: .6; }
+.c-gem-b { fill: #2F7BEA; stroke: #123F80; stroke-width: .6; }
+.c-kcrown { fill: #2A1540; stroke: #B06CFF; stroke-width: 1; stroke-linejoin: round; }
+.c-kband { fill: #4A2470; stroke: #B06CFF; stroke-width: .8; }
+.c-kgem { fill: #7CFF6B; stroke: #2E8A24; stroke-width: .6; }
+.c-kcarve { fill: #FFE27A; }
+.c-sparkle { fill: #FFF6C8; transform-box: fill-box; transform-origin: center; animation: sl-sparkle 2.2s ease-in-out infinite; }
+@keyframes sl-sparkle { 0%, 60%, 100% { opacity: 0; transform: scale(0.4); } 75% { opacity: 1; transform: scale(1); } }
 
 /* Gadżet: w „ręce", czyli przy prawym dolnym boku. Pająk wisi z góry. */
 .sl-costume-gadget {
@@ -631,6 +644,7 @@
 .c-pumpkin-rib { fill: none; stroke: rgba(150, 60, 0, 0.6); stroke-width: 1.5; }
 @media (prefers-reduced-motion: reduce) {
   .sl-pawn-wing, .sl-costume-gadget.g-spider { animation: none; }
+  .c-sparkle { animation: none; opacity: 1; }
 }
 
 /* ── GARDEROBA (okno) ── */
@@ -726,6 +740,21 @@
 .costume-mini .sl-pawn-wrap { width: 40px; height: 40px; }
 .costume-name { font-size: 12px; }
 .costume-item button { font-size: 11px; padding: 4px 10px; }
+
+/* Zakładka i karty skinów wsparcia (BLIK) — różowo-fioletowe, żeby nie mylić ze złotem coins. */
+.costume-tab-supporter { border-color: rgba(255, 120, 190, 0.5); }
+.costume-tab-supporter.is-active { border-color: #FF78BE; }
+.supporter-intro { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted); }
+.costume-item.is-supporter:not(.is-owned) {
+  border-color: rgba(255, 120, 190, 0.55);
+  background: linear-gradient(180deg, rgba(255, 120, 190, 0.1), transparent 70%), var(--surface-alt);
+}
+.costume-season { font-size: 11px; color: #FF9ACB; }
+.costume-season.is-past { color: var(--text-muted); }
+.costume-price-pln { background: linear-gradient(180deg, #FF9ACB, #D2468C); color: #2A0016; }
+.supporter-howto { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }
+.supporter-howto .text-muted { font-size: 11px; }
+.supporter-phone { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; color: var(--text-primary); user-select: all; }
 
 /* Garderoba na planszy (view.shop_at): szafa z lustrem. */
 .sl-shop-hut {
