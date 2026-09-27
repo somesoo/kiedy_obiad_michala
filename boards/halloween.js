@@ -143,12 +143,14 @@ module.exports = {
   },
 
   // BOSS SEZONU: Dynia Zagłady jest JEDYNYM bossem całej Nocy Duchów — pojawia się od razu
-  // po włączeniu sezonu i trwa do nocy Halloween (31.10, 20:00). HP = 1100 × dni robocze do
-  // ataku: ekipa robi dziś ~1000 HP dziennie przy sporych wpłatach, więc bez wpłat się nie
-  // da, a z nimi — na styk. Przejście na 40 pól tego nie zmienia: kostka dalej 1–6, więc
-  // obrażenia z rzutów są te same, a dochód w coins (~40 dziennie)
-  // prawie ten sam. Sezon włączony 1.10 → 22 dni robocze → 24 200 HP.
-  special_boss: { name: 'Dynia Zagłady', emoji: '🎃', attack_at: '10-31 20', hp_per_workday: 1100 },
+  // po włączeniu sezonu i trwa do nocy Halloween (31.10, 20:00). HP = 900 × dni robocze do
+  // ataku, liczone OD NASTĘPNEGO dnia roboczego (dzień włączenia się nie wlicza, choć da się
+  // w niego grać). Włączony 2.10 → 20 dni → 18 000 HP; 1.10 → 21 dni → 18 900 HP.
+  // Świadomie BARDZO trudny (audyt z września 2026): 12 graczy × 3 rzuty × 3,5 oczka × 3
+  // to ~380 HP dziennie z samych rzutów (~7 900 przez sezon), a resztę muszą dołożyć wpłaty —
+  // przy dochodzie ~40 coins dziennie to prawie cały zarobek ekipy przez miesiąc. Przy 1100
+  // (22 000 HP) boss był arytmetycznie nie do ubicia nawet przy 100% dochodu na wpłaty.
+  special_boss: { name: 'Dynia Zagłady', emoji: '🎃', attack_at: '10-31 20', hp_per_workday: 900 },
 
   // Garderoba (sklep z kostiumami) jako szafa z lustrem w lewym dolnym rogu.
   shop_at: [0.75, 10.0],

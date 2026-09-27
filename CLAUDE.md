@@ -1,6 +1,6 @@
 # Kiedy obiad Michała — notatki dla Claude
 
-Biurowe gry dla ~15 osób. `server.js` (~3970 linii, Express) + `lib/boss.js` (walka
+Biurowe gry dla ~15 osób. `server.js` (~4700 linii, Express) + `lib/boss.js` (walka
 z bossem), front to czysty JS/HTML/CSS w `public/` — **bez bundlera i bez kroku
 budowania**. Baza: SQLite przez `node:sqlite`. Wdrożenie: pm2 na małym VPS-ie, właściciel
 przeładowuje ręcznie.
@@ -101,6 +101,12 @@ a wpłacone w nią coins wracają wierszem `season_refund` w `sl_boss_payouts` (
 widzi, bo czyta rejestr). HP = `hp_per_workday` × dni robocze do `attack_at`; termin zawsze
 `attack_at`. Daty w pliku są bez roku, a klucz edycji (`sl_coop.special` =
 `'halloween-2026'`) pilnuje, żeby po wygranej/przegranej boss nie wrócił w tym samym roku.
+Dni liczą się od NASTĘPNEGO dnia roboczego. Dynia ma 900 HP za dzień, czyli 18 000 przy
+włączeniu 2.10. To świadomie bardzo trudny boss: rzuty dają ~7 900 HP, resztę musi dołożyć
+prawie cały dochód ekipy. Przy dawnych 1100 był arytmetycznie nie do ubicia.
+
+**Sezon z bossem trzeba wyłączyć przed 1.01 następnego roku.** Inaczej scheduler policzy
+termin na 31.10 kolejnego roku z nowym kluczem i wystawi Dynię z limitem 60 dni roboczych.
 
 ## Ekonomia planszy — dlaczego Noc Duchów ma 40 pól
 
@@ -111,7 +117,7 @@ ponad raz dziennie i połowa jego zarobku przechodziła na innych graczy. Dlateg
 
 - Noc Duchów ma **40 pól, ~70% z akcją**, a każda akcja jest mała (dynie 3–8 pkt, drzwi
   8/3/8, kocioł −5, okrążenie +30 przez `lap_points`). Dochód wynosi ~40 coins dziennie,
-  prawie jak wcześniej, więc HP bossa sezonu się nie zmieniło.
+  prawie jak wcześniej (HP bossa sezonu przeliczone osobno, patrz „Boss sezonu").
 - **Mniej pól = więcej zbić** (+22% przy 40 polach), dlatego `SL_KNOCKBACK_COIN_STEAL` = 10.
   Kto skraca planszę, musi to przeliczyć razem.
 - **Zbicie ma dwie osobne stawki**: coins (`SL_KNOCKBACK_COIN_STEAL`, przelew od ofiary,
@@ -140,12 +146,15 @@ dwóch rzeczy naraz.
 - **Własny rejestr `sl_season_ledger`** (`kind`, `points`, `coins`, `candies`, `day`, `ref`).
   `resolveLanding()` tylko rozstrzyga (psikus może cofnąć pionek — przed wypychaniem),
   a `apply(ref)` zapisuje, gdy ruch zna już swoje id. Cofanie czyta rejestr.
-- **„Cofnij ruch" odkręca rejestr PRZED odjęciem `earned`.** Tamto odejmowanie przycina
-  saldo do zera; w odwrotnej kolejności przycięcie zjadało część `earned`, a zwrot z kotła
-  dopisywał się w całości — drukowało coins.
+- **Cofanie (ruchu i dnia) odejmuje `earned` od salda BEZ przycinania do zera.** Dawne
+  `MAX(0, balance - ?)` kasowało dług po bossie i wydane w międzyczasie coins, czyli
+  drukowało je. Bez przycięcia kolejność względem cofania rejestru nie ma już znaczenia.
 - **Pula kotła nie jest trzymana**, tylko liczona: minus suma coins z wierszy kotła. Przy
   wyczyszczeniu gracza jego wiersze kotła zostają z `player_id = NULL` — skasowanie
-  wyjęcia powiększyłoby pulę, czyli wydrukowało coins dla następnego.
+  wyjęcia powiększyłoby pulę, czyli wydrukowało coins dla następnego. Cofanie te wiersze
+  pomija, a wrzutkę zwraca **najwyżej w kwocie, która dziś leży w kotle** (`revertRows`):
+  jeśli pulę ktoś już zgarnął, pełny zwrot drukowałby coins. Niezwrócona reszta zostaje
+  w wierszu bez `ref` i `day`.
 - Polowanie na cukierki **nie ma osobnego rankingu**: `candies` idzie w wierszu rankingu
   (`seasonal.candyMap()`), `null` = sezon bez cukierków i kolumny w ogóle nie ma.
 - Drzwi bez `weekdays` są otwarte codziennie (tak jest na Nocy Duchów). Z `weekdays`
@@ -298,7 +307,8 @@ rzucającemu (tylko jemu, toastem), że ktoś już tego gracza przeklął.
 Dodając cokolwiek, co zapisuje punkty lub coins, sprawdź wszystkie pięć:
 
 1. cofnięcie całego dnia (`slRollbackDay`) — kasuje po `day` — **TRASA WYŁĄCZONA** (patrz niżej;
-   sama funkcja żyje i woła ją `slRevertBossDay`, więc spójność nadal trzeba utrzymywać)
+   sama funkcja żyje i sama woła `slRevertBossDay` oraz `seasonal.revertDay`, więc spójność
+   nadal trzeba utrzymywać — to ją odblokuje się po przebudowie)
 2. cofnięcie ostatniego ruchu (`/admin/players/:id/undo-move`) — kasuje po `ref = move:<id>`
 3. cofnięcie nagród bossa (`slRevertBossRewards`)
 4. reset całej gry (`/admin/reset`)
@@ -346,6 +356,14 @@ w ogóle. Wszystkie pięć ścieżek woła gotowe funkcje modułu: `slRevertBoss
   sprzed przemianowania waluty. To nie jest przeoczenie.
 - **Redakcja wpisów pisze do `public_detail`**, nigdy do `detail` — bo `detail` jest
   parsowany przez narzędzia wyżej.
+- **Nie wołaj `buildState` / `slBuildState` wewnątrz `transaction()`.** Stan woła
+  `seasonal.payload()`, a ta sypie cukierki we WŁASNEJ transakcji — `BEGIN` w `BEGIN` to
+  wyjątek i 500. Tak padała każda wpłata na bossa w sezonie z cukierkami (wrzesień 2026).
+  Stan buduje się po zamknięciu transakcji, tak jak w trasie rzutu i sklepu.
+- **Klątwa Odwrotny Ruch może cofnąć przez start na poprzednie okrążenie — celowo.**
+  Podłoga w `slResolveTileEffect` to pole 0 całej gry, więc gracz dostaje szansę przejść
+  przez start jeszcze raz i wziąć premię za okrążenie. To decyzja właściciela, nie
+  drukowanie coins; zbicie i psikus mają własną podłogę okrążenia.
 
 ## Migracje przy starcie
 
@@ -424,11 +442,17 @@ rm -rf db   # na koniec
   na świat i schowanie przycisku niczego by nie zamknęło; w panelu admina karta jest
   wyszarzona, a przycisk `disabled`. **Nie odblokowuj jej mimochodem** — odblokowanie to
   świadoma zmiana tej jednej stałej na `true`, po naprawieniu powodów niżej.
-- **Cofanie dnia i ruchu zabiera za dużo coins.** Rzut dopisuje do salda
-  `earned - curseCoinSteal`, a oba narzędzia odejmują pełne `earned` z obu kolumn. Kto był
-  pod klątwą Kieszonkowiec, traci 50 coins za dużo. `sl_moves` nie pamięta dziś tej różnicy.
-  To główny powód wyłączenia cofania dnia; **cofanie pojedynczego ruchu (`undo-move`) ma ten
-  sam błąd i ZOSTAŁO włączone** — działa na jednym ruchu, więc pomyłka jest tania.
+- **Cofanie dnia i ruchu nie odkręca skutków rzutu dla INNYCH graczy.** Dotyczy to
+  obu narzędzi, ale cofanie pojedynczego ruchu (`undo-move`) **ZOSTAŁO włączone** — działa
+  na jednym ruchu, więc pomyłka jest tania i do poprawienia ręcznie w panelu. Nie odkręca:
+  - **Kieszonkowca.** Rzut dopisuje do salda `earned - curseCoinSteal`, a cofanie odejmuje
+    pełne `earned`, więc ofiara traci 50 coins za dużo, a rzucający zatrzymuje swoje 50.
+    `sl_moves` nie pamięta tej różnicy ani przelewu. To główny powód wyłączenia cofania dnia.
+  - **Zbić.** Ofiara zostaje na polu, na które spadła, bez zabranych coins, a zbijający
+    zatrzymuje coins i `SL_KNOCKBACK_POINTS`. Dotyczy to całej kaskady. Wiersze
+    `knockback`/`bonus` w `sl_points_log` mają `ref = NULL`, więc naprawa wymaga najpierw
+    zapisywania ich z `ref` tury.
+  - **Zużytych Freeze i klątw.** Nie wracają do ekwipunku.
 - **Scheduler Discorda Wordle loguje „powiadomienie wysłane"**, choć wywołanie jest
   zakomentowane.
 - **~540 z 1397 linii `public/style.css` to martwy kod** po bukmacherce, ładowany na

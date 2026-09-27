@@ -2431,7 +2431,11 @@ function slReverseLink(board, tile) {
 }
 
 function slResolveTileEffect(landedAbs, board, invertBoard = false) {
-  let abs = Math.max(0, landedAbs); // nie schodzimy poniżej startu (np. klątwa Odwrotny Ruch)
+  // Podłoga to pole 0 CAŁEJ gry, nie bieżącego okrążenia. Klątwa Odwrotny Ruch może więc
+  // ŚWIADOMIE cofnąć gracza przez start na poprzednie okrążenie — i dać mu szansę przejść
+  // przez start jeszcze raz, razem z premią za okrążenie (decyzja właściciela, wrzesień 2026).
+  // Zbicie i psikus mają własną podłogę okrążenia; tu jej celowo nie ma.
+  let abs = Math.max(0, landedAbs);
   let tilePoints = 0;
   let note = null;
   const landed = slTileOf(abs);
@@ -4367,9 +4371,11 @@ function slRollbackDay(date) {
       SELECT from_abs FROM sl_moves WHERE player_id = ? AND move_date = ?
       ORDER BY move_seq ASC, id ASC LIMIT 1
     `);
+    // Saldo bez przycinania do zera — patrz „Cofnij ruch" (undo-move): MAX(0, …) drukowało
+    // coins, a tutaj do tego przed revertami bossa i sezonu niżej.
     const restore = db.prepare(`
       UPDATE sl_state
-      SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?), balance = MAX(0, balance - ?),
+      SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?), balance = balance - ?,
           rolls_today = 0, last_move_date = NULL, last_move_at = NULL
       WHERE player_id = ?
     `);
@@ -4664,15 +4670,16 @@ app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
     const sameDay = st.last_move_date === move.move_date;
     const nextRolls = sameDay ? Math.max(0, Number(st.rolls_today) - 1) : Number(st.rolls_today);
 
-    // Kocioł, psikusy i cukierki tego ruchu (ten sam `ref`) odkręcamy PRZED odjęciem
-    // `earned` niżej. Tamto odejmowanie przycina saldo do zera — gdyby kocioł zabrał
-    // wcześniej 10 coins i zepchnął gracza nisko, przycięcie „zjadłoby" część `earned`,
-    // a zwrot z kotła dopisałby się potem w całości, czyli wydrukował coins.
+    // Kocioł, psikusy i cukierki tego ruchu (ten sam `ref`) — z własnego rejestru.
     seasonal.revertRef(`move:${move.id}`);
 
+    // Saldo BEZ przycinania do zera (CLAUDE.md, „Dwie waluty"): dawne MAX(0, balance - ?)
+    // kasowało dług po bossie i wydane w międzyczasie coins, czyli drukowało je — gracz
+    // z −50, który rzucił +12 i dostał cofnięcie, lądował na 0 zamiast na −50. Bez
+    // przycięcia kolejność względem revertRef wyżej też przestaje mieć znaczenie.
     db.prepare(`
       UPDATE sl_state SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?),
-        balance = MAX(0, balance - ?), rolls_today = ?
+        balance = balance - ?, rolls_today = ?
       WHERE player_id = ?
     `).run(fromAbs, Math.floor(fromAbs / slBoardSize()), pts, pts, nextRolls, playerId);
 

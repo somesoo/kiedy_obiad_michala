@@ -832,6 +832,10 @@ function renderCostumes(g) {
 
 function openWardrobe() {
   if (!state.game) return;
+  // Z chatki na planszy da się wejść także z podglądu na telefonie. Przy prawdziwym
+  // pełnym ekranie (Android) przeglądarka rysuje tylko #board-sheet, a garderoba leży poza
+  // nim — byłaby otwarta, ale niewidoczna. Najpierw zamykamy podgląd.
+  slBoardPeek(false);
   renderCostumes(state.game);
   document.getElementById('wardrobe').style.display = 'flex';
 }
@@ -2366,7 +2370,7 @@ function slRenderBossNotice(c) {
       im wcześniej się dorzucisz, tym więcej progów złapiesz.</p>
       <p class="boss-notice-warn">⚠️ Jak nie zdążycie na czas, boss zabiera
       <strong>${c.timeout_penalty} coins KAŻDEMU</strong> — płasko, bez zniżki za wpłatę
-      i bez względu na stan konta. <strong>Saldo może zejść pod kreskę.</strong></p>
+      i bez względu na to, ile masz coins. <strong>Coins mogą zejść pod kreskę.</strong></p>
       <p class="boss-notice-foot">To faza testów — stawki i trudność będą jeszcze krążone
       na podstawie tego, jak pójdzie. Szczegóły w regulaminie niżej; zgłaszajcie, co nie gra.</p>
     </div>`;
@@ -2387,7 +2391,7 @@ function slRenderBossRules(c) {
     `<strong>dwóch paskach</strong> pod planszą: ile obrażeń już zadaliście i ile czasu zostało ` +
     `do terminu. Obrażenia idą z dwóch źródeł: <strong>każdy Twój rzut kostką rani go za darmo</strong> ` +
     `(oczka × ${b.dice_damage_mult}, bez dodatkowej akcji — zwykłe granie już walczy), ` +
-    `a dodatkowo możesz <strong>wpłacić coins: 1 coin = 1 obrażenie</strong>, dowolną kwotę ze swojego salda. ` +
+    `a dodatkowo możesz <strong>wpłacić coins: 1 coin = 1 obrażenie</strong>, dowolną kwotę ze swoich coins. ` +
     `<strong>Nagrody dostają WYŁĄCZNIE ci, którzy wpłacili</strong> — rzuty są darmowe, więc nic nie ryzykują. ` +
     `<strong>Pokonacie go na czas</strong>, a każdy wpłacający dostaje: <strong>${perCoin} pkt</strong> za każdy ` +
     `wpłacony coin, <strong>${pct(b.refund_rate)}% wpłaty z powrotem</strong> w coins, ` +
@@ -2397,7 +2401,7 @@ function slRenderBossRules(c) {
     `wpłacił choć coina, dostaje <strong>+${b.milestone_points} pkt</strong> od ręki — więc im wcześniej się dorzucisz, ` +
     `tym więcej progów złapiesz. <strong>Nie zdążycie do terminu</strong> — wpłacone coins przepadają, ` +
     `a boss zabiera <strong>${c.timeout_penalty} coins</strong> KAŻDEMU graczowi, bez zniżki za wpłatę ` +
-    `i bez względu na saldo (można zejść pod kreskę; z długu wychodzisz normalną grą, ale sklep i wpłaty są wtedy zablokowane). ` +
+    `i bez względu na to, ile masz coins (można zejść pod kreskę; z długu wychodzisz normalną grą, ale sklep i wpłaty są wtedy zablokowane). ` +
     `Tak czy inaczej kolejny boss staje od razu — po wygranej mocniejszy, po przegranej łagodniejszy.`;
 }
 
@@ -2483,7 +2487,7 @@ function renderCoop(g) {
   // więc tu jest jej miejsce (jako odznaka w górnym rzędzie ściskała pasek HP na wąskich
   // ekranach). #coop-deadline zostaje tym samym elementem, który co sekundę przepisuje
   // updateCoopDeadline — kara jest obok niego, nie w nim, żeby jej nie nadpisał.
-  const penaltyTitle = `Nie zdążycie do terminu — boss zabiera ${c.my_timeout_penalty} coins KAŻDEMU graczowi, także tym, którzy wpłacili. Bez zniżki i bez względu na saldo: można zejść pod kreskę.`;
+  const penaltyTitle = `Nie zdążycie do terminu — boss zabiera ${c.my_timeout_penalty} coins KAŻDEMU graczowi, także tym, którzy wpłacili. Bez zniżki i bez względu na to, ile masz coins: można zejść pod kreskę.`;
   const penaltyHtml = `<span class="boss-bar-penalty">· potem −${c.my_timeout_penalty} coins każdemu 💀</span>`;
   const timeBarHtml = b.deadline_at
     ? `<div class="boss-time-bar" id="boss-time-bar" data-from="${esc(b.started_at || '')}" data-until="${esc(b.deadline_at)}" title="${esc(penaltyTitle)}"><div class="boss-time-fill"></div><span class="boss-bar-label"><span class="mono" id="coop-deadline" data-until="${esc(b.deadline_at)}">⏳ –</span>${penaltyHtml}</span></div>`
