@@ -49,6 +49,9 @@
    wejście do zasad (panel boczny go nie ma), więc nadpisujemy selektorem po ID
    (nie istnieje w DOM Wordle, więc nic mu nie grozi), żeby był widoczny zawsze. */
 #btn-how { display: inline-block; }
+/* Wejście do archiwum Wordle (gra zakończona, strona pod /wordle). To <a>, a nie <button>,
+   więc zdejmujemy podkreślenie i wyrównujemy wygląd do sąsiedniego „Zasady". */
+#btn-wordle { display: inline-block; text-decoration: none; }
 
 /* ── KOLUMNA PLANSZY ── */
 .col-game {

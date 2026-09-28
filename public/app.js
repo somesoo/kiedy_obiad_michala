@@ -408,7 +408,7 @@ document.getElementById('lb-season').addEventListener('change', e => {
 async function loadLeaderboard() {
   try {
     const q = state.lbSeason ? `&season=${encodeURIComponent(state.lbSeason)}` : '';
-    const data = await api('GET', `/api/leaderboard?highlight=${state.playerId}${q}`);
+    const data = await api('GET', `/api/wordle/leaderboard?highlight=${state.playerId}${q}`);
     populateSeasonSelect(data);
     renderLeaderboard(data);
   } catch (e) {

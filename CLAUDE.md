@@ -24,7 +24,7 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 | **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
 | **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/snakes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
-| **Wordle po polsku** | ~20% `server.js`, `public/app.js`, `index.html` | **zakończony 2026-08-31** przez `GAME_END_AT`; `gameHasEnded()` zwraca `true`, gra jest trwale zablokowana. Nie inwestuj tu czasu bez wyraźnej prośby. |
+| **Wordle po polsku** (archiwum) | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **zakończony 2026-08-31** przez `GAME_END_AT`, trwale zablokowany i już nie wróci. Kod zostaje: strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). W rdzeniu zostało tylko to, czego używa też Snakes: `players`, `/api/register`, `/api/me`. Nie inwestuj tu czasu bez wyraźnej prośby. |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
 
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
@@ -492,8 +492,8 @@ rm -rf db   # na koniec
     `knockback`/`bonus` w `sl_points_log` mają `ref = NULL`, więc naprawa wymaga najpierw
     zapisywania ich z `ref` tury.
   - **Zużytych Freeze i klątw.** Nie wracają do ekwipunku.
-- **Scheduler Discorda Wordle loguje „powiadomienie wysłane"**, choć wywołanie jest
-  zakomentowane.
+- **Scheduler Discorda Wordle (`lib/wordle.js`) loguje „powiadomienie wysłane"**, choć
+  wywołanie jest zakomentowane.
 - **~540 z 1397 linii `public/style.css` to martwy kod** po bukmacherce, ładowany na
   wszystkich stronach. Do tego `.lb-row`, `.lb-rank`, `.lb-nick` i `:root` są zdefiniowane
   po dwa razy — pierwszy zestaw jest w całości nadpisywany, więc zmiany w nim nie działają.
