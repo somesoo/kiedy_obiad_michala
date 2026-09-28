@@ -186,7 +186,9 @@ function stateSignature(g) {
     // trafienia byłoby samo w sobie sygnałem, że coś na graczu wisi.
     g.me.can_roll, g.me.has_shield,
     g.inventory,
-    g.coop ? [g.coop.status, g.coop.attackers.length, g.coop.boss ? g.coop.boss.hp : null] : null
+    g.coop ? [g.coop.status, g.coop.attackers.length, g.coop.boss ? g.coop.boss.hp : null] : null,
+    // Zamknięcie sezonu: nowe zakładki w rankingu, medale i podium do obejrzenia.
+    (g.seasons_archive || []).length, g.crowning ? g.crowning.closure_id : null
   ]);
 }
 
@@ -652,6 +654,7 @@ function renderAll() {
   renderRollButton(g);
   renderCoop(g);
   renderBossChip(g);
+  slMaybeCrown(g);
 }
 
 // ── SEZON PLANSZY ──
@@ -811,6 +814,7 @@ function renderCostumes(g) {
       <div class="costume-item${i.worn ? ' is-worn' : ''}${i.owned ? ' is-owned' : ''}">
         <span class="costume-icon">${icon}</span>
         <span class="costume-name">${esc(i.name)}</span>
+        ${i.season && !i.season_active ? `<span class="costume-season is-past">🗓️ z sezonu ${esc(i.season_name)}</span>` : ''}
         ${i.owned ? '<span class="costume-owned-tag">w szafie</span>' : `<span class="costume-price mono">${i.price} coins</span>`}
         ${saving}
         ${btn}
@@ -2671,7 +2675,9 @@ function slTipFor(playerId) {
   if (!src || !src.points_breakdown) return null;
 
   const total = Number(src.total_points) || 0;
-  const head = `<div class="sl-tip-head">${esc(src.nickname)}<span class="sl-tip-total mono">${total} pkt</span></div>`;
+  const medals = (src.medals || []).length
+    ? `<div class="sl-tip-medals">${src.medals.map(m => `${SL_MEDAL[m.place]} ${esc(m.season)}`).join(' · ')}</div>` : '';
+  const head = `<div class="sl-tip-head">${esc(src.nickname)}<span class="sl-tip-total mono">${total} pkt</span></div>` + medals;
   const split = src.points_split;
   // Sezonu jeszcze nikt nie przełączał — cała gra to jeden kawałek, rozbicie jak dawniej.
   if (!split) return head + (slTipRows(src.points_breakdown, total) || '<div class="sl-tip-empty">Jeszcze bez punktów.</div>');
@@ -2764,10 +2770,118 @@ document.addEventListener('focusout', e => {
 window.addEventListener('scroll', slTipHide, true);
 
 // ── LEADERBOARD ──
+// Ranking ma zakładki sezonów: bieżący (na żywo, z payloadu) i zamknięte (zdjęcie z chwili
+// zamknięcia, dociągane raz z /api/snakes/seasons/:id — po zamknięciu już się nie zmienia,
+// więc trzymamy je w pamięci). Wybrana zakładka musi przeżyć odświeżanie co 10 s.
+let slLbSeason = null;          // null = bieżący sezon, inaczej id zamknięcia
+const slLbArchive = new Map();  // id zamknięcia → { season, leaderboard }
+const slLbLoading = new Set();
+
+const SL_MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
+
+// Medale przy nicku. Do trzech — każdy osobno, od najstarszego sezonu. Więcej — zliczone,
+// żeby weteran z pięcioma podiami nie wypychał nicku z wąskiego panelu. Pełna lista w title.
+function slMedalsHtml(medals) {
+  if (!medals || !medals.length) return '';
+  const title = medals.map(m => `${SL_MEDAL[m.place]} ${m.season}`).join(' · ');
+  let icons;
+  if (medals.length <= 3) {
+    icons = medals.map(m => SL_MEDAL[m.place]).join('');
+  } else {
+    icons = [1, 2, 3].map(pl => {
+      const n = medals.filter(m => m.place === pl).length;
+      return n ? `${SL_MEDAL[pl]}<span class="lb-medal-n">${n}</span>` : '';
+    }).join('');
+  }
+  return `<span class="lb-medals" title="${esc(title)}">${icons}</span>`;
+}
+
+function slLbRowHtml(p, { hunt, topCandy, archived }) {
+  const rank = SL_MEDAL[p.rank] || p.rank;
+  const meClass = p.is_me ? ' is-me' : '';
+  const isTop = hunt && topCandy > 0 && p.candies === topCandy;
+  const candyTitle = archived
+    ? (isTop ? 'Najwięcej cukierków w tym sezonie' : 'Zebrane cukierki')
+    : (isTop ? 'Prowadzi w polowaniu na cukierki — kto będzie miał najwięcej na koniec października, zgarnia koronę' : 'Zebrane cukierki');
+  const candy = hunt && p.candies != null
+    ? `<span class="lb-candy mono${isTop ? ' is-top' : ''}" title="${candyTitle}">${isTop ? '👑' : ''}🍬 ${p.candies}</span>` : '';
+  // Dymek z rozbiciem punktów jest tylko dla sezonu na żywo — archiwum rozbicia nie ma,
+  // a dymek pokazałby punkty z BIEŻĄCEGO sezonu pod wierszem starego.
+  const tip = archived ? '' : ` data-tip-player="${p.player_id}"`;
+  return `
+      <div class="lb-row${meClass}"${tip}>
+        <span class="lb-rank">${rank}</span>
+        <div class="lb-main">
+          <div class="lb-top">
+            <span class="lb-nick">${esc(p.nickname)}</span>${slMedalsHtml(p.medals)}
+            <span class="lb-right">${candy}<span class="lb-points mono">${p.total_points} <span class="lb-unit">pkt</span></span></span>
+          </div>
+          <div class="lb-stats">
+            <span title="Ukończone okrążenia">🔁 ${p.laps}</span>
+            <span title="${archived ? 'Pole na koniec sezonu' : 'Aktualne pole'}">📍 ${p.tile}</span>
+          </div>
+        </div>
+      </div>`;
+}
+
+function renderLbSeasonTabs(g) {
+  const box = document.getElementById('lb-seasons');
+  const archive = g.seasons_archive || [];
+  if (!archive.length) { box.hidden = true; box.innerHTML = ''; slLbSeason = null; return; }
+  // Zakładka sezonu, którego już nie ma (np. wyczyszczone archiwum), wraca do bieżącego.
+  if (slLbSeason != null && !archive.some(c => c.id === slLbSeason)) slLbSeason = null;
+  box.hidden = false;
+  const liveName = (g.board && g.board.name) || 'Ten sezon';
+  box.innerHTML = `<button class="lb-season-tab${slLbSeason == null ? ' is-active' : ''}" data-lb-season="">${esc(liveName)} <span class="lb-season-live">teraz</span></button>`
+    + archive.map(c => `<button class="lb-season-tab${slLbSeason === c.id ? ' is-active' : ''}" data-lb-season="${c.id}">${esc(c.name)}</button>`).join('');
+}
+
+document.addEventListener('click', e => {
+  const tab = e.target.closest && e.target.closest('[data-lb-season]');
+  if (!tab) return;
+  slLbSeason = tab.dataset.lbSeason ? Number(tab.dataset.lbSeason) : null;
+  if (state.game) renderLeaderboard(state.game);
+});
+
+async function slLoadArchivedSeason(id) {
+  if (slLbLoading.has(id)) return;
+  slLbLoading.add(id);
+  try {
+    slLbArchive.set(id, await api('GET', `/api/snakes/seasons/${id}`));
+  } catch (e) {
+    showToast(e.message);
+    slLbSeason = null;
+  } finally {
+    slLbLoading.delete(id);
+    if (state.game) renderLeaderboard(state.game);
+  }
+}
+
 function renderLeaderboard(g) {
+  renderLbSeasonTabs(g);
   const list = document.getElementById('leaderboard-list');
+  const count = document.getElementById('players-count');
+
+  if (slLbSeason != null) {
+    const data = slLbArchive.get(slLbSeason);
+    if (!data) {
+      count.textContent = '';
+      list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Wczytuję ranking sezonu…</div>';
+      slLoadArchivedSeason(slLbSeason);
+      return;
+    }
+    const rows = data.leaderboard;
+    const hunt = rows.some(p => p.candies != null);
+    const topCandy = hunt ? Math.max(0, ...rows.map(p => p.candies || 0)) : 0;
+    count.textContent = `zakończony · ${rows.length} graczy`;
+    list.innerHTML = rows.length
+      ? rows.map(p => slLbRowHtml(p, { hunt, topCandy, archived: true })).join('')
+      : '<div class="text-muted small" style="padding:12px 4px">W tym sezonie nikt nie zagrał.</div>';
+    return;
+  }
+
   if (!g.leaderboard.length) {
-    document.getElementById('players-count').textContent = '0 graczy';
+    count.textContent = '0 graczy';
     list.innerHTML = '<div class="text-muted small" style="padding:12px 4px">Nikt jeszcze nie zagrał — bądź pierwszy!</div>';
     return;
   }
@@ -2776,28 +2890,100 @@ function renderLeaderboard(g) {
   const hunt = g.leaderboard.some(p => p.candies != null);
   const topCandy = hunt ? Math.max(0, ...g.leaderboard.map(p => p.candies || 0)) : 0;
   const onBoard = g.season_events && g.season_events.candy ? g.season_events.candy.tiles.length : 0;
-  document.getElementById('players-count').textContent = hunt
+  count.textContent = hunt
     ? `${g.leaderboard.length} graczy · 🍬 ${onBoard} na planszy` : `${g.leaderboard.length} graczy`;
-  list.innerHTML = g.leaderboard.map(p => {
-    const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
-    const meClass = p.is_me ? ' is-me' : '';
-    const candy = hunt
-      ? `<span class="lb-candy mono${topCandy > 0 && p.candies === topCandy ? ' is-top' : ''}" title="${topCandy > 0 && p.candies === topCandy ? 'Prowadzi w polowaniu na cukierki — kto będzie miał najwięcej na koniec października, zgarnia koronę' : 'Zebrane cukierki'}">${topCandy > 0 && p.candies === topCandy ? '👑' : ''}🍬 ${p.candies}</span>` : '';
+  list.innerHTML = g.leaderboard.map(p => slLbRowHtml(p, { hunt, topCandy, archived: false })).join('');
+}
+
+// ── UKORONOWANIE ──
+// Po zamknięciu sezonu każdy, kto w nim grał, raz zobaczy podium: stopnie wyrastają od
+// trzeciego do pierwszego, gracze wskakują na nie, a na zwycięzcę spada korona. Serwer
+// pamięta, kto już widział (sl_state.crowned_seen), więc animacja nie wraca na innym
+// urządzeniu. Nowy gracz spoza wyników nie dostaje jej wcale — to nie jego sezon.
+//
+// Nakładka żyje w <body>, a nie w #board-area, bo renderBoard podmienia tam innerHTML
+// co 10 s. `slCrownShown` pilnuje, żeby odświeżenie nie odpaliło jej drugi raz, zanim
+// serwer zapisze „widziane".
+let slCrownShown = null;
+
+function slCrownAvatar(p) {
+  const initial = esc((p.nickname || '?').trim().charAt(0).toUpperCase() || '?');
+  return p.avatar_url
+    ? `<img class="crown-avatar" src="${esc(p.avatar_url)}" alt="">`
+    : `<span class="crown-avatar crown-avatar-empty">${initial}</span>`;
+}
+
+function slCrownHtml(c, g) {
+  const byPlace = {};
+  c.podium.forEach(p => { byPlace[p.place] = p; });
+  // Kolejność na scenie: 2 · 1 · 3 — klasyczne podium, zwycięzca w środku i najwyżej.
+  const spot = place => {
+    const p = byPlace[place];
+    if (!p) return `<div class="crown-spot is-empty" data-place="${place}"><div class="crown-step"><span>${place}</span></div></div>`;
     return `
-      <div class="lb-row${meClass}" data-tip-player="${p.player_id}">
-        <span class="lb-rank">${medal}</span>
-        <div class="lb-main">
-          <div class="lb-top">
-            <span class="lb-nick">${esc(p.nickname)}</span>
-            <span class="lb-right">${candy}<span class="lb-points mono">${p.total_points} <span class="lb-unit">pkt</span></span></span>
-          </div>
-          <div class="lb-stats">
-            <span title="Ukończone okrążenia">🔁 ${p.laps}</span>
-            <span title="Aktualne pole">📍 ${p.tile}</span>
-          </div>
+      <div class="crown-spot${p.is_me ? ' is-me' : ''}" data-place="${place}">
+        <div class="crown-person">
+          ${place === 1 ? '<span class="crown-crown" aria-hidden="true">👑</span>' : ''}
+          ${slCrownAvatar(p)}
+          <span class="crown-medal" aria-hidden="true">${SL_MEDAL[place]}</span>
+          <span class="crown-name">${esc(p.nickname)}</span>
+          <span class="crown-pts mono">${p.total_points} pkt</span>
         </div>
+        <div class="crown-step"><span>${place}</span></div>
       </div>`;
-  }).join('');
+  };
+  const me = c.me;
+  const mine = me.place <= 3
+    ? `Stoisz na podium! ${SL_MEDAL[me.place]} zostaje przy Twoim nicku na zawsze.`
+    : `Twoje miejsce: <strong>${me.place}.</strong> z ${c.players} · ${me.total_points} pkt`;
+  const next = (g.board && g.board.name) || 'nowy sezon';
+  return `
+    <div class="crown-stage">
+      <button class="crown-close" id="crown-close" title="Zamknij">✕</button>
+      <div class="crown-kicker">Koniec sezonu</div>
+      <h2 class="crown-title" id="crown-title">${esc(c.season_name)}</h2>
+      <div class="crown-podium">
+        <div class="crown-rays" aria-hidden="true"></div>
+        ${spot(2)}${spot(1)}${spot(3)}
+      </div>
+      <div class="crown-me">${mine}</div>
+      <div class="crown-next">Startuje <strong>${esc(next)}</strong>. Wszyscy od zera: punkty, coins, okrążenia i ekwipunek. Kostiumy zostają.</div>
+      <button class="btn-primary crown-go" id="crown-go">Zaczynamy!</button>
+    </div>`;
+}
+
+function slMaybeCrown(g) {
+  const c = g && g.crowning;
+  if (!c || slCrownShown === c.closure_id) return;
+  if (document.getElementById('crown-overlay')) return;
+  const avatarOverlay = document.getElementById('avatar-overlay');
+  if (avatarOverlay && avatarOverlay.style.display !== 'none') return;
+  slCrownShown = c.closure_id;
+
+  const el = document.createElement('div');
+  el.className = 'overlay crown-overlay';
+  el.id = 'crown-overlay';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-labelledby', 'crown-title');
+  el.innerHTML = slCrownHtml(c, g);
+  document.body.appendChild(el);
+  // Konfetti w chwili, gdy korona ląduje na zwycięzcy (patrz animation-delay w CSS).
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const confetti = setTimeout(() => showConfetti(['👑', '🏆', '⭐', '🎉']), reduced ? 0 : 2300);
+
+  const close = () => {
+    clearTimeout(confetti);
+    el.remove();
+    document.removeEventListener('keydown', onKey);
+    // Błąd zapisu nie jest końcem świata: podium pokaże się jeszcze raz przy następnym wejściu.
+    api('POST', '/api/snakes/crowning/seen', { closure_id: c.closure_id }).catch(() => {});
+  };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  el.querySelector('#crown-go').addEventListener('click', close);
+  el.querySelector('#crown-close').addEventListener('click', close);
+  el.querySelector('#crown-go').focus({ preventScroll: true });
 }
 
 // ── COUNTDOWN (do północy = nowy ruch) ──
@@ -2861,11 +3047,11 @@ function updateCountdown() {
 }
 
 // ── CONFETTI ──
-function showConfetti() {
+function showConfetti(custom = null) {
   const container = document.getElementById('confetti-container');
   // Sezon może mieć własne konfetti (np. dynie i duchy) — patrz `confetti` w pliku planszy.
   const seasonal = state.game && state.game.board && slBoardView(state.game.board).confetti;
-  const icons = seasonal || ['🎉', '⭐', '🐍', '🪜'];
+  const icons = custom || seasonal || ['🎉', '⭐', '🐍', '🪜'];
   for (let i = 0; i < 22; i++) {
     const el = document.createElement('div');
     el.className = 'confetti-piece';

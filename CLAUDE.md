@@ -20,6 +20,7 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 |---|---|---|
 | **Snakes & Ladders** (prefiks `sl*`) | większość `server.js`, `public/snakes*` | **aktywna gra, tu idzie cała praca** |
 | **Sezony planszy** | `boards/*.js`, `lib/seasons.js`, `public/themes/` | plansza = plik; admin przełącza sezon |
+| **Zamknięcie sezonu** | `lib/crowning.js`, `slCloseSeasonAndInstall` w `server.js` | archiwum rankingu, medale, podium, wszyscy od zera |
 | **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
 | **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/snakes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
@@ -48,10 +49,11 @@ w logu, gdy liczba pól sezonu bez `testing` się zmieniła.
 - **Liczba pól jest zmienna** — rozmiar zawsze przez `slBoardSize()`, nigdy ze stałej.
 - `sl_board` to **lustro** aktywnego pliku, reseedowane przy każdym starcie. Poprawka w pliku
   wchodzi po restarcie. Plik z błędem nie trafia na listę, powód jest w logu.
-- **Zmiana sezonu = wszyscy na polu 0** (`abs_pos = laps × nowy rozmiar`; okrążenia, punkty,
-  coins i ekwipunek zostają). `season_move_floor` zapamiętuje ostatni ruch starej planszy
-  i cofanie ruchu oraz dnia **odmawia** dla starszych ruchów, bo ich `from_abs` wskazuje pole
-  na innej planszy.
+- **Zmiana sezonu domyślnie ZAMYKA sezon** (patrz „Zamknięcie sezonu" niżej): wszyscy od zera.
+  Bez zamykania (`close: false`, tylko na pomyłki i testy) wszyscy stają na polu 0
+  (`abs_pos = laps × nowy rozmiar`), a okrążenia, punkty, coins i ekwipunek zostają.
+  W obu wariantach `season_move_floor` zapamiętuje ostatni ruch starej planszy i cofanie ruchu
+  oraz dnia **odmawia** dla starszych ruchów, bo ich `from_abs` wskazuje pole na innej planszy.
 - Front rysuje pola z `board.path` w gridzie **bez gapów**. Odstęp robi symetryczny `margin`
   na `.sl-cell`. Gap rozjechałby drogę i łączniki z kafelkami (`slGridPoint`).
 - Motyw: `public/themes/<theme>.css` doładowywany z payloadu, a efekty to klasy `fx-<nazwa>`
@@ -91,6 +93,37 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
   701–1000px zostaje przy przewijaniu w bok.
 - Garderoba na planszy (`shop_at`) ma rozmiar liczony od WYSOKOŚCI planszy — plansza 'free'
   jest ~2× szersza niż wysoka i kwadrat liczony od szerokości nachodził na pola.
+
+## Zamknięcie sezonu — podium, medale, wszyscy od zera
+
+Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woła
+`slCloseSeasonAndInstall` — archiwum, zerowanie i nowa plansza lecą w **jednej** transakcji,
+żeby żaden rzut nie wpadł pomiędzy.
+
+- **Archiwum to zdjęcie, nie przeliczenie** (`sl_season_closures` + `sl_season_results`,
+  `lib/crowning.js`). Kolejność jak w rankingu: punkty, przy remisie okrążenia, potem pole
+  (`abs_pos`). Do archiwum trafia tylko ten, kto w sezonie grał (punkty ≠ 0 albo ruch po
+  `season_move_floor`) — gracz, który tylko zajrzał, nie zajmuje miejsca.
+- **Zerowane:** punkty, coins, okrążenia, pozycja, ekwipunek, czekające efekty (freeze, klątwy,
+  tarcze), dokupione dziś Extra Move, cały `sl_points_log` (rozbicie; suma żyje w archiwum),
+  rejestr sezonowy (kocioł, cukierki). Znika też `season_points_floor`, więc dymek pokazuje
+  jedno rozbicie. **Zostają:** kostiumy (także założone) i dzienny licznik rzutów.
+- **Boss:** trwająca walka kończy się BEZ nagród, kar i zwrotów (coins i tak są zerowane),
+  a nowy cykl startuje od bazowego progu (`slCloseFightForSeason`). `boss_season_cycle_floor`
+  to ostatni cykl starego sezonu — `slRevertBossRewards` i `slRevertBossDay` nie sięgają za
+  niego, bo odjęłyby stare nagrody od nowego zera. Reset gry zeruje tę granicę (cykle
+  numerują się wtedy od 1).
+- **Medale** (`medals` w wierszu rankingu) to miejsca 1–3 ze wszystkich zamknięć. Ranking ma
+  zakładki sezonów (`seasons_archive` w stanie, ranking zamkniętego: `GET /api/snakes/seasons/:id`).
+- **Ukoronowanie:** `crowning` w stanie gracza jest niepuste tylko dla OSTATNIEGO zamknięcia,
+  tylko dla tych, którzy są w jego wynikach, i tylko dopóki `sl_state.crowned_seen` < id
+  zamknięcia. Pamięć jest na serwerze, a nie w localStorage — raz na osobę, nie na urządzenie.
+  Front: `slMaybeCrown` w `snakes.js`, nakładka w `<body>` (poza `#board-area`).
+- **Kostiumy mają `season`** w katalogu — kupić można tylko te z aktywnego sezonu (albo bez
+  `season`), a kupione wcześniej dalej się nosi. Obecny zestaw jest oznaczony `'halloween'`,
+  więc na planszy `default` nie jest w sprzedaży.
+- Reset gry **nie** rusza archiwum (to historia). Wyczyszczenie gracza kasuje jego wiersze
+  wyników, ale miejsc innych nie przenumerowuje.
 
 ## Boss sezonu (`special_boss` w pliku planszy)
 
@@ -310,7 +343,7 @@ Dodając cokolwiek, co zapisuje punkty lub coins, sprawdź wszystkie pięć:
    sama funkcja żyje i sama woła `slRevertBossDay` oraz `seasonal.revertDay`, więc spójność
    nadal trzeba utrzymywać — to ją odblokuje się po przebudowie)
 2. cofnięcie ostatniego ruchu (`/admin/players/:id/undo-move`) — kasuje po `ref = move:<id>`
-3. cofnięcie nagród bossa (`slRevertBossRewards`)
+3. cofnięcie nagród bossa (`slRevertBossRewards`) — tylko cykle bieżącego sezonu
 4. reset całej gry (`/admin/reset`)
 5. wyczyszczenie gracza
 

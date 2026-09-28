@@ -2277,17 +2277,65 @@ function slSeasonMoveFloor() {
 // newSeason = admin ŚWIADOMIE zaczyna sezon (także ponownie ten sam) — wtedy od tego miejsca
 // liczy się rozbicie punktów „ten sezon". Reset pozycji przy starcie po edycji pliku
 // planszy sezonu nie zaczyna.
+function slInstallBoardRows(season, resetPositions, newSeason) {
+  slSeedBoardRows(season);
+  const n = resetPositions ? slResetPositionsToStart(season.size) : 0;
+  if (newSeason) slMarkSeasonStart();
+  slMetaSet('active_board', season.id);
+  slMetaSet('board_size', season.size);
+  return n;
+}
+
 function slInstallBoard(season, resetPositions, newSeason = false) {
-  const moved = transaction(() => {
-    slSeedBoardRows(season);
-    const n = resetPositions ? slResetPositionsToStart(season.size) : 0;
-    if (newSeason) slMarkSeasonStart();
-    slMetaSet('active_board', season.id);
-    slMetaSet('board_size', season.size);
-    return n;
-  });
+  const moved = transaction(() => slInstallBoardRows(season, resetPositions, newSeason));
   slBoard = season; // dopiero po udanej transakcji — przy błędzie zostaje stara plansza
   return moved;
+}
+
+// ── ZAMKNIĘCIE SEZONU ──
+// Zdjęcie rankingu do archiwum, zerowanie gry i nowa plansza — w JEDNEJ transakcji, żeby
+// żaden rzut nie wpadł pomiędzy archiwum a zerowanie. Zerujemy wszystko, co daje przewagę:
+// punkty, coins, okrążenia, ekwipunek, czekające ataki i tarcze, dokupione dziś Extra Move.
+// Zostają kostiumy (kosmetyka, zapłacone i tak) i dzienny licznik rzutów — zmiana sezonu
+// w środku dnia nie ma dawać nikomu dodatkowych rzutów.
+//
+// Rozbicie punktów (sl_points_log) kasujemy w całości: suma starego sezonu żyje już
+// w archiwum, a stare wiersze po wyzerowaniu total_points rozjechałyby dymek. Stąd też
+// znika granica „ten sezon / wcześniej" — po zamknięciu wszystko w dymku to ten sezon.
+//
+// slBoard musi być nowy JUŻ w środku transakcji: slCloseFightForSeason startuje nowy cykl
+// bossa, a ten czyta bossa sezonowego z aktywnej planszy.
+function slCloseSeasonAndInstall(season) {
+  const prev = slBoard;
+  try {
+    return transaction(() => {
+      const closure = crowning.archiveSeason({
+        board: prev.id,
+        name: slSeasonLabel(prev.id),
+        moveFloor: slSeasonMoveFloor(),
+        candies: seasonal.candyMap(),
+        tileOf: slTileOf
+      });
+      db.exec(`
+        UPDATE sl_state SET abs_pos = 0, laps = 0, balance = 0, total_points = 0,
+          extra_rolls = 0, extra_rolls_date = NULL;
+        DELETE FROM sl_inventory;
+        DELETE FROM sl_effects WHERE status = 'pending';
+        DELETE FROM sl_points_log;
+        DELETE FROM sl_meta WHERE key = 'season_points_floor';
+      `);
+      // Gdyby admin przełączył potem planszę BEZ zamykania, dymek pokaże to jako „wcześniej".
+      slMetaSet('season_prior_label', 'Poprzednia plansza');
+      seasonal.resetAll(); // kocioł, cukierki na polach i rejestr — liczba cukierków jest w archiwum
+      const moved = slInstallBoardRows(season, true, false);
+      slBoard = season;
+      const fight = boss.slCloseFightForSeason();
+      return { closure, moved, fight };
+    });
+  } catch (e) {
+    slBoard = prev;
+    throw e;
+  }
 }
 
 (function slActivateBoardOnStartup() {
@@ -2798,9 +2846,12 @@ function slLeaderboard(meId) {
   // Polowanie na cukierki (sezon z events.candy) nie ma osobnego rankingu — liczba 🍬
   // stoi w wierszu gracza obok punktów. null = sezon bez cukierków.
   const candies = seasonal.candyMap();
+  // Medale za podium zamkniętych sezonów — przy nicku, niezależnie od bieżących punktów.
+  const medals = crowning.medalsMap();
   return rows.map((r, i) => ({
     rank: i + 1,
     candies: candies ? (candies.get(r.player_id) || 0) : null,
+    medals: medals.get(r.player_id) || [],
     player_id: r.player_id,
     nickname: r.nickname,
     total_points: Number(r.total_points),
@@ -3004,11 +3055,15 @@ function slSpecialBossNow() {
 
 // ── KOSTIUMY ── czysta kosmetyka pionka za coins (lib/costumes.js). Ta sama fabryka co
 // boss: helpery przychodzą w deps, jeden uchwyt bazy.
+// Pierwszy sezon w UI nazywa się „Snakes Game", nie jak plik planszy (patrz dymek gracza).
+function slSeasonLabel(id) {
+  return id === seasons.DEFAULT_ID ? SL_FIRST_SEASON_NAME : ((seasons.get(id) || {}).name || id);
+}
+
 const costumes = require('./lib/costumes')({
   db, transaction, slLogActivity, slEnsureState, slMetaGet, slMetaSet,
   activeSeasonId: () => slBoard.id,
-  // Pierwszy sezon w UI nazywa się „Snakes Game", nie jak plik planszy (patrz dymek gracza).
-  seasonLabel: id => id === seasons.DEFAULT_ID ? SL_FIRST_SEASON_NAME : ((seasons.get(id) || {}).name || id),
+  seasonLabel: slSeasonLabel,
 });
 costumes.initSchema();
 costumes.registerRoutes(app, { authPlayer, checkAdmin, buildState: playerId => slBuildState(playerId) });
@@ -3020,6 +3075,11 @@ const seasonal = require('./lib/seasonal')({
   getSeason: () => slBoard, tileOf: slTileOf, boardSize: slBoardSize
 });
 seasonal.initSchema();
+
+// ── ZAMKNIĘCIE SEZONU ── archiwum rankingu, medale, ukoronowanie (lib/crowning.js).
+const crowning = require('./lib/crowning')({ db, ensureColumn, slAvatarUrl });
+crowning.initSchema();
+crowning.registerRoutes(app, { authPlayer });
 
 // ── MIGRACJA (jednorazowa): DOŁADOWANIE „bank się pomylił" — każdy gracz dostaje
 // SL_BANK_ERROR_GRANT coins do portfela. Jednorazowy prezent od admina przy okazji
@@ -3105,6 +3165,9 @@ function slBuildState(playerId) {
     costumes: costumes.slCostumeShop(playerId),
     season_events: seasonal.payload(playerId),
     coop: boss.slCoopPayload(playerId),
+    // Zamknięte sezony (zakładki w rankingu) i podium do obejrzenia raz po zamknięciu.
+    seasons_archive: crowning.closures(),
+    crowning: crowning.crowningFor(playerId),
     server_date: today
   };
 }
@@ -3148,6 +3211,7 @@ app.get('/api/snakes/board', (req, res) => {
     board: slBoardPayload(),
     players: slPlayersPayload(null),
     leaderboard: slLeaderboard(null),
+    seasons_archive: crowning.closures(),
     coop: boss.slCoopPayload(null)
   });
 });
@@ -3908,8 +3972,10 @@ app.get('/api/snakes/admin/seasons', (req, res) => {
   res.json({ active: slBoard.id, seasons: seasons.list() });
 });
 
-// POST /api/snakes/admin/season { password, board } — przełącza sezon planszy. Wszyscy
-// wracają na pole 0 (okrążenia, punkty, coins i ekwipunek zostają), a ruchów sprzed zmiany
+// POST /api/snakes/admin/season { password, board, close? } — przełącza sezon planszy.
+// Domyślnie (close ≠ false) ZAMYKA poprzedni sezon: ranking idzie do archiwum, podium
+// dostaje medale, a wszyscy zaczynają od zera (slCloseSeasonAndInstall). Z close: false
+// tylko zmienia planszę — wszyscy na pole 0, reszta zostaje. Ruchów sprzed zmiany
 // nie da się już cofnąć (patrz slResetPositionsToStart). Ponowne włączenie AKTYWNEGO
 // sezonu też resetuje pozycje — to świadome: „zacznijmy sezon od nowa".
 app.post('/api/snakes/admin/season', (req, res) => {
@@ -3918,14 +3984,35 @@ app.post('/api/snakes/admin/season', (req, res) => {
   if (!season) return res.status(404).json({ error: 'Nie ma takiego sezonu (albo jego plik ma błąd — patrz logi serwera).' });
 
   const previous = slBoard.id;
-  const moved = slInstallBoard(season, true, true);
-  console.log(`Snakes/Admin: sezon ${previous} → ${season.id} (${season.size} pól), ${moved} graczy na polu 0`);
+  // Domyślnie przełączenie ZAMYKA sezon (archiwum, medale, wszyscy od zera). Bez zamykania
+  // — tylko w razie pomyłki albo testów: sama zmiana planszy, wszystko inne zostaje.
+  const close = req.body.close !== false;
+  let moved, closure = null;
+  if (close) {
+    const out = slCloseSeasonAndInstall(season);
+    moved = out.moved;
+    closure = out.closure;
+    console.log(`Snakes/Admin: sezon ${previous} ZAMKNIĘTY (#${closure.id}, ${closure.players} graczy w archiwum) → ${season.id} (${season.size} pól), wszyscy od zera`);
+  } else {
+    moved = slInstallBoard(season, true, true);
+    console.log(`Snakes/Admin: sezon ${previous} → ${season.id} (${season.size} pól), ${moved} graczy na polu 0 (bez zamykania)`);
+  }
   // Sezon z własnym bossem (special_boss) wystawia go OD RAZU, a nie przy kolejnej edycji.
+  // Po zamknięciu to no-op (nowy cykl już jest bossem sezonu), bez zamknięcia — zwraca wpłaty.
   boss.slEnsureSpecialBoss();
-  slPostDiscord({ content: `🗺️ **Nowy sezon planszy: ${season.name}!** Wszyscy startują od pola 0 — punkty i coins zostają.` })
-    .catch(err => console.error('Snakes/Discord [season]:', err.message));
 
-  res.json({ success: true, active: season.id, players_moved: moved, board: slBoardPayload() });
+  let content;
+  if (closure) {
+    const medal = ['🥇', '🥈', '🥉'];
+    const podium = closure.podium.map(p => `${medal[p.place - 1]} **${p.nickname}** (${p.total_points} pkt)`).join('\n');
+    content = `🏆 **Koniec sezonu ${closure.name}!**` + (podium ? `\n${podium}` : '')
+      + `\n\n🗺️ **Startuje nowy sezon: ${season.name}.** Wszyscy od zera: punkty, coins, okrążenia i ekwipunek. Kostiumy zostają.\n${SNAKES_URL}`;
+  } else {
+    content = `🗺️ **Nowa plansza: ${season.name}!** Wszyscy startują od pola 0 — punkty i coins zostają.`;
+  }
+  slPostDiscord({ content }).catch(err => console.error('Snakes/Discord [season]:', err.message));
+
+  res.json({ success: true, active: season.id, players_moved: moved, closure, board: slBoardPayload() });
 });
 
 // GET /api/snakes/admin/players — lista graczy z ich stanem w Snakes & Ladders
@@ -3979,6 +4066,7 @@ app.delete('/api/snakes/admin/players/:id', (req, res) => {
     boss.slClearPlayerBossData(playerId); // ŚCIEŻKA COFANIA #5 — wkłady i wypłaty bossa
     costumes.slClearPlayerCostumes(playerId);
     seasonal.clearPlayer(playerId);
+    crowning.clearPlayer(playerId);
     db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_points_log WHERE player_id = ?').run(playerId);
     db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);

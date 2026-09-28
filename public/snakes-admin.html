@@ -119,12 +119,22 @@
         <div class="adm-note" style="margin-top:12px">
           Każdy sezon to plik <code>boards/&lt;nazwa&gt;.js</code> (kształt, drabiny, węże, bonusy,
           motyw). Nowy plik pojawia się tu po restarcie serwera; plik z błędem nie pojawia się
-          wcale (powód jest w logach). Zmiana sezonu stawia <strong>wszystkich na polu 0</strong>.
-          Punkty, coins, okrążenia i ekwipunek zostają. Ruchów sprzed zmiany nie da się już
-          cofnąć (ani „cofnij ruch", ani cofnięcie dnia), bo stały na innej planszy.
+          wcale (powód jest w logach).<br><br>
+          <strong>Z zaznaczonym „zamknij sezon"</strong> (tak startuje każdy nowy sezon): ranking
+          idzie do archiwum, pierwsza trójka dostaje medale przy nicku, a <strong>wszyscy zaczynają
+          od zera</strong> — punkty, coins, okrążenia, ekwipunek, czekające ataki i tarcze. Trwająca
+          walka z bossem kończy się bez nagród i kar, rusza nowa. Zostają tylko kostiumy. Każdy,
+          kto grał w zamykanym sezonie, przy następnym wejściu zobaczy podium.<br>
+          <strong>Bez zaznaczenia</strong> (tylko na pomyłki i testy): zmienia się sama plansza,
+          wszyscy stają na polu 0, a reszta zostaje.<br><br>
+          Ruchów sprzed zmiany nie da się już cofnąć (ani „cofnij ruch", ani cofnięcie dnia),
+          bo stały na innej planszy. Zamknięcia sezonu nie da się cofnąć.
         </div>
         <div class="adm-actions">
           <select id="season-select" style="width:240px"></select>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px">
+            <input type="checkbox" id="season-close" checked> zamknij sezon (podium i wszyscy od zera)
+          </label>
           <button class="btn-ghost" id="btn-season">Włącz sezon</button>
         </div>
       </div>
@@ -494,11 +504,17 @@
       const sel = document.getElementById('season-select');
       const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value;
       if (!sel.value) return;
-      if (!confirm(`Włączyć sezon „${label}"?\n\nWszyscy gracze wrócą na pole 0 (punkty, coins i okrążenia zostają), a ruchów sprzed zmiany nie da się już cofnąć.`)) return;
+      const close = document.getElementById('season-close').checked;
+      const msg = close
+        ? `ZAMKNĄĆ bieżący sezon i włączyć „${label}"?\n\nRanking pójdzie do archiwum, pierwsza trójka dostanie medale, a WSZYSCY zaczną od zera: punkty, coins, okrążenia i ekwipunek. Trwająca walka z bossem skończy się bez nagród. Zostają tylko kostiumy.\n\nTego nie da się cofnąć.`
+        : `Włączyć planszę „${label}" BEZ zamykania sezonu?\n\nWszyscy gracze wrócą na pole 0 (punkty, coins i okrążenia zostają), a ruchów sprzed zmiany nie da się już cofnąć.`;
+      if (!confirm(msg)) return;
       try {
-        const res = await api('POST', '/api/snakes/admin/season', { password: pass, board: sel.value });
+        const res = await api('POST', '/api/snakes/admin/season', { password: pass, board: sel.value, close });
         await loadSettings();
-        showToast(`🗺️ Sezon „${res.board.name}" włączony — ${res.players_moved} graczy na polu 0.`);
+        showToast(res.closure
+          ? `🏆 Sezon „${res.closure.name}" zamknięty (${res.closure.players} graczy w archiwum). Startuje „${res.board.name}".`
+          : `🗺️ Plansza „${res.board.name}" włączona — ${res.players_moved} graczy na polu 0.`);
       } catch (e) {
         showToast(e.message);
       }
