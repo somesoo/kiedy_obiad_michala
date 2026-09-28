@@ -1529,15 +1529,44 @@ const SL_MAX_EXTRA_ROLLS = 2;
 // ── GODZINY BIUROWE ──
 // To gra biurowa: rzucać można wyłącznie w oknie SL_PLAY_START_HOUR–SL_PLAY_END_HOUR
 // (czasu Warszawy, dni robocze). Po 16:00 niewykorzystane ruchy przepadają.
+// Stałe z env to tylko DOMYŚLNE okno — admin może je nadpisać w panelu (sl_meta), np. na
+// czas testów zdjąć blokadę całkiem (0–24 i weekendy). Dlatego okno czytamy zawsze przez
+// slPlayHours(), nigdy wprost ze stałych: inaczej komunikat mówiłby „8–16", a gra
+// wpuszczała o 20:00.
 const SL_PLAY_START_HOUR = Number(process.env.SNAKES_PLAY_START_HOUR || 8);
 const SL_PLAY_END_HOUR = Number(process.env.SNAKES_PLAY_END_HOUR || 16);
+const SL_PLAY_META_START = 'play_start_hour';
+const SL_PLAY_META_END = 'play_end_hour';
+const SL_PLAY_META_WEEKENDS = 'play_weekends';
+
+// Aktualne okno gry: { start, end, weekends, custom }. `end` = 24 znaczy „do północy".
+// Zepsuta wartość w sl_meta (ręczna edycja bazy) nie może zamknąć gry na zawsze —
+// wtedy wracamy do domyślnych z env.
+function slPlayHours() {
+  const rawStart = slMetaGet(SL_PLAY_META_START);
+  const rawEnd = slMetaGet(SL_PLAY_META_END);
+  let start = rawStart != null ? Number(rawStart) : SL_PLAY_START_HOUR;
+  let end = rawEnd != null ? Number(rawEnd) : SL_PLAY_END_HOUR;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 24 || start >= end) {
+    start = SL_PLAY_START_HOUR;
+    end = SL_PLAY_END_HOUR;
+  }
+  const weekends = slMetaGet(SL_PLAY_META_WEEKENDS) === '1';
+  return {
+    start, end, weekends,
+    custom: rawStart != null || rawEnd != null || weekends,
+    default_start: SL_PLAY_START_HOUR,
+    default_end: SL_PLAY_END_HOUR
+  };
+}
 
 // Czy w danej chwili okno gry jest otwarte (dzień roboczy + godzina w zakresie).
 function slOfficeOpenAt(ms = Date.now()) {
+  const hours = slPlayHours();
   const p = warsawParts(new Date(ms));
-  if (isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) return false;
+  if (!hours.weekends && isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) return false;
   const h = Number(p.h);
-  return h >= SL_PLAY_START_HOUR && h < SL_PLAY_END_HOUR;
+  return h >= hours.start && h < hours.end;
 }
 
 // Najbliższa chwila (epoch ms), w której okno gry jest otwarte: samo `fromMs`, jeśli
@@ -1545,12 +1574,13 @@ function slOfficeOpenAt(ms = Date.now()) {
 // od kotwicy w południe, żeby zmiana czasu (CET/CEST) nie przesunęła nam doby.
 function slNextOpenMs(fromMs = Date.now()) {
   if (slOfficeOpenAt(fromMs)) return fromMs;
+  const hours = slPlayHours();
   const p0 = warsawParts(new Date(fromMs));
   let anchor = warsawWallTimeToMs(Number(p0.y), Number(p0.mo), Number(p0.d), 12);
   for (let i = 0; i < 14; i++) {
     const p = warsawParts(new Date(anchor));
-    const openMs = warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_START_HOUR);
-    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`) && openMs > fromMs) return openMs;
+    const openMs = warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), hours.start);
+    if ((hours.weekends || !isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) && openMs > fromMs) return openMs;
     anchor += 24 * 60 * 60 * 1000;
   }
   return fromMs;
@@ -1559,7 +1589,7 @@ function slNextOpenMs(fromMs = Date.now()) {
 // Godzina zamknięcia okna dla dnia, w którym wypada `ms` (epoch ms).
 function slOfficeCloseMs(ms = Date.now()) {
   const p = warsawParts(new Date(ms));
-  return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_END_HOUR);
+  return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), slPlayHours().end);
 }
 
 
@@ -3126,7 +3156,10 @@ function slBuildState(playerId) {
   const st = slEnsureState(playerId);
   const shop = slShopPayload(playerId); // raz — sięga do bazy po oczekującą Drożyznę
   const today = todayWaw();
-  const isWeekend = isWeekendStr(today);
+  // „Weekend" = dzień, w którym gra jest zamknięta z powodu weekendu. Z włączonymi w panelu
+  // weekendami (testy) sobota i niedziela zachowują się jak zwykły dzień.
+  const playHours = slPlayHours();
+  const isWeekend = isWeekendStr(today) && !playHours.weekends;
   const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
   const dailyRolls = slDailyRollsFor(st, today);
   const rollsRemainingToday = Math.max(0, dailyRolls - rollsUsedToday);
@@ -3148,8 +3181,8 @@ function slBuildState(playerId) {
       extra_rolls_today: dailyRolls - SL_DAILY_ROLLS,
       is_weekend: isWeekend,
       office_open: officeOpen,
-      office_start_hour: SL_PLAY_START_HOUR,
-      office_end_hour: SL_PLAY_END_HOUR,
+      office_start_hour: playHours.start,
+      office_end_hour: playHours.end,
       office_closes_at: officeOpen ? new Date(slOfficeCloseMs()).toISOString() : null,
       next_move_at: new Date(slNextOpenMs()).toISOString(),
       can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend && officeOpen,
@@ -3246,14 +3279,14 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   }
 
   // Bramka: w weekend nie gramy — dokładnie jak w Wordle.
-  if (isWeekendStr(today)) {
+  if (isWeekendStr(today) && !slPlayHours().weekends) {
     return res.status(400).json({ error: 'W weekend nie gramy — wróć w poniedziałek.', is_weekend: true });
   }
 
   // Bramka: gra biurowa — rzucamy tylko w godzinach pracy (czasu Warszawy).
   if (!slOfficeOpenAt()) {
     return res.status(400).json({
-      error: `Rzucamy tylko w godzinach ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 — to gra biurowa.`,
+      error: `Rzucamy tylko w godzinach ${slPlayHours().start}:00–${slPlayHours().end}:00 — to gra biurowa.`,
       office_closed: true,
       next_open: new Date(slNextOpenMs()).toISOString()
     });
@@ -3482,7 +3515,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   });
 
   if (result.locked) {
-    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00 (albo dołóż sobie ruch Extra Move'em).` });
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${slPlayHours().start}:00 a ${slPlayHours().end}:00 (albo dołóż sobie ruch Extra Move'em).` });
   }
 
   // Plansza u gracza była nieaktualna — rzut się NIE odbył (limit dzienny nietknięty).
@@ -3728,12 +3761,12 @@ app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
   // spalić power-up na ruch, którego i tak nie da się wykonać, odmawiamy użycia.
   // (Freeze/Curse/Shield celowo bez tej bramki: one czekają na swój moment.)
   if (type === 'double_move') {
-    if (isWeekendStr(today)) {
+    if (isWeekendStr(today) && !slPlayHours().weekends) {
       return res.status(400).json({ error: 'W weekend nie gramy — zostaw Extra Move na poniedziałek.', is_weekend: true });
     }
     if (!slOfficeOpenAt()) {
       return res.status(400).json({
-        error: `Extra Move daje ruch od ręki, a biuro jest zamknięte — użyj go między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.`,
+        error: `Extra Move daje ruch od ręki, a biuro jest zamknięte — użyj go między ${slPlayHours().start}:00 a ${slPlayHours().end}:00.`,
         office_closed: true
       });
     }
@@ -3922,10 +3955,41 @@ app.get('/api/snakes/admin/settings', (req, res) => {
     // Panel pokazuje koszty pod nazwami, które widzi gracz — inaczej admin czytałby
     // surowy klucz `double_move`, gdy reszta gry mówi o nim „Extra Move".
     powerup_labels: SL_POWERUP_LABELS,
+    play_hours: slPlayHours(),
     boss_enabled: boss.slBossEnabled(),
     // null = boss wyłączony; panel czyta to jako „nie ma czym sterować" (patrz renderInfo).
     coop: boss.slBossEnabled() ? boss.slCoopPayload(null) : null
   });
+});
+
+// POST /api/snakes/admin/play-hours { password, start, end, weekends } albo { password, reset: true }
+// Okno, w którym wolno rzucać (godziny czasu Warszawy, `end` wyłącznie, 24 = do północy).
+// Głównie na testy: 0–24 z weekendami zdejmuje blokadę całkiem. `reset` wraca do okna
+// z env (SNAKES_PLAY_*_HOUR). Liczba dziennych ruchów się nie zmienia — dalej liczy się
+// po dniu kalendarzowym, więc szersze okno nie daje nikomu dodatkowych rzutów.
+app.post('/api/snakes/admin/play-hours', (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  if (req.body.reset === true) {
+    db.prepare('DELETE FROM sl_meta WHERE key IN (?, ?, ?)')
+      .run(SL_PLAY_META_START, SL_PLAY_META_END, SL_PLAY_META_WEEKENDS);
+  } else {
+    const start = Number(req.body.start);
+    const end = Number(req.body.end);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > 23 || end < 1 || end > 24) {
+      return res.status(400).json({ error: 'Godziny muszą być liczbami całkowitymi: początek 0–23, koniec 1–24.' });
+    }
+    if (start >= end) {
+      return res.status(400).json({ error: 'Koniec okna musi być później niż początek.' });
+    }
+    transaction(() => {
+      slMetaSet(SL_PLAY_META_START, start);
+      slMetaSet(SL_PLAY_META_END, end);
+      slMetaSet(SL_PLAY_META_WEEKENDS, req.body.weekends ? '1' : '0');
+    });
+  }
+  const hours = slPlayHours();
+  console.log(`Snakes/Admin: okno gry ${hours.start}:00–${hours.end}:00${hours.weekends ? ' z weekendami' : ' (pon–pt)'}${hours.custom ? '' : ' — domyślne'}`);
+  res.json({ success: true, play_hours: hours });
 });
 
 // POST /api/snakes/admin/reset { password } — twardy reset CAŁEJ gry Snakes do stanu
@@ -4800,6 +4864,6 @@ app.listen(PORT, () => {
   console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
   // Znacznik wersji w logach — po deployu widać w `pm2 logs`, czy wstał nowy kod.
   console.log(`Bonus za szybkość: pierwsze ${SPEED_BONUS_PLACES} osób dnia (+${SPEED_BONUS_PLACES}…+1 pkt)`);
-  console.log(`Snakes: ${SL_DAILY_ROLLS} ruchy dziennie, do wykorzystania ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 (pon–pt, Europe/Warsaw), bez odstępu między ruchami`);
+  console.log(`Snakes: ${SL_DAILY_ROLLS} ruchy dziennie, domyślnie ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 (pon–pt, Europe/Warsaw; okno zmienia się w panelu admina), bez odstępu między ruchami`);
   startDiscordScheduler();
 });

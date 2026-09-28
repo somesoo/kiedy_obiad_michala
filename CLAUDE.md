@@ -448,9 +448,15 @@ rm -rf db   # na koniec
 - Zawsze `node --check server.js`, `node --check lib/boss.js`, `node --check lib/seasons.js` i `node --check public/snakes.js`.
   Skrypt panelu admina siedzi inline w `snakes-admin.html` — trzeba go wyciąć, żeby
   sprawdzić składnię.
-- **Rzuty działają tylko w oknie gry** (pon–pt, 8:00–16:00). Testując w weekend, podnieś
-  serwer z atrapą zegara: `node --require faketime.js server.js`, gdzie preload nadpisuje
-  `global.Date` klasą przesuniętą o stałą różnicę. Nie modyfikuj do tego kodu projektu.
+- **Rzuty działają tylko w oknie gry** (domyślnie pon–pt, 8:00–16:00). Okno zmienia się
+  w panelu admina (karta „Godziny gry", `POST /api/snakes/admin/play-hours` z
+  `{start, end, weekends}` albo `{reset: true}`) i siedzi w `sl_meta`
+  (`play_start_hour`, `play_end_hour`, `play_weekends`). „Bez blokady" = 0–24 z weekendami.
+  Na produkcji pamiętaj wrócić do domyślnych — to ustawienie przeżywa restart. Serwer czyta
+  okno zawsze przez `slPlayHours()`, nigdy wprost ze stałych `SL_PLAY_*_HOUR` (to tylko
+  domyślne z env). Do testów konkretnej daty (np. Halloween) dalej przydaje się atrapa zegara:
+  `node --require faketime.js server.js`, gdzie preload nadpisuje `global.Date` klasą
+  przesuniętą o stałą różnicę. Nie modyfikuj do tego kodu projektu.
 - Bossa najszybciej ustawia się w dowolnym stanie przez `POST /api/snakes/admin/coop/boss`
   z `{hp}`, a przegraną wymusza `POST /api/snakes/admin/coop/config` z `deadline_at`
   w przeszłości (rozlicza się od razu, bez czekania na tik schedulera).
@@ -492,6 +498,7 @@ rm -rf db   # na koniec
   wszystkich stronach. Do tego `.lb-row`, `.lb-rank`, `.lb-nick` i `:root` są zdefiniowane
   po dwa razy — pierwszy zestaw jest w całości nadpisywany, więc zmiany w nim nie działają.
 - **Regulamin w `snakes.html` ma zaszyte na sztywno godziny gry (8:00–16:00)** w trzech
-  miejscach. Zmiana `SNAKES_PLAY_*_HOUR` sprawia, że zasady kłamią. Punkt o bossie jest
+  miejscach. Zmiana `SNAKES_PLAY_*_HOUR` albo okna w panelu admina sprawia, że zasady
+  kłamią (przycisk rzutu i odliczanie biorą godziny z payloadu, więc mówią prawdę). Punkt o bossie jest
   już wolny od tego problemu — składa go `slRenderBossRules()` ze stawek przysłanych
   w payloadzie, więc jest dobrym wzorcem na resztę.
