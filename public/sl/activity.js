@@ -235,30 +235,3 @@ document.getElementById('activity-list').addEventListener('keydown', e => {
 
 
 document.getElementById('activity-date').addEventListener('change', e => loadActivity(e.target.value || null));
-
-async function loadState() {
-  try {
-    state.game = await api('GET', '/api/snakes/state');
-    renderAll();
-    updateCountdown();
-  } catch (e) {
-    console.error('Błąd ładowania gry:', e);
-  }
-}
-
-function renderAll() {
-  const g = state.game;
-  if (!g) return;
-  applySeason(g.board);
-  renderStats(g);
-  renderBoard(g);
-  renderShop(g);
-  // Garderobę przerysowujemy tylko, gdy jest otwarta — inaczej i tak jej nie widać.
-  if (document.getElementById('wardrobe').style.display === 'flex') renderCostumes(g);
-  document.getElementById('btn-wardrobe').hidden = !!slBoardView(g.board).shop_at;
-  renderLeaderboard(g);
-  renderRollButton(g);
-  renderCoop(g);
-  renderBossChip(g);
-  slMaybeCrown(g);
-}

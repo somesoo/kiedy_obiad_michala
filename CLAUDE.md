@@ -1,15 +1,69 @@
 # Kiedy obiad Michała — notatki dla Claude
 
-Biurowe gry dla ~15 osób. `server.js` (~4700 linii, Express) + `lib/boss.js` (walka
-z bossem), front to czysty JS/HTML/CSS w `public/` — **bez bundlera i bez kroku
-budowania**. Baza: SQLite przez `node:sqlite`. Wdrożenie: pm2 na małym VPS-ie, właściciel
-przeładowuje ręcznie.
+Biurowe gry dla ~15 osób. Express + SQLite (`node:sqlite`), front to czysty JS/HTML/CSS
+w `public/` — **bez bundlera i bez kroku budowania**. Wdrożenie: pm2 na małym VPS-ie,
+właściciel przeładowuje ręcznie. Serwis to dziś **Snakes Game** pod `/snakes` (`/`
+przekierowuje); zakończony Wordle żyje jako archiwum pod `/wordle`.
 
-`lib/boss.js` jest **fabryką**: `require('./lib/boss')({ db, transaction, … })` dostaje
-helpery ze `server.js` zamiast importować je z powrotem (inaczej byłby cykl importów,
-a przy jednym pliku bazy dwa uchwyty to „database is locked"). Podpięcie jest w jednym
-miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swoje tabele
-(`initSchema`), odpala migracje, rejestruje trasy i scheduler terminu.
+## Mapa modułów
+
+`server.js` (~1800 linii) to **rdzeń i miejsce spinania**: Express, baza, logowanie graczy,
+wersjonowanie frontu, schemat i migracje Snakes, stan gracza, rzut kostką i podpięcie
+modułów. Reszta siedzi w fabrykach:
+
+| Plik | Co | Podpięcie w `server.js` (szukaj) |
+|---|---|---|
+| `lib/time.js` | czas Warszawy, dni robocze (czyste funkcje) | `require('./lib/time')` |
+| `lib/wordle.js` | cały Wordle: schemat, hasła, słownik, trasy, Discord | `require('./lib/wordle')` |
+| `lib/activity.js` | dziennik: zapis, klucze tur, moderacja + trasy dziennika | `require('./lib/activity')` |
+| `lib/board.js` | **silnik planszy**: aktywny sezon, pola, ruch, rozstaje, zbicia, payload | `require('./lib/board')` |
+| `lib/discord.js` | szyna zdarzeń Discorda (`slEmit`, przełączniki) | `require('./lib/discord')` |
+| `lib/boss.js` | walka z bossem (schemat, rozliczenia, trasy, scheduler) | `const boss = require` |
+| `lib/costumes.js` | kostiumy i skiny wsparcia | `const costumes = require` |
+| `lib/seasonal.js` | kocioł, drzwi, cukierki (`events` z pliku planszy) | `const seasonal = require` |
+| `lib/crowning.js` | zamknięcie sezonu: archiwum, medale, ukoronowanie | `const crowning = require` |
+| `lib/shop.js` | power-upy, klątwy, cennik z rankingu, tarcza + trasy sklepu | `require('./lib/shop')` |
+| `routes/snakes-admin.js` | reszta panelu admina Snakes | `require('./routes/snakes-admin')` |
+| `lib/seasons.js`, `boards/*.js` | format i walidacja planszy, pliki sezonów | `require('./lib/seasons')` |
+
+**Fabryka** = `require('./lib/x')({ db, transaction, … })`: moduł dostaje helpery ze
+`server.js` zamiast importować je z powrotem (inaczej byłby cykl importów, a przy jednym
+pliku bazy dwa uchwyty to „database is locked"). Zwraca to, czego potrzebuje reszta, a
+`server.js` rozpakowuje to w `const { … } = require(…)(…)`.
+
+**Kolejność podpięć ma znaczenie (TDZ).** Dawniej wszystko było hoistowanymi funkcjami
+w jednym pliku, więc migracja przy starcie mogła wołać funkcję zdefiniowaną niżej. Eksport
+fabryki to `const` — przed linią podpięcia rzuca `ReferenceError`. Stąd zasady:
+- kod wykonywany przy starcie (IIFE migracji, aktywacja planszy) może wołać tylko to, co
+  podpięto WYŻEJ (albo hoistowane funkcje z `server.js`, które same tego nie robią),
+- zależności fabryki muszą istnieć w chwili podpięcia; po coś, co powstaje później, sięga
+  się przez hoistowaną funkcję-pośrednika (wzorzec: `slBonusesOff()` → `seasonal`),
+- **zmiennego stanu nie przekazuje się wartością**: aktywny sezon ma tylko jeden właściciel
+  (`lib/board.js`) i czyta się go przez `slCurrentBoard()`, a zmienia przez `slSetBoard()`.
+
+Front Snakes to kilka zwykłych `<script>` (kolejność w `snakes.html`): biblioteki rysunków
+`public/sl/art-effects.js` (`SL_EFFECTS`), `art-decor.js` (`SL_DECOR`), `art-costumes.js`
+(`SL_COSTUME_ART`), potem `sl/board.js` (rysowanie planszy i pionka), `sl/activity.js`,
+`sl/boss.js`, `sl/ranking.js`, a na końcu `public/snakes.js` (rdzeń: stan, API, logowanie,
+rzut, sklep; woła `init()`). Pliki dzielą globalne nazwy, więc **kod wykonywany przy
+wczytaniu pliku może sięgać tylko po ten plik i wcześniejsze** (listener z `openWardrobe`
+podanym wprost w pliku ładowanym przed jego definicją rozsypie stronę; strzałka
+`() => openWardrobe()` jest bezpieczna). Nowy plik frontu dopisz do `snakes.html` **i** do
+`SNAKES_SCRIPTS` w `server.js` — inaczej nie wejdzie do `?v=` i przeglądarki zostaną przy
+starej wersji.
+
+## Jak dodać nowy sezon (planszę)
+
+1. `boards/<id>.js` — kształt, drabiny, węże, bonusy, `events`, `view`, `special_boss`;
+   wzorce: `boards/default.js` (siatka), `boards/halloween.js` (układ swobodny). Z flagą
+   `testing: true`, dopóki nikt na nim naprawdę nie gra (patrz niżej).
+2. `public/themes/<motyw>.css` — kolory i style efektów (`fx-<nazwa>` na `<body>`).
+3. Nowe ozdoby → wpisy w `SL_DECOR` (`public/sl/art-decor.js`), nowe efekty → `SL_EFFECTS`
+   (`art-effects.js`), nowe kostiumy → katalog w `lib/costumes.js` + rysunek pod tym samym
+   id w `SL_COSTUME_ART` (`art-costumes.js`). Payload niesie tylko nazwy, nieznane są pomijane.
+4. Nowy RODZAJ pola albo nowa reguła ruchu → `lib/board.js` (`slResolveTileEffect`) i
+   rysowanie w `public/sl/board.js`; nowa mechanika sezonowa → `lib/seasonal.js`.
+5. Restart serwera (plansza z błędem nie trafi na listę, powód w logu) i przełączenie w panelu.
 
 **Nie ma testów, lintera ani CI.** Każda zmiana musi być sprawdzona ręcznie (patrz
 „Jak testować"). To główny powód, dla którego duże refaktory są tu złym pomysłem.
@@ -18,12 +72,12 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 
 | Obszar | Gdzie | Stan |
 |---|---|---|
-| **Snakes & Ladders** (prefiks `sl*`) | większość `server.js`, `public/snakes*` | **aktywna gra, tu idzie cała praca** |
+| **Snakes & Ladders** (prefiks `sl*`) | `server.js` + moduły z „Mapy modułów", `public/snakes*`, `public/sl/` | **aktywna gra, tu idzie cała praca** |
 | **Sezony planszy** | `boards/*.js`, `lib/seasons.js`, `public/themes/` | plansza = plik; admin przełącza sezon |
 | **Zamknięcie sezonu** | `lib/crowning.js`, `slCloseSeasonAndInstall` w `server.js` | archiwum rankingu, medale, podium, wszyscy od zera |
 | **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
-| **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/snakes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
-| **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
+| **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/sl/art-costumes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
+| **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/sl/boss.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
 | **Wordle po polsku** (archiwum) | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **zakończony 2026-08-31** przez `GAME_END_AT`, trwale zablokowany i już nie wróci. Kod zostaje: strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). W rdzeniu zostało tylko to, czego używa też Snakes: `players`, `/api/register`, `/api/me`. Nie inwestuj tu czasu bez wyraźnej prośby. |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
 
@@ -59,7 +113,7 @@ w logu, gdy liczba pól sezonu bez `testing` się zmieniła.
 - Motyw: `public/themes/<theme>.css` doładowywany z payloadu, a efekty to klasy `fx-<nazwa>`
   na `<body>`. Warstwy efektów muszą żyć **poza** `#board-area`, bo `renderBoard` podmienia
   jej `innerHTML`. Efekty rysuje `renderSeasonEffects` do `#season-fx` (biblioteka
-  `SL_EFFECTS` w `snakes.js`); nieznana nazwa efektu jest pomijana.
+  `SL_EFFECTS` w `public/sl/art-effects.js`); nieznana nazwa efektu jest pomijana.
 
 **Układ swobodny (`layout: 'free'`, wzorzec: `boards/halloween.js`).** Pola nie siedzą
 w kratkach, tylko stoją w UŁAMKOWYCH punktach, więc droga może iść po krzywej (Noc Duchów
@@ -71,7 +125,7 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
 - Wygląd z pliku jedzie w `board.view` (`layout`, `tile`, `road: 'smooth'`, `closed`,
   `links: 'drawn'`, `loop_label`, `marks`, `confetti`, `decor`). Serwer tylko go przekazuje;
   front czyta przez `slBoardView()` z domyślnymi, więc plansza bez `view` wygląda klasycznie.
-- `decor` niesie tylko `kind` + pozycję. Rysunki SVG siedzą w `SL_DECOR` w `snakes.js`,
+- `decor` niesie tylko `kind` + pozycję. Rysunki SVG siedzą w `SL_DECOR` w `public/sl/art-decor.js`,
   a payload **nigdy** nie niesie znaczników — nieznany `kind` jest pomijany.
 - Tor zamknięty, który przecina sam siebie, rysuje drogę w **dwóch kawałkach** z własnym
   obrzeżem — drugi kładzie się na pierwszy jak mostek.
@@ -118,7 +172,7 @@ Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woł
 - **Ukoronowanie:** `crowning` w stanie gracza jest niepuste tylko dla OSTATNIEGO zamknięcia,
   tylko dla tych, którzy są w jego wynikach, i tylko dopóki `sl_state.crowned_seen` < id
   zamknięcia. Pamięć jest na serwerze, a nie w localStorage — raz na osobę, nie na urządzenie.
-  Front: `slMaybeCrown` w `snakes.js`, nakładka w `<body>` (poza `#board-area`).
+  Front: `slMaybeCrown` w `public/sl/ranking.js`, nakładka w `<body>` (poza `#board-area`).
 - **Kostiumy mają `season`** w katalogu — kupić można tylko te z aktywnego sezonu (albo bez
   `season`), a kupione wcześniej dalej się nosi. Obecny zestaw jest oznaczony `'halloween'`,
   więc na planszy `default` nie jest w sprzedaży.
@@ -426,7 +480,7 @@ kolejny restart go nie wskrzesza.
 
 Nazwa flagi niesie **wersję mechaniki**. Kolejna przebudowa, która ma wystartować bossa od
 nowa = podbicie numeru (`boss_relaunch_v3_done`); stara flaga zostaje i niczego nie blokuje.
-Ten sam wzorzec ma baner w UI (`BOSS_NOTICE_VERSION` w `public/snakes.js`) — podbicie
+Ten sam wzorzec ma baner w UI (`BOSS_NOTICE_VERSION` w `public/sl/boss.js`) — podbicie
 wersji sprawia, że ogłoszenie wraca wszystkim, także tym, którzy zamknęli poprzednie.
 
 ## Jak testować
@@ -445,7 +499,8 @@ rm -rf db   # na koniec
   więc do testów wystarczy sztuczny plik z poprawnym nagłówkiem.
 - Boss bywa domyślnie wyłączony — włącz przez `POST /api/snakes/admin/coop/toggle`.
 - Admin: GET/DELETE biorą `?password=`, POST bierze `{password}` w ciele.
-- Zawsze `node --check server.js`, `node --check lib/boss.js`, `node --check lib/seasons.js` i `node --check public/snakes.js`.
+- Zawsze `node --check` na każdym zmienionym pliku: `server.js`, `lib/*.js`, `routes/*.js`,
+  `public/snakes.js`, `public/sl/*.js`.
   Skrypt panelu admina siedzi inline w `snakes-admin.html` — trzeba go wyciąć, żeby
   sprawdzić składnię.
 - **Rzuty działają tylko w oknie gry** (domyślnie pon–pt, 8:00–16:00). Okno zmienia się
