@@ -514,7 +514,10 @@
   stroke: var(--accent);
   filter: drop-shadow(0 0 4px rgba(200, 241, 53, 0.7));
 }
-@keyframes sl-wing   { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(-16deg) scaleX(0.72); } }
+/* Kupione skrzydła demona zostają krwiste także na moim pionku — za kolor się płaci,
+   więc zielony „to ja" by go zjadał. Znacznikiem zostaje sama poświata. */
+.sl-pawn-me .sl-pawn-wing.w-demon_wings { fill: #A50E1C; stroke: #4A0309; }
+@keyframes sl-wing  { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(-16deg) scaleX(0.72); } }
 @keyframes sl-wing-r { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(16deg) scaleX(0.72); } }
 /* Uszka nietoperza — bez nich to „kółko ze skrzydłami". Czapka je chowa. */
 .sl-pawn-wrap.wings-bat_wings:not(.has-hat)::before,
