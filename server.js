@@ -1760,7 +1760,8 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
             title: `Edycja #${result.boss_hit.victory.cycle}`,
             url: SNAKES_URL,
             description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** coins.`
-              + boss.slBossPayoutLines(result.boss_hit.victory),
+              + boss.slBossPayoutLines(result.boss_hit.victory)
+              + (result.boss_hit.victory.season_over ? '\n\n🏁 To był boss sezonu — do końca sezonu walk z bossem już nie będzie.' : ''),
             color: 0x53D06B
           }]
         }));

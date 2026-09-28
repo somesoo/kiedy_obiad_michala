@@ -11,6 +11,21 @@ function renderBossChip(g) {
   const chip = document.getElementById('boss-chip');
   const c = g.coop;
   renderSpecialBossTeaser(c);
+  // Po bossie sezonu kafelek zostaje, ale bez paska: sam wynik. Klik otwiera kartę
+  // z rozpiską, żeby każdy dalej mógł sprawdzić, co dostał albo ile stracił.
+  if (c && c.season_over) {
+    const so = c.season_over;
+    const verdict = so.defeated ? '🏆 pokonany' : so.settled ? '💀 zaatakował' : '⌛ po terminie';
+    chip.hidden = false;
+    chip.classList.remove('is-low');
+    chip.classList.add('is-special');
+    chip.innerHTML = `
+    <span class="boss-chip-name">${esc(so.emoji)} ${esc(so.name)}</span>
+    <span class="boss-chip-hp mono">${verdict}</span>
+    <span class="boss-chip-arrow" aria-hidden="true">▾</span>`;
+    chip.title = `${so.name} był jedynym bossem tego sezonu — do jego końca walk już nie będzie.`;
+    return;
+  }
   if (!c || !c.boss) { chip.hidden = true; slToggleCoopPop(false); return; }
   const b = c.boss;
   const sp = c.special_boss && c.special_boss.active ? c.special_boss : null;
@@ -406,6 +421,25 @@ function renderCoop(g) {
   // Boss wyłączony (serwer nie przysyła wtedy coop) — chowamy i panel, i punkt regulaminu
   // o walce, żeby zasady nie opisywały czegoś, czego w grze nie ma.
   const rulesItem = document.getElementById('rules-boss');
+  // Boss sezonu ma już wynik: zamiast walki karta „koniec walk w tym sezonie" z rozpiską.
+  // Regulamin walki i ogłoszenie znikają — opisywałyby coś, czego do końca sezonu nie ma.
+  if (c && c.season_over) {
+    const so = c.season_over;
+    const head = so.defeated ? `🏆 Boss sezonu pokonany: ${esc(so.name)}`
+      : so.settled ? `💀 Boss sezonu zaatakował: ${esc(so.name)}`
+      : `⌛ Termin bossa sezonu minął: ${esc(so.name)}`;
+    el.style.display = '';
+    if (rulesItem) rulesItem.style.display = 'none';
+    slRenderBossNotice(null);
+    el.innerHTML = `
+    <div class="coop-row-main">
+      <span class="coop-emoji">${esc(so.emoji)}</span>
+      <span class="coop-name">${head}</span>
+    </div>
+    <div class="hud-foot">To był jedyny boss tego sezonu — do jego końca walk z bossem już nie będzie.</div>
+    <div class="hud-sections">${slCoopPrevBossHtml(c.previous_result)}</div>`;
+    return;
+  }
   if (!c || !c.boss) {
     el.innerHTML = '';
     el.style.display = 'none';

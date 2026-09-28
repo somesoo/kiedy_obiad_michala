@@ -1239,6 +1239,17 @@
         return;
       }
 
+      if (c.season_over) {
+        const so = c.season_over;
+        document.getElementById('coop-info').innerHTML =
+          `${esc(so.emoji)} <strong>Boss sezonu ${esc(so.name)}: ${so.defeated ? 'POKONANY' : so.settled ? 'ZAATAKOWAŁ (przegrana)' : 'termin minął bez walki'}</strong><br>` +
+          'To był jedyny boss tego sezonu — do jego końca żadna walka nie wystartuje (także po wyłączeniu i włączeniu bossa). ' +
+          'Wróci dopiero w sezonie bez bossa sezonowego albo w kolejnym roku.' +
+          renderPrevPayouts(c.previous_result);
+        document.getElementById('boss-info').innerHTML = '';
+        return;
+      }
+
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong><br>` +
         (c.boss ? `Nagroda dla wpłacających: wpłata × ${c.boss.points_per_coin} w pkt · zwrot ${Math.round(c.boss.refund_rate * 100)}% wpłaty · ryczałt +${c.boss.fighter_points} pkt od ${c.boss.fighter_min_coins} coins · podium +${c.boss.podium_points.join('/+')} pkt · kamienie milowe 75/50/25% po +${c.boss.milestone_points} pkt<br>` : '') +
@@ -1367,7 +1378,7 @@
         cfg.coop = res.coop;
         renderInfo();
         showToast(res.resolved
-          ? `🏆 HP zeszło do zera — ${res.boss_name} pokonany, nagrody wypłacone, rusza edycja #${res.resolved.next_cycle.cycle}.`
+          ? `🏆 HP zeszło do zera — ${res.boss_name} pokonany, nagrody wypłacone, ${res.resolved.next_cycle ? `rusza edycja #${res.resolved.next_cycle.cycle}` : "to był boss sezonu — koniec walk w tym sezonie"}.`
           : `✅ ${res.boss_name}: HP ${res.hp}/${res.max_hp}`);
       } catch (e) {
         showToast(e.message);
@@ -1391,7 +1402,7 @@
         await loadPlayers();
         const credit = res.credited_to ? ` (zapisane na ${res.credited_to})` : '';
         showToast(res.resolved
-          ? `🏆 ${res.boss_name} pokonany${credit} — nagrody wypłacone, rusza edycja #${res.resolved.next_cycle.cycle}.`
+          ? `🏆 ${res.boss_name} pokonany${credit} — nagrody wypłacone, ${res.resolved.next_cycle ? `rusza edycja #${res.resolved.next_cycle.cycle}` : "to był boss sezonu — koniec walk w tym sezonie"}.`
           : `🗡️ ${damage > 0 ? `-${damage}` : `+${-damage}`} HP${credit} — ${res.boss_name}: ${res.hp}/${res.max_hp}`);
       } catch (e) {
         showToast(e.message);

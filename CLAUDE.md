@@ -182,15 +182,31 @@ Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woł
 ## Boss sezonu (`special_boss` w pliku planszy)
 
 Sezon może mieć **jednego** bossa na cały czas trwania (Noc Duchów: Dynia Zagłady do nocy
-Halloween). `slEnsureSpecialBoss()` (start serwera, przełączenie sezonu, każdy tik
-schedulera) wystawia go OD RAZU: trwającą zwykłą walkę zamyka **bez nagród i bez kar**,
-a wpłacone w nią coins wracają wierszem `season_refund` w `sl_boss_payouts` (cofanie go
-widzi, bo czyta rejestr). HP = `hp_per_workday` × dni robocze do `attack_at`; termin zawsze
-`attack_at`. Daty w pliku są bez roku, a klucz edycji (`sl_coop.special` =
-`'halloween-2026'`) pilnuje, żeby po wygranej/przegranej boss nie wrócił w tym samym roku.
-Dni liczą się od NASTĘPNEGO dnia roboczego. Dynia ma 900 HP za dzień, czyli 18 000 przy
-włączeniu 2.10. To świadomie bardzo trudny boss: rzuty dają ~7 900 HP, resztę musi dołożyć
-prawie cały dochód ekipy. Przy dawnych 1100 był arytmetycznie nie do ubicia.
+Halloween) i jest to **jedyny boss tego sezonu** — zwykłe, losowe bossy się w nim nie pojawiają.
+Stan liczy `slSeasonBossState()` w `lib/boss.js`:
+
+- `'regular'` — sezon bez `special_boss`, zwykła rotacja bossów.
+- `'special'` — boss sezonu nie ma jeszcze wyniku i jest przed `attack_at`: ma walczyć TERAZ.
+  `slEnsureSpecialBoss()` (start serwera, przełączenie sezonu, każdy tik schedulera) wystawia
+  go OD RAZU: trwającą zwykłą walkę zamyka **bez nagród i bez kar**, a wpłacone w nią coins
+  wracają wierszem `season_refund` w `sl_boss_payouts` (cofanie go widzi, bo czyta rejestr).
+  Zwrot idzie tylko z TRWAJĄCEJ walki — z zamkniętej byłby drukowaniem coins.
+- `'over'` — boss sezonu wygrany albo przegrany w tym roku, albo minął `attack_at`: **do końca
+  sezonu nie ma żadnej walki**. `slCoopInsertCycle` wtedy niczego nie otwiera (wygrana,
+  przegrana, włącznik w panelu, zamknięcie sezonu dostają ostatni zamknięty cykl), payload ma
+  `boss: null` i `season_over`, a front pokazuje kartę z wynikiem zamiast walki.
+
+**Wynik to WYŁĄCZNIE prawdziwe rozliczenie**: `boss_defeated_at` albo wiersze `penalty`
+w rejestrze (`slSpecialSettledCycle`). Techniczne domknięcie walki (przełączenie albo
+zamknięcie sezonu, wyłącznik bossa) wynikiem nie jest, więc boss sezonu po nim wraca.
+Dawniej blokował go DOWOLNY cykl z kluczem edycji — każde przełączenie sezonu w testach
+„spalało" Dynię i Noc Duchów dostawała losowe bossy, także po jej pokonaniu (wrzesień 2026).
+
+HP = `hp_per_workday` × dni robocze do `attack_at` (co najmniej 1 dzień), liczone od
+NASTĘPNEGO dnia roboczego; termin zawsze `attack_at`. Daty w pliku są bez roku, a klucz edycji
+(`sl_coop.special` = `'halloween-2026'`) odróżnia lata. Dynia ma **800 HP za dzień** (decyzja
+właściciela), czyli 16 000 przy włączeniu 2.10. Świadomie trudna: rzuty dają ~7 900 HP, resztę
+muszą dołożyć wpłaty. Przy dawnych 1100 była arytmetycznie nie do ubicia.
 
 **Sezon z bossem trzeba wyłączyć przed 1.01 następnego roku.** Inaczej scheduler policzy
 termin na 31.10 kolejnego roku z nowym kluczem i wystawi Dynię z limitem 60 dni roboczych.
