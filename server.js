@@ -61,7 +61,13 @@ app.use(express.json());
 // adres, więc przeglądarka MUSI pobrać go na nowo, a gdy plik się nie zmienił, adres
 // zostaje ten sam i cache nadal działa (skrót treści, nie czas startu — inaczej każdy
 // restart pm2 kasowałby cache wszystkim bez powodu).
-const VERSIONED_ASSETS = ['style.css', 'snakes.css', 'snakes.js', 'app.js'];
+// Skrypty frontu Snakes w kolejności ze snakes.html. Nowy plik w public/sl/ trzeba dopisać
+// TUTAJ i tam — inaczej jego zmiana nie ruszy ?v= i przeglądarki zostaną przy starej wersji.
+const SNAKES_SCRIPTS = [
+  'sl/art-effects.js', 'sl/art-decor.js', 'sl/art-costumes.js',
+  'sl/board.js', 'sl/activity.js', 'sl/boss.js', 'sl/ranking.js', 'snakes.js'
+];
+const VERSIONED_ASSETS = ['style.css', 'snakes.css', ...SNAKES_SCRIPTS, 'app.js'];
 const ASSET_VERSION = (() => {
   const hash = crypto.createHash('sha1');
   for (const name of VERSIONED_ASSETS) {

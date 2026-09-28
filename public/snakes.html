@@ -241,6 +241,15 @@
   <!-- WIĘKSZY PODGLĄD ZDJĘCIA PO NAJECHANIU (pionki na planszy + wybór celu) -->
   <div class="avatar-hover-preview" id="avatar-hover-preview" style="display:none" aria-hidden="true"></div>
 
+  <!-- Front bez bundlera: kolejność ma znaczenie (snakes.js na końcu, bo woła init()).
+       Nowy plik dopisz też do SNAKES_SCRIPTS w server.js — inaczej nie wejdzie do ?v=. -->
+  <script src="sl/art-effects.js"></script>
+  <script src="sl/art-decor.js"></script>
+  <script src="sl/art-costumes.js"></script>
+  <script src="sl/board.js"></script>
+  <script src="sl/activity.js"></script>
+  <script src="sl/boss.js"></script>
+  <script src="sl/ranking.js"></script>
   <script src="snakes.js"></script>
 </body>
 </html>
