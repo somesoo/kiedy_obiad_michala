@@ -126,7 +126,56 @@ function renderBoard(g) {
       </div>
     </div>
     ${renderLegend(board, g.season_events)}`;
+  // Plansza właśnie podmieniła innerHTML — podświetlenie z rankingu trzeba nałożyć od nowa,
+  // inaczej odświeżenie co 10 s gasiłoby je pod kursorem.
+  slSpotApply();
 }
+
+// ── „GDZIE ON JEST?" — najechanie na wiersz rankingu wskazuje pole gracza ──
+// Pole niesie w data-players WSZYSTKICH, którzy na nim stoją (także schowanych za „+N"
+// w układzie 'free'), więc wskazujemy pole, a pionek dodatkowo, jeśli jest narysowany.
+// Gracz bez zdjęcia nie ma pionka na planszy — wtedy po prostu nic się nie świeci.
+let slSpotPlayer = null;
+
+function slSpotApply() {
+  const area = document.getElementById('board-area');
+  if (!area) return;
+  area.querySelectorAll('.is-spot').forEach(el => el.classList.remove('is-spot'));
+  const boardEl = area.querySelector('.sl-board');
+  const cell = slSpotPlayer != null && area.querySelector(`.sl-cell[data-players~="${slSpotPlayer}"]`);
+  if (boardEl) boardEl.classList.toggle('has-spot', !!cell);
+  if (!cell) return;
+  cell.classList.add('is-spot');
+  const pawn = cell.querySelector(`.sl-pawn-wrap[data-tip-player="${slSpotPlayer}"]`);
+  if (pawn) pawn.classList.add('is-spot');
+}
+
+function slSpotSet(playerId) {
+  if (slSpotPlayer === playerId) return;
+  const area = document.getElementById('board-area');
+  // Na zatłoczonym polu wskazany gracz może siedzieć w „+N" bez pionka. Wtedy przerysowujemy
+  // planszę, a renderCell pokazuje jego zamiast mojego — i przy zjechaniu wraca mój.
+  const hidden = id => id != null && area
+    && !!area.querySelector(`.sl-cell[data-players~="${id}"]`)
+    && !area.querySelector(`.sl-pawn-wrap[data-tip-player="${id}"]`);
+  const swapped = hidden(playerId) || (slSpotPlayer != null && !!area && !!area.querySelector(
+    `.sl-cell[data-players~="${slSpotPlayer}"] .sl-pawn-more`));
+  slSpotPlayer = playerId;
+  if (swapped && state.game) renderBoard(state.game);
+  else slSpotApply();
+}
+
+// Delegacja na document, bo ranking przerysowuje się co 10 s. Tylko wiersze rankingu —
+// pionek na planszy ma to samo data-tip-player, ale wskazywanie samego siebie nic nie daje.
+// Archiwalne wiersze nie mają data-tip-player (pole z końca sezonu to nie pole na planszy).
+document.addEventListener('mouseover', e => {
+  const row = e.target.closest && e.target.closest('.lb-row[data-tip-player]');
+  if (row) slSpotSet(Number(row.dataset.tipPlayer));
+});
+document.addEventListener('mouseout', e => {
+  const row = e.target.closest && e.target.closest('.lb-row[data-tip-player]');
+  if (row && !row.contains(e.relatedTarget)) slSpotSet(null);
+});
 
 // ── ZDARZENIA SEZONOWE NA POLACH (lib/seasonal.js) ──
 // Mapa pole → { kind, icon, title }. Pola zdarzeń nigdy nie są polami specjalnymi
@@ -521,7 +570,9 @@ function renderCell(idx, sp, players, posStyle, board, ev = null, twin = null) {
   let shown = players || [];
   let overflow = '';
   if (free && shown.length > 2) {
-    const ordered = [...shown].sort((a, b) => Number(!!b.is_me) - Number(!!a.is_me));
+    // Gracz wskazany z rankingu (slSpotPlayer) idzie przed mój pionek — ma go być widać.
+    const rank = p => (p.player_id === slSpotPlayer ? 2 : 0) + (p.is_me ? 1 : 0);
+    const ordered = [...shown].sort((a, b) => rank(b) - rank(a));
     shown = ordered.slice(0, 1);
     const rest = ordered.slice(1);
     overflow = `<span class="sl-pawn-more" title="${esc(rest.map(p => p.nickname).join(', '))}">+${rest.length}</span>`;
@@ -534,8 +585,9 @@ function renderCell(idx, sp, players, posStyle, board, ev = null, twin = null) {
     ghost: !!view.ghost_after_days && p.missed_workdays >= view.ghost_after_days,
     pushed: !!(state.pushFlash && state.pushFlash.has(p.player_id)),
   })).join('') + overflow;
+  const who = (players || []).map(p => p.player_id).join(' ');
   return `
-    <div class="${cls}" style="${posStyle}">
+    <div class="${cls}" style="${posStyle}"${who ? ` data-players="${who}"` : ''}>
       ${flag}
       <span class="sl-idx">${idxLabel}</span>
       ${mark}

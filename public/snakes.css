@@ -892,6 +892,35 @@
   line-height: 1;
 }
 
+/* „Gdzie on jest?" — najechanie na wiersz rankingu (slSpotApply w sl/board.js). Reszta
+   planszy przygasa, pole gracza dostaje poświatę, a jego pionek pulsuje. Gdy pionek jest
+   schowany za „+N" (tłok na małym polu), pulsuje licznik. Poświata idzie przez box-shadow,
+   bo .sl-cell ma overflow: hidden i powiększony pionek zostałby przycięty. */
+.sl-cell { transition: opacity 0.15s, box-shadow 0.15s; }
+.sl-board.has-spot .sl-cell:not(.is-spot) { opacity: 0.35; }
+/* Selektor przez .has-spot, bo motywy (np. nagrobki Nocy Duchów) mają własne box-shadow
+   na polach z mocniejszym selektorem i przykryłyby poświatę. */
+.sl-board.has-spot .sl-cell.is-spot {
+  z-index: 3;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 18px 4px var(--accent);
+}
+.sl-pawn-wrap.is-spot { z-index: 2; }
+.sl-pawn-wrap.is-spot .sl-pawn-avatar,
+.sl-cell.is-spot .sl-pawn-more { animation: sl-spot-pulse 0.9s ease-in-out infinite; }
+@keyframes sl-spot-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 0 var(--accent); }
+  50%      { box-shadow: 0 0 0 2px var(--accent), 0 0 10px 5px var(--accent); }
+}
+/* Kostium z kształtem przycina zdjęcie (clip-path), więc poświata na awatarze by zniknęła —
+   świeci cały pionek przez drop-shadow, który idzie po obrysie. */
+.has-shape.sl-pawn-wrap.is-spot .sl-pawn-avatar { animation: none; box-shadow: none; }
+.has-shape.sl-pawn-wrap.is-spot { filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 2px var(--accent)); }
+@media (prefers-reduced-motion: reduce) {
+  .sl-pawn-wrap.is-spot .sl-pawn-avatar,
+  .sl-cell.is-spot .sl-pawn-more { animation: none; box-shadow: 0 0 0 3px var(--accent); }
+}
+
 .sl-legend {
   flex: 0 0 auto;
   display: flex;
