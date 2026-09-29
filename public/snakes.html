@@ -36,6 +36,7 @@
       </div>
       <div class="header-user" id="header-user">
         <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">Zasady</button>
+        <a class="btn-ghost" id="btn-wordle" href="/wordle" title="Office Wordle — zakończony, ranking końcowy">Wordle</a>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
         <span class="user-nick" id="user-nick-display"></span>
         <span class="user-balance" id="user-balance-display"></span>
@@ -80,13 +81,13 @@
     <div class="how-inner">
       <button class="how-close" id="how-close">✕</button>
       <h3>Jak grać w Office Snakes &amp; Ladders?</h3>
-      <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty. Plansza zmienia kształt co sezon — przy zmianie wszyscy startują od pola 0, a punkty, coins i okrążenia zostają.</p>
+      <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty. Gra toczy się w <strong>sezonach</strong> i co sezon plansza zmienia kształt.</p>
       <ol>
         <li><strong>Zdjęcie profilowe — wymagane.</strong> Zanim zagrasz, wgraj zdjęcie (swoje albo dowolne inne) — to Twój pionek na planszy, okrągły awatar widoczny dla wszystkich. Najedź na czyjeś zdjęcie myszką, żeby zobaczyć nick. Bez zdjęcia nie da się rzucić kostką.</li>
         <li><strong>Trzy ruchy dziennie, w godzinach 8:00–16:00.</strong> To gra biurowa: rzucać można wyłącznie od poniedziałku do piątku <strong>między 8:00 a 16:00</strong> (czasu Warszawy). W tym oknie masz <strong>trzy rzuty kostką</strong> i <strong>sam decydujesz, kiedy je zużyjesz</strong> — trzy pod rząd rano albo po jednym przez cały dzień, bez żadnego odstępu między nimi. Po 16:00 przycisk jest zamknięty, nawet jeśli zostały Ci ruchy — niewykorzystane rzuty przepadają wraz z końcem dnia. W sobotę i niedzielę gra stoi — jak w Wordle, w weekend nie rzucamy.</li>
         <li><strong>Drabiny i węże.</strong> Wejdziesz na drabinę 🪜 — wskakujesz wyżej. Wdepniesz na węża 🐍 — zjeżdżasz w dół. Pola bonusowe ⭐ dają dodatkowe punkty bez ruchu. Na planszy <strong>każdy wąż i każda drabina ma narysowaną linię</strong> od pola startowego do docelowego: drabiny to proste, zielone linie w górę, węże to czerwone, wijące się krzywe w dół — od razu widać, dokąd prowadzą.</li>
         <li><strong>Wypychanie.</strong> Wylądujesz na polu zajętym przez kogoś innego — wypychasz go <strong>o losowe 3–6 pól do tyłu</strong> — dostajesz za to <strong>+10 pkt</strong> do rankingu i zabierasz mu do 10 coins (tyle, ile ma — jeśli ma mniej, zabierasz resztę; punkty dostajesz zawsze). Wypchnięty gracz normalnie odpala węże, drabiny i bonusy na polu, na które wylądował — czasem to i tak dobry deal. Cofnięcie zatrzymuje się na polu 0 bieżącego okrążenia — wypchnięcie nie zabiera okrążenia. <strong>Pole 0 (start)</strong> jest bezpieczne — stojącego tam gracza nie da się wypchnąć.</li>
-        <li><strong>Punkty i coins.</strong> Za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus) dostajesz jednocześnie jedno i drugie: <strong>tyle samo punktów co coins</strong>. <strong>Punkty</strong> się tylko kumulują i budują <strong>leaderboard</strong> — nie da się ich wydać. <strong>Coins</strong> to portfel: płacisz nimi w sklepie i wpłacasz je bossowi, więc twoje coins spadają, a punkty nigdy.</li>
+        <li><strong>Punkty i coins.</strong> Za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus) dostajesz jednocześnie jedno i drugie: <strong>tyle samo punktów co coins</strong>. <strong>Punkty</strong> przez cały sezon się tylko kumulują i budują <strong>leaderboard</strong> — nie da się ich wydać. <strong>Coins</strong> to portfel: płacisz nimi w sklepie i wpłacasz je bossowi, więc twoje coins spadają, a punkty nigdy.</li>
         <li><strong>Power-upy (za coins, nie losowo).</strong> W sklepie kupujesz:
           <ul>
             <li>❄️ <strong>Freeze</strong> — zatrzymuje wybranego gracza w jego następnej turze. <strong>Cel nie widzi, że jest zamrożony</strong> — przekona się dopiero, gdy kliknie „Rzuć". W dzienniku pojawia się tylko tyle, że ktoś użył Freeze; na kogo padło, wie wyłącznie rzucający.</li>
@@ -107,7 +108,8 @@
           </ul>
           Przy Freeze i Curse wybierasz <strong>cel</strong> — innego gracza. Jeśli cel ma tarczę, atak przepada.</li>
         <li id="rules-boss"><strong>👹 Walka z bossem.</strong> <span id="rules-boss-text">Boss walczy cały czas — bijecie mu HP.</span></li>
-        <li><strong>Rywalizacja bez końca.</strong> Nie ma zwycięskiego pola — liczy się, kto uzbiera najwięcej punktów i zrobi najwięcej okrążeń.</li>
+        <li><strong>Rywalizacja w sezonach.</strong> Nie ma zwycięskiego pola — liczy się, kto do końca sezonu uzbiera najwięcej punktów (przy remisie wygrywa więcej okrążeń, a potem dalsze pole).</li>
+        <li><strong>🏆 Koniec sezonu i medale.</strong> Gdy sezon się kończy, najlepsza trójka staje na <strong>podium</strong> i dostaje medal 🥇🥈🥉, który zostaje przy nicku na zawsze. Nowy sezon <strong>wszyscy zaczynają od zera</strong>: zerują się punkty, coins, okrążenia i ekwipunek, więc każdy ma równe szanse. Kostiumy zostają i można je dalej nosić, ale kostiumów z poprzedniego sezonu nie da się już kupić. Wyniki starych sezonów zobaczysz w rankingu, w zakładkach nad listą.</li>
       </ol>
     </div>
   </div>
@@ -149,6 +151,8 @@
 
       <div class="mini-card">
         <div class="mini-head">🏆 RANKING <span class="text-muted" id="players-count"></span></div>
+        <!-- Zakładki sezonów — widoczne dopiero po pierwszym zamknięciu sezonu. -->
+        <div class="lb-seasons" id="lb-seasons" hidden></div>
         <div id="leaderboard-list"></div>
       </div>
     </aside>
@@ -237,6 +241,15 @@
   <!-- WIĘKSZY PODGLĄD ZDJĘCIA PO NAJECHANIU (pionki na planszy + wybór celu) -->
   <div class="avatar-hover-preview" id="avatar-hover-preview" style="display:none" aria-hidden="true"></div>
 
+  <!-- Front bez bundlera: kolejność ma znaczenie (snakes.js na końcu, bo woła init()).
+       Nowy plik dopisz też do SNAKES_SCRIPTS w server.js — inaczej nie wejdzie do ?v=. -->
+  <script src="sl/art-effects.js"></script>
+  <script src="sl/art-decor.js"></script>
+  <script src="sl/art-costumes.js"></script>
+  <script src="sl/board.js"></script>
+  <script src="sl/activity.js"></script>
+  <script src="sl/boss.js"></script>
+  <script src="sl/ranking.js"></script>
   <script src="snakes.js"></script>
 </body>
 </html>

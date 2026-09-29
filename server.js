@@ -5,39 +5,13 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto'); // skrót zawartości plików frontu (patrz ASSET_VERSION)
+const { warsawParts, todayWaw, warsawWallTimeToMs, isWeekendStr, addBusinessDaysMs } = require('./lib/time');
 
 const app = express();
 const PORT = process.env.PORT || 31535;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123michal';
-
-// Pierwszy dzień gry (hasło o order_index = 1). Hasła lecą tylko w dni robocze (pon–pt),
-// więc numer hasła = ile dni roboczych minęło od WORD_START (włącznie), a weekendy pomijamy.
-// Hasła lecą w sposób ciągły, niezależnie od miesięcznego resetu sezonu.
-const WORD_START = process.env.WORDLE_WORD_START || process.env.WORDLE_SEASON_START || '2026-07-27';
-
-// Sezon = miesiąc kalendarzowy. Leaderboard/streak/punkty liczą się per sezon i zerują 1. dnia
-// miesiąca. Do końca lipca trwa okres testowy; konkurs startuje od tego sezonu:
-const CONTEST_START = process.env.WORDLE_CONTEST_START || '2026-08'; // 'YYYY-MM'
-
-const MONTHS_PL = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec',
-  'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];
-
-// ── PUNKTACJA ──
-const POINTS_PER_ATTEMPT_STEP = 10;   // baza = (max_prób - N + 1) * 10
-const LENGTH_BONUS_PER_LETTER = 2;    // +2 * długość hasła za trafienie
-const STREAK_BONUS_PER_DAY = 5;       // +5 * streak
-const STREAK_BONUS_CAP = 25;          // ...ale nie więcej niż +25
-const SPEED_BONUS_PLACES = 5;         // bonus za szybkość dla pierwszych 5 osób dnia: +5/+4/+3/+2/+1
-
-// Miejsce liczymy w kolejności ukończenia (kto pierwszy trafił hasło dnia), nie po liczbie prób.
-function speedBonusFor(place) {
-  return place >= 1 && place <= SPEED_BONUS_PLACES ? SPEED_BONUS_PLACES - place + 1 : 0;
-}
-
-// Liczba prób na hasło = długość + 1
-function maxAttemptsFor(wordLength) {
-  return wordLength + 1;
-}
+// Publiczny adres serwisu — linki na Discordzie i tagi podglądu linku (og:url, og:image).
+const APP_URL = process.env.APP_URL || 'https://frog03-21535.wykr.es/';
 
 const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
@@ -52,22 +26,8 @@ const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
 // JOIN-y z tabelą players nadal działają bez zmian w resztcie zapytań.
 db.exec(`ATTACH DATABASE '${path.join(dbDir, 'snakes.db').replace(/'/g, "''")}' AS snakes`);
 
-// ── MIGRACJA ──
-// Poprzedni rozdział to biurowa bukmacherka mundialowa. Office Wordle to nowy tryb —
-// zachowujemy graczy i logowanie, ale usuwamy tabele zakładów i budujemy schemat Wordle.
-const hasWordsTable = db.prepare(
-  `SELECT name FROM sqlite_master WHERE type='table' AND name='words'`
-).get();
-if (!hasWordsTable) {
-  db.exec(`
-    DROP TABLE IF EXISTS bets;
-    DROP TABLE IF EXISTS bet_withdrawals;
-    DROP TABLE IF EXISTS results;
-    DROP TABLE IF EXISTS matches;
-    DROP TABLE IF EXISTS bank;
-  `);
-}
-
+// Gracze — wspólni dla Snakes i Wordle (jedno konto, logowanie tokenem X-Token). Kolumny
+// *_streak, total_wins, last_word_index to spadek po Wordle; Snakes trzyma swoje w sl_state.
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,230 +41,15 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-
-  CREATE TABLE IF NOT EXISTS words (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    word TEXT NOT NULL,
-    order_index INTEGER UNIQUE NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS games (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id INTEGER REFERENCES players(id),
-    word_id INTEGER REFERENCES words(id),
-    word_index INTEGER NOT NULL,
-    guesses TEXT DEFAULT '[]',
-    status TEXT DEFAULT 'in_progress',
-    attempts_used INTEGER DEFAULT 0,
-    points INTEGER DEFAULT 0,
-    win_place INTEGER,
-    speed_bonus INTEGER DEFAULT 0,
-    played_on TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    finished_at DATETIME,
-    UNIQUE(player_id, word_id)
-  );
 `);
 
-// Migracja starej tabeli players (z czasów bukmacherki) — dołóż brakujące kolumny.
+// Dokłada kolumnę do istniejącej tabeli, jeśli jej brakuje — migracje schematu przy starcie
+// (Wordle, boss, zamknięcie sezonu). Dostają ją też moduły z lib/.
 function ensureColumn(table, column, definition) {
   const exists = db.prepare(
     `SELECT COUNT(*) AS c FROM pragma_table_info(?) WHERE name = ?`
   ).get(table, column).c > 0;
   if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-}
-ensureColumn('players', 'total_points', 'INTEGER DEFAULT 0');
-ensureColumn('players', 'last_word_index', 'INTEGER DEFAULT 0');
-ensureColumn('players', 'season', 'TEXT'); // sezon (YYYY-MM), w którym gracz ostatnio grał — do resetu streaka
-// Bonus za szybkość doszedł później niż tabela games — dokładamy kolumny do istniejącej bazy.
-ensureColumn('games', 'win_place', 'INTEGER');      // które to było trafienie danego dnia (1, 2, 3…)
-ensureColumn('games', 'speed_bonus', 'INTEGER DEFAULT 0');
-
-// Zamiana polskich znaków na ASCII — hasła muszą być grywalne na klawiaturze A–Z.
-const PL_ASCII = { Ą: 'A', Ć: 'C', Ę: 'E', Ł: 'L', Ń: 'N', Ó: 'O', Ś: 'S', Ź: 'Z', Ż: 'Z' };
-function toAsciiUpper(s) {
-  return String(s).toUpperCase().replace(/[ĄĆĘŁŃÓŚŹŻ]/g, ch => PL_ASCII[ch]);
-}
-
-// Tasowanie Fisher-Yates
-function shuffle(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// Normalizacja hasła do postaci grywalnej (A–Z). Zwraca '' gdy nic nie zostaje.
-function normalizeWord(raw) {
-  return toAsciiUpper(raw == null ? '' : raw).replace(/[^A-Z]/g, '');
-}
-
-// ── SEED HASEŁ ──
-// Hasła wczytujemy z slowa.json (jeśli istnieje), zamieniamy polskie znaki na ASCII
-// i TASUJEMY — order_index przydzielany losowo, więc hasła dnia lecą w losowej kolejności.
-const FALLBACK_WORDS = ['KAWA', 'BIURO', 'LAPTOP', 'PROJEKT', 'ZEBRANIE'];
-
-// Akceptuje zarówno listę stringów, jak i listę obiektów { word: ... } (stary format).
-function parseWordList(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map(w => normalizeWord(typeof w === 'string' ? w : w && w.word))
-    .filter(w => w.length >= 3 && w.length <= 12);
-}
-
-function loadSeedWords() {
-  const file = path.join(__dirname, 'slowa.json');
-  if (fs.existsSync(file)) {
-    try {
-      const words = parseWordList(JSON.parse(fs.readFileSync(file, 'utf8')));
-      if (words.length) return words;
-    } catch (e) {
-      console.error('Nie udało się wczytać slowa.json:', e.message);
-    }
-  }
-  return FALLBACK_WORDS.map(normalizeWord);
-}
-
-const seedCount = db.prepare('SELECT COUNT(*) AS c FROM words').get().c;
-if (seedCount === 0) {
-  const insertWord = db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)');
-  shuffle(loadSeedWords()).forEach((w, i) => insertWord.run(w, i + 1));
-}
-
-// ── WALIDACJA SŁOWNIKOWA (hybryda) ──
-// Zgadywane słowo musi być prawdziwe: albo jest w bundlowanym słowniku polskim (data/pl-words.txt,
-// zwinięty do ASCII), albo — jeśli go tam nie ma (rzadkie/odmienione słowo) — przechodzi test
-// fonotaktyczny. Blokuje to strzelanie samymi samogłoskami i "matematyczne" nie-słowa,
-// nie odrzucając przy tym normalnie zbudowanych, realnych słów. Hasła gry są zawsze dozwolone.
-const VOWELS = new Set(['A', 'E', 'I', 'O', 'U', 'Y']);
-const DICTIONARY = new Set();
-(function loadDictionary() {
-  try {
-    const file = path.join(__dirname, 'data', 'pl-words.txt');
-    if (fs.existsSync(file)) {
-      for (const w of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-        if (w) DICTIONARY.add(w);
-      }
-    } else {
-      console.warn('Brak data/pl-words.txt — walidacja opiera się tylko na heurystyce.');
-    }
-  } catch (e) {
-    console.error('Nie udało się wczytać słownika:', e.message);
-  }
-  for (const r of db.prepare('SELECT word FROM words').all()) DICTIONARY.add(r.word);
-  console.log('Słownik zgadywanej:', DICTIONARY.size, 'słów');
-})();
-
-// Heurystyka fonotaktyczna — odsiewa nie-słowa (same samogłoski, mash spółgłosek, powtórki liter).
-function looksLikeWord(w) {
-  const len = w.length;
-  let vowels = 0;
-  const counts = {};
-  for (const c of w) {
-    if (VOWELS.has(c)) vowels++;
-    counts[c] = (counts[c] || 0) + 1;
-    if (counts[c] > 3) return false;               // ta sama litera 4+ razy
-  }
-  if (vowels === 0) return false;                   // brak samogłoski
-  if (vowels === len) return false;                 // same samogłoski (np. AEIOU)
-  if (/(.)\1\1/.test(w)) return false;              // 3 identyczne litery pod rząd
-  const ratio = vowels / len;
-  if (ratio < 0.15 || ratio > 0.80) return false;   // nienaturalny udział samogłosek
-  return true;
-}
-
-function isAllowedGuess(guess) {
-  return DICTIONARY.has(guess) || looksLikeWord(guess);
-}
-
-// ── ZESTAWY HASEŁ ──
-// Gotowe paczki haseł na dany miesiąc leżą w sets/*.json:
-//   { "id": "2026-08", "label": "Sierpień 2026", "starts_on": "2026-08-01", "words": ["ALERT", ...] }
-// Admin ładuje taki zestaw jednym przyciskiem — hasła trafiają do puli od pierwszego dnia
-// roboczego miesiąca, w losowej kolejności, a wcześniejsze (rozegrane) dni zostają nietknięte.
-const SETS_DIR = path.join(__dirname, 'sets');
-
-function loadWordSets() {
-  if (!fs.existsSync(SETS_DIR)) return [];
-  return fs.readdirSync(SETS_DIR)
-    .filter(f => f.endsWith('.json'))
-    .map(f => {
-      try {
-        const raw = JSON.parse(fs.readFileSync(path.join(SETS_DIR, f), 'utf8'));
-        const words = parseWordList(raw.words);
-        if (!words.length) return null;
-        const startsOn = /^\d{4}-\d{2}-\d{2}$/.test(raw.starts_on || '') ? raw.starts_on : null;
-        if (!startsOn) return null;
-        return {
-          id: raw.id || path.basename(f, '.json'),
-          label: raw.label || path.basename(f, '.json'),
-          starts_on: startsOn,
-          words: [...new Set(words)]
-        };
-      } catch (e) {
-        console.error(`Nie udało się wczytać zestawu ${f}:`, e.message);
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.starts_on.localeCompare(b.starts_on));
-}
-
-// Numer hasła, od którego zestaw wchodzi do puli
-function setStartIndex(set) {
-  return businessDaysElapsed(firstBusinessDayOnOrAfter(set.starts_on));
-}
-
-// Granica nietykalna: do tego numeru hasła włącznie nie ruszamy niczego — to dni, które
-// ktoś już rozegrał, plus hasło aktualnie wiszące (ktoś może być w trakcie zgadywania).
-function frozenThroughIndex() {
-  const lastPlayed = db.prepare(`
-    SELECT MAX(w.order_index) AS n FROM words w JOIN games g ON g.word_id = w.id
-  `).get().n || 0;
-  return Math.max(Number(lastPlayed), supplyIndex());
-}
-
-// Plan podmiany zestawu: [from..to] to jego zakres dni, ale nadpisujemy dopiero od write_from.
-function setPlan(set) {
-  const from = setStartIndex(set);
-  const to = from + set.words.length - 1;
-  const writeFrom = Math.max(from, frozenThroughIndex() + 1);
-  return { from, to, writeFrom, slots: to - writeFrom + 1 };
-}
-
-// Zestaw uznajemy za wczytany, gdy w podmienialnej części zakresu siedzą wyłącznie jego hasła.
-// Dni zamrożone (rozegrane) celowo pomijamy — po podmianie w trakcie miesiąca zostają tam
-// hasła z poprzedniej wersji zestawu i to jest w porządku.
-function isSetLoaded(set) {
-  const { to, writeFrom, slots } = setPlan(set);
-  if (slots <= 0) return true; // cały zakres już rozegrany — nie ma czego wczytywać
-  const rows = db.prepare(
-    'SELECT word FROM words WHERE order_index >= ? AND order_index <= ?'
-  ).all(writeFrom, to);
-  if (rows.length !== slots) return false;
-  const inSet = new Set(set.words);
-  return rows.every(r => inSet.has(r.word));
-}
-
-function setSummary(set) {
-  const { from, to, writeFrom, slots } = setPlan(set);
-  return {
-    id: set.id,
-    label: set.label,
-    starts_on: set.starts_on,
-    word_count: set.words.length,
-    from_index: from,
-    to_index: to,
-    from_date: dateForIndex(from),
-    to_date: dateForIndex(to),
-    write_from_index: writeFrom,
-    write_from_date: dateForIndex(writeFrom),
-    frozen_days: Math.max(0, writeFrom - from),
-    replaceable_days: Math.max(0, slots),
-    is_loaded: isSetLoaded(set)
-  };
 }
 
 app.use(express.json());
@@ -316,7 +61,13 @@ app.use(express.json());
 // adres, więc przeglądarka MUSI pobrać go na nowo, a gdy plik się nie zmienił, adres
 // zostaje ten sam i cache nadal działa (skrót treści, nie czas startu — inaczej każdy
 // restart pm2 kasowałby cache wszystkim bez powodu).
-const VERSIONED_ASSETS = ['style.css', 'snakes.css', 'snakes.js', 'app.js'];
+// Skrypty frontu Snakes w kolejności ze snakes.html. Nowy plik w public/sl/ trzeba dopisać
+// TUTAJ i tam — inaczej jego zmiana nie ruszy ?v= i przeglądarki zostaną przy starej wersji.
+const SNAKES_SCRIPTS = [
+  'sl/art-effects.js', 'sl/art-decor.js', 'sl/art-costumes.js',
+  'sl/board.js', 'sl/activity.js', 'sl/boss.js', 'sl/ranking.js', 'snakes.js'
+];
+const VERSIONED_ASSETS = ['style.css', 'snakes.css', ...SNAKES_SCRIPTS, 'app.js'];
 const ASSET_VERSION = (() => {
   const hash = crypto.createHash('sha1');
   for (const name of VERSIONED_ASSETS) {
@@ -372,283 +123,14 @@ app.use('/api', (req, res, next) => {
   res.set('X-App-Version', ASSET_VERSION);
   next();
 });
+// Serwis to dziś Snakes — Wordle skończył się 2026-08-31 i przeniósł pod /wordle (lib/wordle.js).
+// Stare adresy przekierowujemy, żeby zakładki i linki z Discorda dalej gdzieś prowadziły.
+app.get(['/', '/index.html'], (req, res) => res.redirect(302, '/snakes'));
+app.get(['/admin', '/admin.html'], (req, res) => res.redirect(302, '/wordle/admin'));
 app.get(['/snakes', '/snakes.html'], (req, res) => sendPage(res, 'snakes.html'));
 app.get(['/snakes/admin', '/snakes-admin.html'], (req, res) => sendPage(res, 'snakes-admin.html'));
 
 app.use(express.static(path.join(__dirname, 'public')));
-
-// ── STREFA CZASOWA (Europe/Warsaw) ──
-function warsawParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hourCycle: 'h23'
-  }).formatToParts(date);
-  const get = type => parts.find(p => p.type === type).value;
-  return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute'), s: get('second') };
-}
-
-// Dzisiejsza data w Warszawie jako 'YYYY-MM-DD'
-function todayWaw() {
-  const p = warsawParts();
-  return `${p.y}-${p.mo}-${p.d}`;
-}
-
-// Odwrotność warsawParts: epoch ms odpowiadający podanej godzinie ściennej w
-// Europe/Warsaw dla danej daty (Y-M-D). Iteracyjnie koryguje różnicę stref (CET/CEST),
-// aż warsawParts(wynik) faktycznie pokaże żądaną godzinę — zbiega w 1-2 krokach.
-function warsawWallTimeToMs(y, m, d, hour) {
-  const wantedUtc = Date.UTC(y, m - 1, d, hour, 0, 0);
-  let guessMs = wantedUtc;
-  for (let i = 0; i < 3; i++) {
-    const p = warsawParts(new Date(guessMs));
-    const shownUtc = Date.UTC(Number(p.y), Number(p.mo) - 1, Number(p.d), Number(p.h), Number(p.mi), Number(p.s));
-    const diff = wantedUtc - shownUtc;
-    if (diff === 0) break;
-    guessMs += diff;
-  }
-  return guessMs;
-}
-
-// ── DNI ROBOCZE / NUMER HASŁA ──
-// Weekend rozpoznajemy z daty kalendarzowej (na północach UTC — DST nie ma znaczenia).
-function isWeekendStr(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return dow === 0 || dow === 6; // niedziela / sobota
-}
-
-// (Snakes & Ladders) Dodaje `days` DNI ROBOCZYCH (pon–pt, czasu Warszawy) do danej
-// chwili — weekendy są całkowicie pomijane, więc licznik "nie płynie" w sobotę/niedzielę.
-// Używane do terminu pokonania bossa w wydarzeniu co-op (patrz slFinishBossEvent).
-function addBusinessDaysMs(fromMs, days) {
-  let ms = fromMs;
-  let remaining = days;
-  while (remaining > 0) {
-    ms += 24 * 60 * 60 * 1000;
-    const p = warsawParts(new Date(ms));
-    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) remaining--;
-  }
-  return ms;
-}
-
-// Ile dni roboczych (pon–pt) minęło od WORD_START do dateStr włącznie
-function businessDaysElapsed(dateStr) {
-  const [sy, sm, sd] = WORD_START.split('-').map(Number);
-  const [ey, em, ed] = dateStr.split('-').map(Number);
-  let cur = Date.UTC(sy, sm - 1, sd);
-  const end = Date.UTC(ey, em - 1, ed);
-  if (end < cur) return 0;
-  let n = 0;
-  while (cur <= end) {
-    const dow = new Date(cur).getUTCDay();
-    if (dow !== 0 && dow !== 6) n++;
-    cur += 86400000;
-  }
-  return n;
-}
-
-function isoFromUTC(t) {
-  const dt = new Date(t);
-  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
-}
-
-// Poprzedni dzień roboczy przed dateStr (pon → poprzedni pt)
-function previousBusinessDay(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  let t = Date.UTC(y, m - 1, d);
-  do { t -= 86400000; } while ([0, 6].includes(new Date(t).getUTCDay()));
-  return isoFromUTC(t);
-}
-
-// Pierwszy dzień roboczy w dniu dateStr lub po nim
-function firstBusinessDayOnOrAfter(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  let t = Date.UTC(y, m - 1, d);
-  while ([0, 6].includes(new Date(t).getUTCDay())) t += 86400000;
-  return isoFromUTC(t);
-}
-
-// Data (YYYY-MM-DD), w którą wypadnie hasło o danym numerze — odwrotność businessDaysElapsed.
-function dateForIndex(n) {
-  if (!Number.isInteger(n) || n < 1) return null;
-  const [y, m, d] = WORD_START.split('-').map(Number);
-  let t = Date.UTC(y, m - 1, d);
-  let count = 0;
-  for (let i = 0; i < 20000; i++) {
-    const dow = new Date(t).getUTCDay();
-    if (dow !== 0 && dow !== 6) {
-      count++;
-      if (count === n) return isoFromUTC(t);
-    }
-    t += 86400000;
-  }
-  return null;
-}
-
-// Godzina, o której pojawia się nowe hasło (czasu Warszawy). Do tej godziny wisi wczorajsze.
-const NEW_WORD_HOUR = parseInt(process.env.WORDLE_NEW_WORD_HOUR, 10) || 8;
-
-// Twardy, jednorazowy koniec CAŁEJ gry (nie dobowy reset) — po tej chwili wpisywanie jest
-// zablokowane NA STAŁE, niezależnie od dnia tygodnia/godziny, a UI pokazuje ranking końcowy
-// zamiast planszy. Domyślnie 2026-08-31 16:00 czasu Warszawy (offset +02:00 — CEST latem);
-// jeśli trzeba to kiedyś przesunąć/wyłączyć, nadpisz WORDLE_GAME_END_AT w .env (puste = brak końca).
-const GAME_END_AT = process.env.WORDLE_GAME_END_AT || '2026-08-31T16:00:00+02:00';
-function gameHasEnded() {
-  return !!GAME_END_AT && Date.now() >= Date.parse(GAME_END_AT);
-}
-
-// Które hasło jest teraz aktualne i w jakiej fazie:
-//  - 'live'    : hasło dnia gra się (08:00 → północ) — można wpisywać
-//  - 'expired' : północ → 08:00, wisi jeszcze wczorajsze hasło, ale wpisywanie zamknięte
-//  - 'weekend' : sobota/niedziela — przerwa
-//  - 'ended'   : gra zakończona na stałe (patrz GAME_END_AT) — wpisywanie zablokowane na zawsze
-// Zwraca { phase, index, date } (index/date = null poza dniami z hasłem).
-function activePuzzle() {
-  if (gameHasEnded()) {
-    return { phase: 'ended', index: null, date: null };
-  }
-  const p = warsawParts();
-  const today = `${p.y}-${p.mo}-${p.d}`;
-  const hour = Number(p.h);
-
-  if (isWeekendStr(today)) {
-    return { phase: 'weekend', index: null, date: null };
-  }
-  if (hour >= NEW_WORD_HOUR) {
-    const n = businessDaysElapsed(today);
-    return { phase: 'live', index: n >= 1 ? n : null, date: today };
-  }
-  // 00:00–08:00 w dzień roboczy: wisi jeszcze hasło poprzedniego dnia roboczego, ale zamknięte
-  const prev = previousBusinessDay(today);
-  const n = businessDaysElapsed(prev);
-  return { phase: 'expired', index: n >= 1 ? n : null, date: prev };
-}
-
-// Numer aktualnie pokazywanego hasła (do rankingu dnia / panelu admina). null gdy brak.
-function currentPuzzleIndex() {
-  return activePuzzle().index;
-}
-
-// Najwyższy zużyty indeks hasła — do liczenia zapasu w puli
-function supplyIndex() {
-  const idx = currentPuzzleIndex();
-  return idx !== null ? idx : businessDaysElapsed(todayWaw());
-}
-
-// Aktualnie pokazywane hasło (żywe LUB wygasłe — do wyświetlenia; null w weekend/przerwie)
-function currentWord() {
-  const idx = currentPuzzleIndex();
-  if (!idx) return null;
-  return db.prepare('SELECT * FROM words WHERE order_index = ?').get(idx) || null;
-}
-
-// ── SEZON (miesiąc kalendarzowy) ──
-// Po zakończeniu gry (GAME_END_AT) sezon zamraża się na miesiącu, w którym gra się skończyła —
-// nie ma "przełączenia" na kolejny miesiąc, ranking końcowy zostaje na stałe.
-function currentSeasonId() {
-  const p = gameHasEnded() ? warsawParts(new Date(Date.parse(GAME_END_AT))) : warsawParts();
-  return `${p.y}-${p.mo}`; // 'YYYY-MM'
-}
-function seasonMonthLabel(id) {
-  const [y, m] = id.split('-').map(Number);
-  return `${MONTHS_PL[m - 1]} ${y}`;
-}
-function seasonLabel() {
-  return seasonMonthLabel(currentSeasonId());
-}
-function isTestPeriod() {
-  return currentSeasonId() < CONTEST_START;
-}
-// Granice bieżącego sezonu jako daty 'YYYY-MM-DD' [first, nextFirst)
-function seasonBounds() {
-  const id = currentSeasonId();
-  const [y, m] = id.split('-').map(Number);
-  const first = `${id}-01`;
-  let ny = y, nm = m + 1;
-  if (nm > 12) { nm = 1; ny++; }
-  const nextFirst = `${ny}-${String(nm).padStart(2, '0')}-01`;
-  return { first, nextFirst };
-}
-
-function seasonInfo() {
-  const ap = activePuzzle();
-  const idx = ap.index;
-  const supply = supplyIndex();
-  const maxIndex = db.prepare('SELECT MAX(order_index) AS m FROM words').get().m || 0;
-  const hasWord = idx !== null && !!db.prepare('SELECT 1 FROM words WHERE order_index = ?').get(idx);
-  return {
-    season_id: currentSeasonId(),
-    season_label: seasonLabel(),
-    is_test: isTestPeriod(),
-    contest_start: CONTEST_START,
-    phase: ap.phase,
-    day_number: idx,
-    is_weekend: ap.phase === 'weekend',
-    is_ended: ap.phase === 'ended',
-    new_word_hour: NEW_WORD_HOUR,
-    remaining_words: db.prepare('SELECT COUNT(*) AS c FROM words WHERE order_index > ?').get(supply).c,
-    total_words: db.prepare('SELECT COUNT(*) AS c FROM words').get().c,
-    max_index: maxIndex,
-    supply_exhausted: idx !== null && idx > maxIndex,
-    has_word_today: hasWord,
-    speed_bonus_places: SPEED_BONUS_PLACES // publiczny znacznik: brak pola = działa stara wersja serwera
-  };
-}
-
-// Streak/rekord ograniczone do bieżącego sezonu (0, jeśli gracz nie grał jeszcze w tym miesiącu)
-function effectiveStreaks(player) {
-  return player.season === currentSeasonId()
-    ? { current: player.current_streak, best: player.best_streak }
-    : { current: 0, best: 0 };
-}
-
-// Punkty gracza w bieżącym sezonie (suma z gier tego miesiąca)
-function seasonPoints(playerId) {
-  const { first, nextFirst } = seasonBounds();
-  return Number(db.prepare(
-    'SELECT COALESCE(SUM(points), 0) AS p FROM games WHERE player_id = ? AND played_on >= ? AND played_on < ?'
-  ).get(playerId, first, nextFirst).p);
-}
-
-// Ilu graczy odgadło już dzisiejsze hasło (do liczenia wolnych miejsc premiowanych)
-function winnersToday(wordId) {
-  return Number(db.prepare(
-    `SELECT COUNT(*) AS c FROM games WHERE word_id = ? AND status = 'won'`
-  ).get(wordId).c);
-}
-
-// ── OCENA ZGADYWANIA (standard Wordle, obsługa powtórzeń) ──
-function evaluateGuess(guess, answer) {
-  const n = answer.length;
-  const res = new Array(n).fill('gray');
-  const counts = {};
-  for (const ch of answer) counts[ch] = (counts[ch] || 0) + 1;
-  for (let i = 0; i < n; i++) {
-    if (guess[i] === answer[i]) { res[i] = 'green'; counts[guess[i]]--; }
-  }
-  for (let i = 0; i < n; i++) {
-    if (res[i] === 'green') continue;
-    const c = guess[i];
-    if (counts[c] > 0) { res[i] = 'yellow'; counts[c]--; }
-  }
-  return res;
-}
-
-// Zbiorczy status każdej litery na klawiaturze (green > yellow > gray)
-function keyboardStatuses(guesses, answer) {
-  const rank = { gray: 0, yellow: 1, green: 2 };
-  const map = {};
-  guesses.forEach(g => {
-    const statuses = evaluateGuess(g, answer);
-    for (let i = 0; i < g.length; i++) {
-      const c = g[i], s = statuses[i];
-      if (!map[c] || rank[s] > rank[map[c]]) map[c] = s;
-    }
-  });
-  return map;
-}
 
 function transaction(fn) {
   db.exec('BEGIN');
@@ -670,73 +152,6 @@ function authPlayer(req, res, next) {
   db.prepare('UPDATE players SET last_seen = CURRENT_TIMESTAMP WHERE id = ?').run(player.id);
   req.player = player;
   next();
-}
-
-// Buduje pełny stan gry dla gracza na dziś (bez zdradzania hasła, dopóki gra trwa)
-function buildGameState(player) {
-  const info = seasonInfo();
-  const word = currentWord();
-
-  const eff = effectiveStreaks(player);
-  const base = {
-    season_id: info.season_id,
-    season_label: info.season_label,
-    is_test: info.is_test,
-    phase: info.phase,
-    day_number: info.day_number,
-    is_weekend: info.is_weekend,
-    is_ended: info.is_ended,
-    supply_exhausted: info.supply_exhausted,
-    new_word_hour: info.new_word_hour,
-    remaining_words: info.remaining_words,
-    total_words: info.total_words,
-    stats: {
-      current_streak: eff.current,
-      best_streak: eff.best,
-      season_points: seasonPoints(player.id)
-    }
-  };
-
-  if (!word) {
-    return { ...base, has_word: false };
-  }
-
-  const live = info.phase === 'live';
-  const maxAttempts = maxAttemptsFor(word.word.length);
-  const game = db.prepare(
-    'SELECT * FROM games WHERE player_id = ? AND word_id = ?'
-  ).get(player.id, word.id);
-
-  const guessList = game ? JSON.parse(game.guesses) : [];
-  const rows = guessList.map(g => ({
-    guess: g,
-    statuses: evaluateGuess(g, word.word)
-  }));
-  const rawStatus = game ? game.status : 'not_started';
-  const finished = rawStatus === 'won' || rawStatus === 'lost';
-  // Po godzinie 00:00 (faza 'expired') wpisywanie jest zamknięte — niedokończoną grę
-  // pokazujemy jako 'expired' i odsłaniamy hasło. Na żywo działa normalnie.
-  const status = (!live && !finished) ? 'expired' : rawStatus;
-  const playable = live && (rawStatus === 'not_started' || rawStatus === 'in_progress');
-
-  return {
-    ...base,
-    has_word: true,
-    playable,
-    word_length: word.word.length,
-    max_attempts: maxAttempts,
-    guesses: rows,
-    attempts_used: guessList.length,
-    status,
-    keyboard: keyboardStatuses(guessList, word.word),
-    points_today: game ? game.points : 0,
-    // Bonus za szybkość: moje miejsce (jeśli wygrałem) i ile premiowanych miejsc jeszcze wolnych.
-    win_place: game && game.status === 'won' ? game.win_place : null,
-    speed_bonus: game ? Number(game.speed_bonus || 0) : 0,
-    speed_bonus_places: SPEED_BONUS_PLACES,
-    speed_spots_left: Math.max(0, SPEED_BONUS_PLACES - winnersToday(word.id)),
-    answer: (finished || !live) ? word.word : null
-  };
 }
 
 // ──────────────────────────────────────────────
@@ -771,269 +186,10 @@ app.post('/api/register', (req, res) => {
   }
 });
 
+// GET /api/me — kim jestem (Snakes i Wordle logują się tym samym tokenem). Statystyki
+// Wordle stąd wyleciały razem z modułem: żaden front ich nie czytał.
 app.get('/api/me', authPlayer, (req, res) => {
-  const { player } = req;
-  const eff = effectiveStreaks(player);
-  res.json({
-    id: player.id,
-    nickname: player.nickname,
-    current_streak: eff.current,
-    best_streak: eff.best,
-    season_points: seasonPoints(player.id)
-  });
-});
-
-// GET /api/wordle/today — stan dzisiejszej rozgrywki gracza
-app.get('/api/wordle/today', authPlayer, (req, res) => {
-  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
-  res.json(buildGameState(player));
-});
-
-// POST /api/wordle/guess — dopisz próbę { guess }
-app.post('/api/wordle/guess', authPlayer, (req, res) => {
-  const ap = activePuzzle();
-  if (ap.phase !== 'live') {
-    const msg = ap.phase === 'ended'
-      ? 'Gra zakończona — dziękujemy za udział! Zobacz ranking końcowy.'
-      : ap.phase === 'weekend'
-      ? 'Weekend — hasła gramy od poniedziałku do piątku'
-      : `Wpisywanie zamknięte o północy — nowe hasło o ${NEW_WORD_HOUR}:00`;
-    return res.status(400).json({ error: msg });
-  }
-  const word = currentWord();
-  if (!word) return res.status(400).json({ error: 'Brak hasła w puli na dziś' });
-
-  const answer = word.word;
-  const maxAttempts = maxAttemptsFor(answer.length);
-  const guess = String(req.body.guess || '').trim().toUpperCase();
-
-  if (guess.length !== answer.length) {
-    return res.status(400).json({ error: `Hasło ma ${answer.length} liter` });
-  }
-  if (!/^[A-Z]+$/.test(guess)) {
-    return res.status(400).json({ error: 'Dozwolone są tylko litery A–Z' });
-  }
-  // Nie-słowa odrzucamy zanim policzymy próbę — nieudana walidacja nie zużywa podejścia.
-  if (guess !== answer && !isAllowedGuess(guess)) {
-    return res.status(400).json({ error: 'Nie ma takiego słowa — wpisz istniejące słowo', invalid_word: true });
-  }
-
-  const result = transaction(() => {
-    let game = db.prepare('SELECT * FROM games WHERE player_id = ? AND word_id = ?').get(req.player.id, word.id);
-
-    if (!game) {
-      db.prepare(`
-        INSERT INTO games (player_id, word_id, word_index, guesses, status, played_on)
-        VALUES (?, ?, ?, '[]', 'in_progress', ?)
-      `).run(req.player.id, word.id, word.order_index, todayWaw());
-      game = db.prepare('SELECT * FROM games WHERE player_id = ? AND word_id = ?').get(req.player.id, word.id);
-    }
-
-    if (game.status !== 'in_progress') {
-      return { locked: true };
-    }
-
-    const guesses = JSON.parse(game.guesses);
-    if (guesses.length >= maxAttempts) {
-      return { locked: true };
-    }
-
-    guesses.push(guess);
-    const attemptsUsed = guesses.length;
-    const won = guess === answer;
-    const lost = !won && attemptsUsed >= maxAttempts;
-    let status = 'in_progress';
-    let points = 0;
-    let winPlace = null;
-    let speedBonus = 0;
-
-    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
-    // Streak jest liczony w obrębie sezonu (miesiąca). Jeśli gracz nie grał jeszcze w tym
-    // sezonie, startuje od zera — to daje automatyczny reset 1. dnia miesiąca.
-    const season = currentSeasonId();
-    const sameSeason = player.season === season;
-    const prevStreak = sameSeason ? player.current_streak : 0;
-    const prevBest = sameSeason ? player.best_streak : 0;
-    const prevLastIdx = sameSeason ? player.last_word_index : 0;
-
-    if (won || lost) {
-      status = won ? 'won' : 'lost';
-
-      let newStreak;
-      if (won) {
-        // Indeksy haseł pomijają weekendy, więc pt→pn to wciąż kolejne numery — seria trwa.
-        newStreak = (prevLastIdx === word.order_index - 1) ? prevStreak + 1 : 1;
-        const base = (maxAttempts - attemptsUsed + 1) * POINTS_PER_ATTEMPT_STEP;
-        const lengthBonus = LENGTH_BONUS_PER_LETTER * answer.length;
-        const streakBonus = Math.min(newStreak * STREAK_BONUS_PER_DAY, STREAK_BONUS_CAP);
-        // Bonus za szybkość — liczymy, ilu graczy trafiło hasło przede mną (jesteśmy
-        // w transakcji, a baza jest jednowątkowa, więc miejsca nie zdublują się).
-        const winnersBefore = db.prepare(
-          `SELECT COUNT(*) AS c FROM games WHERE word_id = ? AND status = 'won'`
-        ).get(word.id).c;
-        winPlace = Number(winnersBefore) + 1;
-        speedBonus = speedBonusFor(winPlace);
-        points = base + lengthBonus + streakBonus + speedBonus;
-      } else {
-        newStreak = 0;
-      }
-
-      const bestStreak = Math.max(prevBest, newStreak);
-      db.prepare(`
-        UPDATE players
-        SET current_streak = ?, best_streak = ?, last_word_index = ?, season = ?,
-            total_points = total_points + ?, total_wins = total_wins + ?
-        WHERE id = ?
-      `).run(newStreak, bestStreak, word.order_index, season, points, won ? 1 : 0, player.id);
-
-      db.prepare(`
-        UPDATE games SET guesses = ?, status = ?, attempts_used = ?, points = ?,
-               win_place = ?, speed_bonus = ?, finished_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(JSON.stringify(guesses), status, attemptsUsed, points, winPlace, speedBonus, game.id);
-    } else {
-      db.prepare('UPDATE games SET guesses = ?, attempts_used = ? WHERE id = ?')
-        .run(JSON.stringify(guesses), attemptsUsed, game.id);
-    }
-
-    return { locked: false };
-  });
-
-  if (result.locked) {
-    return res.status(400).json({ error: 'Dzisiejsza gra jest już zakończona' });
-  }
-
-  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
-  res.json(buildGameState(player));
-});
-
-// GET /api/season — publiczny status sezonu (do nagłówka)
-app.get('/api/season', (req, res) => {
-  res.json(seasonInfo());
-});
-
-// GET /api/leaderboard?season=YYYY-MM|all&highlight=ID
-// Domyślnie bieżący sezon (miesiąc). Konkretny 'YYYY-MM' = historyczny leaderboard danego
-// miesiąca; 'all' = wszystkie sezony razem. Zwraca też listę dostępnych miesięcy (do wyboru).
-app.get('/api/leaderboard', (req, res) => {
-  const highlightId = parseInt(req.query.highlight, 10) || null;
-  const curSeason = currentSeasonId();
-  const q = req.query.season;
-  let target;
-  if (q === 'all') target = 'all';
-  else if (/^\d{4}-\d{2}$/.test(q || '')) target = q;
-  else target = curSeason;
-
-  let dateFilter = '';
-  if (target !== 'all') {
-    const [y, m] = target.split('-').map(Number);
-    let ny = y, nm = m + 1;
-    if (nm > 12) { nm = 1; ny++; }
-    const first = `${target}-01`;
-    const nextFirst = `${ny}-${String(nm).padStart(2, '0')}-01`;
-    dateFilter = `AND g.played_on >= '${first}' AND g.played_on < '${nextFirst}'`;
-  }
-
-  // Streak pokazujemy tylko dla bieżącego sezonu (dla miesięcy historycznych go nie
-  // przechowujemy) — w innych widokach kolumna serii jest pusta.
-  const isCurrent = target === curSeason;
-  const streakSelect = isCurrent ? 'CASE WHEN p.season = ? THEN p.current_streak ELSE 0 END' : 'NULL';
-  const params = isCurrent ? [curSeason] : [];
-
-  const rows = db.prepare(`
-    SELECT
-      p.id, p.nickname,
-      ${streakSelect} AS streak,
-      COALESCE(SUM(g.points), 0) AS points,
-      COUNT(g.id) AS games_played,
-      SUM(CASE WHEN g.status = 'won' THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN g.status = 'won' THEN g.attempts_used ELSE 0 END) AS won_attempts
-    FROM players p
-    LEFT JOIN games g ON g.player_id = p.id ${dateFilter}
-    GROUP BY p.id
-    HAVING games_played > 0
-    ORDER BY points DESC, wins DESC, games_played ASC
-  `).all(...params);
-
-  const list = rows.map((r, i) => ({
-    rank: i + 1,
-    id: r.id,
-    nickname: r.nickname,
-    total_points: Number(r.points),
-    streak: r.streak === null ? null : Number(r.streak),
-    games_played: Number(r.games_played),
-    wins: Number(r.wins),
-    avg_attempts: r.wins > 0 ? Math.round((Number(r.won_attempts) / Number(r.wins)) * 10) / 10 : null,
-    is_me: highlightId ? r.id === highlightId : false
-  }));
-
-  // Lista miesięcy, w których cokolwiek rozegrano (+ zawsze bieżący sezon), do selektora historii
-  const seasons = db.prepare(`SELECT DISTINCT substr(played_on, 1, 7) AS s FROM games ORDER BY s DESC`).all().map(r => r.s);
-  if (!seasons.includes(curSeason)) seasons.unshift(curSeason);
-  seasons.sort().reverse();
-  const availableSeasons = seasons.map(s => ({ id: s, label: seasonMonthLabel(s), is_current: s === curSeason }));
-
-  res.json({
-    leaderboard: list,
-    total_players: list.length,
-    season: target,
-    season_label: target === 'all' ? 'Wszystkie sezony' : seasonMonthLabel(target),
-    current_season: curSeason,
-    available_seasons: availableSeasons
-  });
-});
-
-// GET /api/wordle/daily — ranking dzisiejszego hasła (kto najlepiej trafił dziś)
-app.get('/api/wordle/daily', (req, res) => {
-  const highlightId = parseInt(req.query.highlight, 10) || null;
-  const day = currentPuzzleIndex();
-  const word = currentWord();
-
-  if (!word) {
-    return res.json({
-      day_number: day, has_word: false,
-      is_weekend: isWeekendStr(todayWaw()),
-      is_ended: activePuzzle().phase === 'ended',
-      entries: [], total: 0
-    });
-  }
-
-  // Zwycięzcy najpierw (mniej prób = wyżej), potem przegrani. Punkty jako rozstrzygnięcie remisu.
-  const rows = db.prepare(`
-    SELECT g.status, g.attempts_used, g.points, g.win_place, g.speed_bonus, p.id AS player_id, p.nickname
-    FROM games g
-    JOIN players p ON p.id = g.player_id
-    WHERE g.word_index = ? AND g.status IN ('won', 'lost')
-    ORDER BY
-      (g.status = 'won') DESC,
-      CASE WHEN g.status = 'won' THEN g.attempts_used ELSE 999 END ASC,
-      g.points DESC
-  `).all(word.order_index);
-
-  const entries = rows.map((r, i) => ({
-    rank: i + 1,
-    nickname: r.nickname,
-    status: r.status,
-    attempts_used: Number(r.attempts_used),
-    points: Number(r.points),
-    win_place: r.status === 'won' && r.win_place ? Number(r.win_place) : null,
-    speed_bonus: Number(r.speed_bonus || 0),
-    is_me: highlightId ? r.player_id === highlightId : false
-  }));
-
-  const inProgress = db.prepare(`
-    SELECT COUNT(*) AS c FROM games WHERE word_index = ? AND status = 'in_progress'
-  `).get(word.order_index).c;
-
-  res.json({
-    day_number: day,
-    has_word: true,
-    entries,
-    total: entries.length,
-    in_progress: Number(inProgress),
-    speed_bonus_places: SPEED_BONUS_PLACES,
-    speed_spots_left: Math.max(0, SPEED_BONUS_PLACES - winnersToday(word.id))
-  });
+  res.json({ id: req.player.id, nickname: req.player.nickname });
 });
 
 // ──────────────────────────────────────────────
@@ -1049,269 +205,11 @@ function checkAdmin(req, res) {
   return true;
 }
 
-// GET /api/admin/words — lista haseł + status sezonu.
-// UWAGA: treść przyszłych i dzisiejszego hasła NIE jest wysyłana — admin też gra, więc
-// nie może ich przypadkiem zobaczyć (ani w tabeli, ani w devtools). Odsłonić można
-// pojedyncze hasło świadomie: GET /api/admin/word/:id/reveal.
-app.get('/api/admin/words', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const words = db.prepare('SELECT id, word, order_index FROM words ORDER BY order_index ASC').all();
-  const ap = activePuzzle();
-  const idx = ap.index;
-  // W fazie 'expired' (po północy) hasło dnia jest już odsłonięte graczom, więc i tu jest jawne.
-  const pastThreshold = idx === null ? supplyIndex() + 1 : (ap.phase === 'expired' ? idx + 1 : idx);
-  const withStatus = words.map(w => {
-    const played = db.prepare('SELECT COUNT(*) AS c FROM games WHERE word_id = ?').get(w.id).c;
-    const isPast = w.order_index < pastThreshold;
-    return {
-      id: w.id,
-      order_index: w.order_index,
-      date: dateForIndex(w.order_index),
-      word: isPast ? w.word : null, // rozegrane hasła są już jawne
-      hidden: !isPast,
-      length: w.word.length,
-      max_attempts: maxAttemptsFor(w.word.length),
-      is_current: idx !== null && w.order_index === idx,
-      is_past: isPast,
-      games_played: Number(played)
-    };
-  });
-  res.json({ words: withStatus, season: seasonInfo(), word_start: WORD_START });
-});
-
-// GET /api/admin/word/:id/reveal — świadome odsłonięcie jednego ukrytego hasła
-app.get('/api/admin/word/:id/reveal', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const word = db.prepare('SELECT word FROM words WHERE id = ?').get(parseInt(req.params.id, 10));
-  if (!word) return res.status(404).json({ error: 'Hasło nie istnieje' });
-  res.json({ word: word.word });
-});
-
-// POST /api/admin/word — dodaj lub zaktualizuj hasło { id?, word, order_index }
-app.post('/api/admin/word', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const { id } = req.body;
-  const word = toAsciiUpper(String(req.body.word || '').trim());
-  const orderIndex = parseInt(req.body.order_index, 10);
-
-  if (!/^[A-Z]{3,12}$/.test(word)) {
-    return res.status(400).json({ error: 'Hasło: 3–12 liter A–Z (bez polskich znaków i spacji)' });
-  }
-  if (!Number.isInteger(orderIndex) || orderIndex < 1) {
-    return res.status(400).json({ error: 'Podaj poprawny numer dnia (order_index ≥ 1)' });
-  }
-
-  const clash = db.prepare('SELECT id FROM words WHERE order_index = ? AND id IS NOT ?').get(orderIndex, id || null);
-  if (clash) {
-    return res.status(400).json({ error: `Numer dnia ${orderIndex} jest już zajęty przez inne hasło` });
-  }
-
-  try {
-    if (id) {
-      const existing = db.prepare('SELECT * FROM words WHERE id = ?').get(id);
-      if (!existing) return res.status(404).json({ error: 'Hasło nie istnieje' });
-      db.prepare('UPDATE words SET word = ?, order_index = ? WHERE id = ?')
-        .run(word, orderIndex, id);
-    } else {
-      db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)')
-        .run(word, orderIndex);
-    }
-  } catch (e) {
-    if (e.message && e.message.includes('UNIQUE')) {
-      return res.status(400).json({ error: 'Ten numer dnia jest już zajęty' });
-    }
-    throw e;
-  }
-
-  DICTIONARY.add(word); // nowe hasło ma być zawsze dozwolone jako zgadywane słowo
-  res.json({ success: true });
-});
-
-// DELETE /api/admin/word/:id
-app.delete('/api/admin/word/:id', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const wordId = parseInt(req.params.id, 10);
-  const word = db.prepare('SELECT * FROM words WHERE id = ?').get(wordId);
-  if (!word) return res.status(404).json({ error: 'Hasło nie istnieje' });
-
-  const played = db.prepare('SELECT COUNT(*) AS c FROM games WHERE word_id = ?').get(wordId).c;
-  if (played > 0) {
-    return res.status(400).json({ error: 'Nie można usunąć — to hasło ma już rozegrane gry' });
-  }
-
-  db.prepare('DELETE FROM words WHERE id = ?').run(wordId);
-  res.json({ success: true });
-});
-
-// GET /api/admin/sets — gotowe zestawy haseł do wczytania jednym kliknięciem
-app.get('/api/admin/sets', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  res.json({ sets: loadWordSets().map(setSummary) });
-});
-
-// POST /api/admin/sets/:id/load — wczytaj zestaw do puli od jego pierwszego dnia roboczego.
-// Podmiana jest bezpieczna także w trakcie miesiąca: dni już rozegrane oraz hasło dnia
-// bieżącego zostają nietknięte, nadpisywane są wyłącznie przyszłe, jeszcze niezagrane sloty.
-// Dzięki temu można poprawić zestaw po starcie sezonu, nie psując wyników z rozegranych dni.
-app.post('/api/admin/sets/:id/load', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const set = loadWordSets().find(s => s.id === req.params.id);
-  if (!set) return res.status(404).json({ error: 'Nie ma takiego zestawu' });
-
-  const { from, to, writeFrom, slots } = setPlan(set);
-  if (slots <= 0) {
-    return res.status(400).json({
-      error: `Nie ma czego podmieniać — cały zestaw (dni #${from}–#${to}) jest już rozegrany`
-    });
-  }
-
-  // Hasła, które zostają na zamrożonych dniach — nie chcemy ich powtórzyć w nowej części.
-  const kept = db.prepare(
-    'SELECT word FROM words WHERE order_index >= ? AND order_index < ?'
-  ).all(from, writeFrom).map(r => r.word);
-  const keptSet = new Set(kept);
-
-  const candidates = set.words.filter(w => !keptSet.has(w));
-  if (candidates.length < slots) {
-    return res.status(400).json({
-      error: `Za mało nowych haseł — ${candidates.length} do obsadzenia ${slots} dni`
-    });
-  }
-  const chosen = shuffle(candidates).slice(0, slots);
-
-  const replaced = transaction(() => {
-    // Kasujemy tylko to, czego nikt nie tknął — gry trzymają referencję do words.id.
-    const removed = db.prepare(`
-      DELETE FROM words
-      WHERE order_index >= ?
-        AND id NOT IN (SELECT word_id FROM games WHERE word_id IS NOT NULL)
-    `).run(writeFrom).changes;
-    const insert = db.prepare('INSERT INTO words (word, order_index) VALUES (?, ?)');
-    chosen.forEach((w, i) => insert.run(w, writeFrom + i));
-    return Number(removed);
-  });
-
-  for (const w of set.words) DICTIONARY.add(w); // hasła zawsze dozwolone jako zgadywane słowa
-
-  res.json({
-    success: true,
-    loaded: chosen.length,
-    unused: set.words.length - chosen.length,
-    replaced,
-    kept: kept.length,
-    kept_from_index: kept.length ? from : null,
-    kept_to_index: kept.length ? writeFrom - 1 : null,
-    kept_from_date: kept.length ? dateForIndex(from) : null,
-    kept_to_date: kept.length ? dateForIndex(writeFrom - 1) : null,
-    from_index: writeFrom,
-    to_index: to,
-    from_date: dateForIndex(writeFrom),
-    to_date: dateForIndex(to)
-  });
-});
-
-// GET /api/admin/players
-app.get('/api/admin/players', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const players = db.prepare(`
-    SELECT id, nickname, total_points, total_wins, current_streak, best_streak, created_at, last_seen
-    FROM players
-    ORDER BY total_points DESC
-  `).all();
-  res.json({ players });
-});
-
-// DELETE /api/admin/player/:id
-app.delete('/api/admin/player/:id', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  transaction(() => {
-    db.prepare('DELETE FROM games WHERE player_id = ?').run(playerId);
-    db.prepare('DELETE FROM players WHERE id = ?').run(playerId);
-  });
-
-  res.json({ success: true, deleted: player.nickname });
-});
-
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
-
-// ── CODZIENNE POWIADOMIENIE NA DISCORDA ──
-// O NOTIFY_HOUR (domyślnie 8:00 czasu Warszawy) leci webhook z linkiem do gry.
-// Weekendy pomijamy — wtedy nie ma hasła. Webhook trzymamy w .env (repo jest publiczne).
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
-const APP_URL = process.env.APP_URL || 'https://frog03-21535.wykr.es/';
-const NOTIFY_HOUR = parseInt(process.env.DISCORD_NOTIFY_HOUR, 10) || NEW_WORD_HOUR;
-
-// Ostatni dzień (YYYY-MM-DD), za który powiadomienie już poszło — chroni przed dublem
-// przy restarcie serwera w ciągu dnia.
-let lastNotifiedDate = null;
-
-async function sendDiscordNotification() {
-  if (!DISCORD_WEBHOOK_URL) return { skipped: 'brak DISCORD_WEBHOOK_URL' };
-
-  const idx = businessDaysElapsed(todayWaw());
-  const payload = {
-    content: '🟩 **Office Wordle** — nowe hasło dnia jest już dostępne!',
-    embeds: [{
-      title: idx >= 1 ? `Hasło #${idx}` : 'Zagraj teraz',
-      url: APP_URL,
-      description: `Masz czas do północy. ⚡ Pierwsze ${SPEED_BONUS_PLACES} osób, które dziś trafią, dostaje bonus (+${SPEED_BONUS_PLACES}…+1 pkt). Powodzenia!\n${APP_URL}`,
-      color: 0x6aaa64,
-      footer: { text: `Sezon: ${seasonLabel()}` }
-    }]
-  };
-
-  const res = await fetch(DISCORD_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (!res.ok) throw new Error(`Discord ${res.status}: ${await res.text()}`);
-  return { sent: true, index: idx };
-}
-
-// Tykamy co minutę zamiast liczyć setTimeout do 8:00 — odporne na DST i na drift.
-function startDiscordScheduler() {
-  if (!DISCORD_WEBHOOK_URL) {
-    console.log('Discord: brak DISCORD_WEBHOOK_URL — powiadomienia wyłączone');
-    return;
-  }
-
-  // Start po godzinie powiadomienia = dzisiejsze uznajemy za wysłane (nie spamujemy przy restarcie).
-  if (Number(warsawParts().h) >= NOTIFY_HOUR) lastNotifiedDate = todayWaw();
-
-  setInterval(async () => {
-    const today = todayWaw();
-    if (today === lastNotifiedDate) return;
-    if (Number(warsawParts().h) < NOTIFY_HOUR) return;
-    if (isWeekendStr(today)) { lastNotifiedDate = today; return; }
-
-    lastNotifiedDate = today; // ustawiamy przed wysyłką — błąd sieci nie ma powtarzać się co minutę
-    try {
-//      await sendDiscordNotification();
-      console.log(`Discord: powiadomienie wysłane (${today})`);
-    } catch (err) {
-      console.error('Discord: nie udało się wysłać powiadomienia —', err.message);
-    }
-  }, 60_000);
-
-  console.log(`Discord: powiadomienia włączone, codziennie o ${String(NOTIFY_HOUR).padStart(2, '0')}:00 (pon–pt, Europe/Warsaw)`);
-}
-
-// POST /api/admin/discord-test — ręczne wysłanie powiadomienia (do sprawdzenia webhooka)
-app.post('/api/admin/discord-test', async (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  try {
-    const result = await sendDiscordNotification();
-    res.json({ success: true, ...result });
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
+// ── OFFICE WORDLE (archiwum) — cały w lib/wordle.js ──
+// Musi stać PO express.json() (trasy POST czytają req.body) i przed schematem Snakes —
+// tu dawniej leżał kod Wordle, więc kolejność startu się nie zmienia.
+const wordle = require('./lib/wordle')({
+  app, db, transaction, ensureColumn, authPlayer, checkAdmin, sendPage, APP_URL
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1334,184 +232,15 @@ app.post('/api/admin/discord-test', async (req, res) => {
 //    progu rusza event „bossowy", a po jego ukończeniu kontrybutorzy dostają nagrody.
 
 // Kształt i układ planszy nie mieszkają w kodzie — każdy sezon to plik boards/<id>.js
-// (patrz lib/seasons.js). Aktywny sezon trzyma `slBoard`, ustawiany przy starcie
-// i przy zmianie sezonu z panelu (slInstallBoard). Liczba pól bywa różna w różnych
-// sezonach, dlatego rozmiar czytamy zawsze przez slBoardSize(), nigdy ze stałej.
+// (patrz lib/seasons.js). Aktywny sezon trzyma silnik planszy (lib/board.js); czyta się
+// go przez slCurrentBoard(), a podmienia przez slSetBoard() — przy starcie i przy zmianie
+// sezonu z panelu (slInstallBoard). Liczba pól bywa różna w różnych sezonach, dlatego
+// rozmiar czytamy zawsze przez slBoardSize(), nigdy ze stałej.
 const seasons = require('./lib/seasons');
-let slBoard = seasons.get(seasons.DEFAULT_ID);
-function slBoardSize() { return slBoard.size; }
-const SL_POINTS_PER_PIP = 2;           // punkty za każde oczko rzutu
-const SL_POINTS_PER_TILE = 1;          // punkty za każde przebyte pole (postęp)
-const SL_POINTS_PER_LAP = 50;          // bonus za każde ukończone okrążenie (domyślny)
-// Plik sezonu może nadpisać premię za okrążenie (`lap_points`) — krótsza droga znaczy
-// częstsze okrążenia, a przy 50 pkt premia zaczynała ważyć więcej niż akcje na polach.
-function slLapPoints() { return slBoard.lap_points != null ? slBoard.lap_points : SL_POINTS_PER_LAP; }
-
-// Koszty power-upów (w coins). Shield jest najdroższy, bo to kontra na cudzy atak —
-// ma kosztować więcej niż sam atak, ale zostaje w zasięgu kilku dni zbierania (dzienny
-// ruch to ~10–30 coins). Curse jest najtańszy mimo ośmiu wariantów: pojedynczy wariant
-// trafia się losowo, więc rzucający nie kupuje konkretnego efektu, tylko loterię.
-const SL_POWERUP_COSTS = { freeze: 30, curse: 15, double_move: 40, shield: 70 };
-const SL_POWERUP_TYPES = Object.keys(SL_POWERUP_COSTS);
-// Typy ataków, które Shield potrafi zablokować (zużywa się przy pierwszym z nich).
-const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
-
-// ── KLĄTWA — 7 losowych wariantów ──
-// Wariant losujemy w momencie RZUCENIA klątwy (sl_effects.variant) i odpalamy go na
-// NASTĘPNYM ruchu ofiary. Warianty 1/2/5 zmieniają SPOSÓB poruszania się, więc muszą
-// zadziałać PRZED odpaleniem węży/drabin/bonusów (patrz slCurseAdjustRoll + invertBoard
-// w slResolveTileEffect) — inaczej gracz lądowałby na złym polu. Warianty 3/4/6/7
-// działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
-const SL_CURSE_VARIANTS = 8;
-const SL_CURSE_COIN_STEAL = 50; // ile coins zabiera Kieszonkowiec (wariant 3)
-// Drożyzna (wariant 8) jako JEDYNA klątwa nie odpala się na ruchu, tylko w sklepie.
-// Ma trzy stany — ukryta, odsłonięta, zużyta (patrz kolumna "revealed_at" niżej): pierwsza
-// próba zakupu jest WSTRZYMYWANA i tylko odsłania klątwę, podbijając ceny o ten mnożnik;
-// zużywa się dopiero przy następnym, świadomym zakupie.
-const SL_CURSE_PRICE_VARIANT = 8;
-const SL_CURSE_PRICE_MARKUP = 1.5;
-// KOLEJKA KLĄTW. Klątwy na jednym graczu NIE odpalają naraz — każdy ruch zdejmuje
-// najstarszą (FIFO), a Drożyzna czeka na zakup. Naraz się nie da: warianty się ze sobą
-// gryzą (Odwrotny Ruch + Rozdwojona Kostka, podwójna Chciwość = ćwierć zdobyczy), a jeden
-// ruch zamieniałby się w nokaut. Za to kolejka ma sufit, bo przy cenie 15 coins dwie
-// osoby mogłyby zakopać kogoś na kilka dni. Dwa limity, oba liczą wszystkie oczekujące
-// klątwy (także Drożyznę):
-//  • na cel — tyle może na nim wisieć naraz, od wszystkich rzucających razem,
-//  • od jednego rzucającego na ten sam cel — żeby jeden bogacz nie zajął całej kolejki.
-// Odmowa przy limicie celu mówi rzucającemu, że ktoś już tego gracza przeklął. To świadomy
-// koszt: wie o tym tylko rzucający, nie ofiara, i nie wie, jaka to klątwa ani od kogo.
-const SL_CURSE_MAX_PENDING_PER_TARGET = 2;
-const SL_CURSE_MAX_PENDING_PER_CASTER = 1;
-
-// Oczekująca Drożyzna na tym graczu (albo null). JEDNO miejsce, z którego korzysta
-// i cennik w sklepie, i sam zakup — inaczej sklep pokazywałby jedną cenę, a kasa brała
-// inną. Dokładnie tak było: witryna rysowała cenę bazową, serwer ściągał 1,5×, a przycisk
-// „Kup" odblokowywał się przy cenie bazowej, więc gracz z 80 coins klikał Shielda „za 70"
-// i dostawał „za mało — koszt 105".
-function slPendingPriceCurse(playerId) {
-  return db.prepare(`
-    SELECT id, source_player_id, revealed_at FROM sl_effects
-    WHERE target_player_id = ? AND type = 'curse' AND status = 'pending' AND variant = ?
-    ORDER BY id LIMIT 1
-  `).get(playerId, SL_CURSE_PRICE_VARIANT) || null;
-}
-
-// ── EXTRA MOVE: CENA Z MIEJSCA W RANKINGU ──
-// Dwa Extra Move'y dziennie zostają, bo to mechanizm, który ludzie lubią i kupują zawsze.
-// Symulacja (wrzesień 2026, 12 graczy, ~2 mln ruchów) pokazała, że przy równej cenie lider
-// ma nad drugim średnio 4,7% przewagi, a >10% w co ósmym sezonie. Kto odjechał, kupuje
-// tyle samo ruchów co goniący, więc nie da się go dogonić. Cena rośnie z miejscem: czołówka
-// płaci więcej, dół mniej. Przewaga lidera spada wtedy do ~2,3% (>10% w 1% sezonów),
-// a opuszczający dni wygrywają częściej — przy tej samej liczbie kupowanych ruchów.
-const SL_EXTRA_MOVE_TOP_PRICES = [60, 55, 50]; // 1., 2., 3. miejsce
-const SL_EXTRA_MOVE_MID_UNTIL = 7;             // miejsca 4.–7. płacą cenę bazową (SL_POWERUP_COSTS)
-const SL_EXTRA_MOVE_LOW_PRICE = 30;            // miejsca 8. i dalej
-// Ile Extra Move'ów można trzymać w ekwipunku: tyle, ile da się zużyć jednego dnia.
-// Bez sufitu gracz z dołu tabeli nakupiłby tanich sztuk na zapas i zużył je jako lider.
-const SL_EXTRA_MOVE_MAX_OWNED = 2;
-
-// Miejsce liczymy NA ŻYWO, przy każdym zakupie — kto awansuje, od razu płaci więcej.
-// Kolejność jak w slLeaderboard. Żeby kasa nie pobrała innej kwoty, niż pokazał sklep
-// (ranking potrafi się zmienić między odświeżeniem a kliknięciem), front odsyła cenę,
-// którą widział, a /shop/buy przy rozjeździe wstrzymuje zakup — patrz `expected_cost`.
-function slCurrentRank(playerId) {
-  const rows = db.prepare('SELECT player_id FROM sl_state ORDER BY total_points DESC, laps DESC, abs_pos DESC').all();
-  const i = rows.findIndex(r => r.player_id === playerId);
-  return i < 0 ? null : i + 1;
-}
-
-// Cena bazowa (bez Drożyzny) dla konkretnego gracza.
-function slPowerupBaseCost(type, playerId) {
-  if (type !== 'double_move' || playerId == null) return SL_POWERUP_COSTS[type];
-  const rank = slCurrentRank(playerId) || Infinity;
-  if (rank <= SL_EXTRA_MOVE_TOP_PRICES.length) return SL_EXTRA_MOVE_TOP_PRICES[rank - 1];
-  if (rank <= SL_EXTRA_MOVE_MID_UNTIL) return SL_POWERUP_COSTS.double_move;
-  return SL_EXTRA_MOVE_LOW_PRICE;
-}
-
-function slShopPriceOf(type, cursed, playerId) {
-  const base = slPowerupBaseCost(type, playerId);
-  return cursed ? Math.ceil(base * SL_CURSE_PRICE_MARKUP) : base;
-}
-
-// Cennik DLA KONKRETNEGO GRACZA — z doliczoną Drożyzną, ale WYŁĄCZNIE gdy jest już
-// ujawniona (patrz kolumna revealed_at). Dopóki klątwa siedzi ukryta, cennik pokazuje
-// ceny bazowe i nie zdradza jej ani słowem — a i tak nikt nie przepłaci, bo pierwsza
-// próba zakupu zostaje wstrzymana zamiast obciążyć konto.
-// Zasada ukrytej informacji jest tym nietknięta: ofiara dowiaduje się dopiero w chwili
-// odpalenia klątwy, a kto ją rzucił, nie wychodzi z tego payloadu w ogóle.
-function slShopPayload(playerId) {
-  const curse = slPendingPriceCurse(playerId);
-  const cursed = !!(curse && curse.revealed_at);
-  return {
-    items: SL_POWERUP_TYPES.map(type => ({
-      type,
-      cost: slShopPriceOf(type, cursed, playerId), // cena, którą gracz REALNIE zapłaci
-      base_cost: slPowerupBaseCost(type, playerId),
-      // Extra Move: skąd ta cena — miejsce z rana i cały cennik, żeby sklep umiał to wyjaśnić.
-      ...(type === 'double_move' ? {
-        rank: slCurrentRank(playerId),
-        rank_prices: { top: SL_EXTRA_MOVE_TOP_PRICES, mid: SL_POWERUP_COSTS.double_move, mid_until: SL_EXTRA_MOVE_MID_UNTIL, low: SL_EXTRA_MOVE_LOW_PRICE },
-        max_owned: SL_EXTRA_MOVE_MAX_OWNED
-      } : {})
-    })),
-    price_curse: cursed ? {
-      label: SL_CURSE_LABELS[SL_CURSE_PRICE_VARIANT],
-      markup_percent: Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)
-    } : null
-  };
-}
-const SL_CURSE_LABELS = {
-  1: '↩️ Odwrotny Ruch',
-  2: '➗ Rozdwojona Kostka',
-  3: '💰 Kieszonkowiec',
-  4: '📉 Chciwość',
-  5: '🔀 Odwrócone Zasady',
-  6: '🌀 Chaos',
-  7: '🚫 Bez Bonusu',
-  8: '🧾 Drożyzna'
-};
-const SL_CURSE_DESCRIPTIONS = {
-  1: 'kość cofa zamiast pchać do przodu (np. rzut 4 = 4 pola W TYŁ)',
-  2: 'rzut liczy się w połowie, w dół (rzut 5 = ruch o 2 pola)',
-  3: `traci ${SL_CURSE_COIN_STEAL} coins na rzecz tego, kto rzucił klątwę`,
-  4: 'połowa punktów zdobytych tym ruchem przepada',
-  5: 'na ten ruch drabiny i węże działa się od drugiego końca — ze szczytu drabiny zjeżdżasz na dół, z ogona węża wjeżdżasz do góry',
-  6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
-  7: 'pole bonusowe na ten ruch nie działa',
-  8: `pierwsza próba zakupu zostaje wstrzymana, a ceny w sklepie rosną o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% do najbliższego zakupu`
-};
-
-// Warianty 1/2 zmieniają wartość kości PRZED ruchem — reszta rzutów nie rusza.
-function slCurseAdjustRoll(variant, roll) {
-  if (variant === 1) return -roll;               // Odwrotny Ruch
-  if (variant === 2) return Math.floor(roll / 2); // Rozdwojona Kostka (w dół)
-  return roll;
-}
 
 // ── WYDARZENIE KOOPERACYJNE (co-op) / WALKA Z BOSSEM ──
 // Cała mechanika bossa — stałe, schemat, rozliczenia i trasy — mieszka w lib/boss.js.
 // Tutaj zostaje wyłącznie punkt podpięcia (szukaj "const boss = createBossModule").
-
-// ── KNOCKBACK (wypychanie z zajętego pola) ──
-// Ile coins traci wypchnięty gracz na rzecz tego, kto go zbił.
-// Było 20. Symulacja 12 aktywnych graczy (wrzesień 2026) pokazała, że każdy jest zbijany
-// średnio ponad raz dziennie, a przy 20 coins zbicia przelewały między graczami POŁOWĘ
-// tego, co ktoś w ogóle zarobił (najgorsze 10% — trzy czwarte). Dla ekipy to zero, ale
-// pojedynczy gracz wiecznie stał przy pustym portfelu i nie mógł na nic odłożyć. Na
-// mniejszej planszy (Noc Duchów, 40 pól) zbić jest jeszcze więcej, stąd 10.
-const SL_KNOCKBACK_COIN_STEAL = 10;
-// Ile punktów RANKINGU dostaje zbijający — osobno od coins. Dawniej punkty były równe
-// zabranym coins, więc zbicie gracza z pustym portfelem albo w długu (po bossie) nie dawało
-// nic do rankingu, a to przypadek, nie zasługa zbijającego. Teraz: coins to przelew między
-// graczami (zależny od portfela ofiary, gra ich nie drukuje), punkty to stała nagroda za
-// samo zbicie. Obie liczby da się stroić niezależnie.
-const SL_KNOCKBACK_POINTS = 10;
-// O ile pól cofa się wypchnięty gracz — losowo z tego zakresu, osobne losowanie dla
-// KAŻDEJ ofiary (także w kaskadzie), z twardym progiem na polu 0 bieżącego okrążenia
-// (patrz slApplyKnockback): okrążenia wypchnięcie nie zabiera.
-const SL_KNOCKBACK_TILES_BACK_MIN = 3;
-const SL_KNOCKBACK_TILES_BACK_MAX = 6;
 
 // Ile ruchów (rzutów) dziennie ma każdy gracz na starcie dnia. Freeze blokuje JEDEN
 // z nich (nie cały dzień), a Extra Move DOKŁADA jeden ruch ponad ten limit — od ręki,
@@ -1529,15 +258,44 @@ const SL_MAX_EXTRA_ROLLS = 2;
 // ── GODZINY BIUROWE ──
 // To gra biurowa: rzucać można wyłącznie w oknie SL_PLAY_START_HOUR–SL_PLAY_END_HOUR
 // (czasu Warszawy, dni robocze). Po 16:00 niewykorzystane ruchy przepadają.
+// Stałe z env to tylko DOMYŚLNE okno — admin może je nadpisać w panelu (sl_meta), np. na
+// czas testów zdjąć blokadę całkiem (0–24 i weekendy). Dlatego okno czytamy zawsze przez
+// slPlayHours(), nigdy wprost ze stałych: inaczej komunikat mówiłby „8–16", a gra
+// wpuszczała o 20:00.
 const SL_PLAY_START_HOUR = Number(process.env.SNAKES_PLAY_START_HOUR || 8);
 const SL_PLAY_END_HOUR = Number(process.env.SNAKES_PLAY_END_HOUR || 16);
+const SL_PLAY_META_START = 'play_start_hour';
+const SL_PLAY_META_END = 'play_end_hour';
+const SL_PLAY_META_WEEKENDS = 'play_weekends';
+
+// Aktualne okno gry: { start, end, weekends, custom }. `end` = 24 znaczy „do północy".
+// Zepsuta wartość w sl_meta (ręczna edycja bazy) nie może zamknąć gry na zawsze —
+// wtedy wracamy do domyślnych z env.
+function slPlayHours() {
+  const rawStart = slMetaGet(SL_PLAY_META_START);
+  const rawEnd = slMetaGet(SL_PLAY_META_END);
+  let start = rawStart != null ? Number(rawStart) : SL_PLAY_START_HOUR;
+  let end = rawEnd != null ? Number(rawEnd) : SL_PLAY_END_HOUR;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 24 || start >= end) {
+    start = SL_PLAY_START_HOUR;
+    end = SL_PLAY_END_HOUR;
+  }
+  const weekends = slMetaGet(SL_PLAY_META_WEEKENDS) === '1';
+  return {
+    start, end, weekends,
+    custom: rawStart != null || rawEnd != null || weekends,
+    default_start: SL_PLAY_START_HOUR,
+    default_end: SL_PLAY_END_HOUR
+  };
+}
 
 // Czy w danej chwili okno gry jest otwarte (dzień roboczy + godzina w zakresie).
 function slOfficeOpenAt(ms = Date.now()) {
+  const hours = slPlayHours();
   const p = warsawParts(new Date(ms));
-  if (isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) return false;
+  if (!hours.weekends && isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) return false;
   const h = Number(p.h);
-  return h >= SL_PLAY_START_HOUR && h < SL_PLAY_END_HOUR;
+  return h >= hours.start && h < hours.end;
 }
 
 // Najbliższa chwila (epoch ms), w której okno gry jest otwarte: samo `fromMs`, jeśli
@@ -1545,12 +303,13 @@ function slOfficeOpenAt(ms = Date.now()) {
 // od kotwicy w południe, żeby zmiana czasu (CET/CEST) nie przesunęła nam doby.
 function slNextOpenMs(fromMs = Date.now()) {
   if (slOfficeOpenAt(fromMs)) return fromMs;
+  const hours = slPlayHours();
   const p0 = warsawParts(new Date(fromMs));
   let anchor = warsawWallTimeToMs(Number(p0.y), Number(p0.mo), Number(p0.d), 12);
   for (let i = 0; i < 14; i++) {
     const p = warsawParts(new Date(anchor));
-    const openMs = warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_START_HOUR);
-    if (!isWeekendStr(`${p.y}-${p.mo}-${p.d}`) && openMs > fromMs) return openMs;
+    const openMs = warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), hours.start);
+    if ((hours.weekends || !isWeekendStr(`${p.y}-${p.mo}-${p.d}`)) && openMs > fromMs) return openMs;
     anchor += 24 * 60 * 60 * 1000;
   }
   return fromMs;
@@ -1559,7 +318,7 @@ function slNextOpenMs(fromMs = Date.now()) {
 // Godzina zamknięcia okna dla dnia, w którym wypada `ms` (epoch ms).
 function slOfficeCloseMs(ms = Date.now()) {
   const p = warsawParts(new Date(ms));
-  return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), SL_PLAY_END_HOUR);
+  return warsawWallTimeToMs(Number(p.y), Number(p.mo), Number(p.d), slPlayHours().end);
 }
 
 
@@ -2035,195 +794,23 @@ function slPointsSeasonSplit(totalPoints, rawAll, rawSeason, seasonMap) {
   return { season, prior };
 }
 
-function slLogActivity(playerId, type, detail, ref = null) {
-  db.prepare('INSERT INTO sl_activity (player_id, type, detail, day, ref) VALUES (?, ?, ?, ?, ?)')
-    .run(playerId, type, detail, todayWaw(), ref);
-}
+// ── DZIENNIK AKTYWNOŚCI ── zapis, klucze tur i moderacja widoku (lib/activity.js),
+// razem z trasami: publiczną GET /api/snakes/activity i panelem admina od historii.
+const {
+  slLogActivity, slNewTurnRef
+} = require('./lib/activity')({
+  db, todayWaw, slMetaGet, slMetaSet, slAvatarUrl, app, checkAdmin
+});
 
-// Świeży klucz tury. Licznik + znacznik czasu, a nie numer ruchu: po „Cofnij ostatni ruch"
-// gracz rzuca jeszcze raz z tym samym numerem, a stare wpisy w dzienniku zostają — przy
-// kluczu z numeru obie tury skleiłyby się w jeden blok.
-let slTurnSeq = 0;
-function slNewTurnRef(playerId) {
-  return `turn:${playerId}:${Date.now()}:${++slTurnSeq}`;
-}
-
-// ══ MODERACJA WIDOKU DZIENNIKA ══
-// Dziennik jest publiczny (GET /api/snakes/activity nie wymaga logowania), a admin ma
-// decydować, CO Z NIEGO WIDAĆ — nie kasować zapisu. Dlatego nic tu niczego nie usuwa
-// ani nie nadpisuje: widoczność liczy się przy KAŻDYM odczycie z trzech warstw, więc
-// każdą decyzję da się cofnąć jednym kliknięciem, a wpis w bazie zostaje nietknięty.
-//
-// Dwie NIEZALEŻNE osie:
-//   • czy widać — nadpisanie wpisu > reguła 'hide' > domyślna widoczność typu > widoczne
-//   • jaki tekst — public_detail wpisu > tekst z reguły 'redact' > oryginalny detail
-// Rozdzielenie osi daje sensowne kombinacje, np. „pokaż mimo reguły, ale z innym tekstem".
-
-// Typy wpisów, którymi da się sterować hurtem. Klucz musi się zgadzać z tym, co wpisuje
-// slLogActivity; wartość to etykieta dla panelu.
-const SL_ACTIVITY_TYPES = {
-  roll:      'Rzuty kostką',
-  shop_buy:  'Zakupy w sklepie',
-  shop_use:  'Użycie power-upów',
-  // Osobny typ, a nie 'roll'/'shop_use', bo front podświetla te wpisy obu stronom klątwy
-  // (ofierze i rzucającemu) — a wolno mu to robić tylko po polach wpisu, nigdy po treści.
-  curse_fired: 'Odpalone klątwy',
-  knockback: 'Wypychanie z pola',
-  boss_hit:  'Walka z bossem',
-  avatar:    'Zmiana zdjęcia profilowego',
-  bonus_grant: 'Doładowania coins od admina',
-  boss_reward: 'Rozliczenie walki z bossem',
-  // Kocioł, cukierek albo psikus, cukierki (lib/seasonal.js) — wpisy w bloku tury.
-  season_event: 'Wydarzenia sezonu'
-};
-
-// Widoczność typów — ten sam wzorzec co przełączniki Discorda (patrz slEventsConfig):
-// jeden klucz w sl_meta z JSON-em, domyślnie WSZYSTKO widoczne, więc bez decyzji admina
-// dziennik wygląda dokładnie jak przed wprowadzeniem moderacji.
-function slActivityTypesConfig() {
-  let stored = {};
-  try {
-    stored = JSON.parse(slMetaGet('activity_types_visible') || '{}');
-  } catch {
-    stored = {};
-  }
-  const cfg = {};
-  for (const key of Object.keys(SL_ACTIVITY_TYPES)) {
-    cfg[key] = typeof stored[key] === 'boolean' ? stored[key] : true;
-  }
-  return cfg;
-}
-
-function slSetActivityTypesConfig(patch) {
-  const cfg = slActivityTypesConfig();
-  for (const [key, val] of Object.entries(patch || {})) {
-    if (key in SL_ACTIVITY_TYPES) cfg[key] = !!val;
-  }
-  slMetaSet('activity_types_visible', JSON.stringify(cfg));
-  return cfg;
-}
-
-// Komplet ustawień moderacji na JEDNO żądanie — ładowany raz i podawany dalej, żeby nie
-// odpytywać bazy o reguły przy każdym wierszu.
-function slActivityModeration() {
-  return {
-    types: slActivityTypesConfig(),
-    rules: db.prepare('SELECT * FROM sl_activity_rules ORDER BY id').all()
-  };
-}
-
-// Predykat SQL „ten wpis jest ukryty". Idzie do SQL, a nie do JS, bo współpracuje
-// z LIMIT-em (inaczej trzeba by pobierać z zapasem i dociąć w pamięci) oraz z listą dni.
-// Cała warstwa reguł mieści się w jednym skorelowanym EXISTS — każdy wymiar dopasowania
-// jest wyrażalny w SQL. `match_text` NIGDY nie jest wklejany do zapytania, tylko wiązany
-// jako parametr; ESCAPE sprawia, że % i _ wpisane przez admina znaczą same siebie.
-function slActivityHiddenSql(mod, alias = 'a') {
-  const hiddenTypes = Object.keys(mod.types).filter(t => !mod.types[t]);
-  // UWAGA: musi być IS, nie = . Domyślnie visibility jest NULL, a `NULL = 'hidden'` daje
-  // w SQL nie fałsz, tylko NULL — całe wyrażenie robi się NULL i `WHERE NOT (…)` wycina
-  // WSZYSTKIE wpisy. Operator IS w SQLite porównuje bezpiecznie względem NULL-a.
-  const parts = [`${alias}.visibility IS 'hidden'`];
-  const args = [];
-
-  const auto = [];
-  if (hiddenTypes.length) {
-    auto.push(`${alias}.type IN (${hiddenTypes.map(() => '?').join(', ')})`);
-    args.push(...hiddenTypes);
-  }
-  auto.push(`EXISTS (
-    SELECT 1 FROM sl_activity_rules r
-    WHERE r.enabled = 1 AND r.action = 'hide'
-      AND (r.match_type      IS NULL OR r.match_type = ${alias}.type)
-      AND (r.match_player_id IS NULL OR r.match_player_id = ${alias}.player_id)
-      AND (r.match_day_from  IS NULL OR ${alias}.day >= r.match_day_from)
-      AND (r.match_day_to    IS NULL OR ${alias}.day <= r.match_day_to)
-      AND (r.match_text      IS NULL OR ${alias}.detail LIKE '%' || REPLACE(REPLACE(r.match_text, '\\', '\\\\'), '%', '\\%') || '%' ESCAPE '\\')
-  )`);
-
-  // Warstwy automatyczne (typ + reguły) liczą się TYLKO wtedy, gdy wpis nie ma własnego
-  // nadpisania — 'shown' przypina go widocznym mimo wszystko.
-  parts.push(`(${alias}.visibility IS NULL AND (${auto.join(' OR ')}))`);
-  return { sql: `(${parts.join(' OR ')})`, args };
-}
-
-// Powód ukrycia/podmiany — wyłącznie do pokazania adminowi, dlaczego wpis wygląda tak,
-// jak wygląda. Liczone w JS na już pobranym wierszu, bo to opis, nie filtr.
-function slActivityRuleMatches(rule, row) {
-  if (!rule.enabled) return false;
-  if (rule.match_type && rule.match_type !== row.type) return false;
-  if (rule.match_player_id != null && Number(rule.match_player_id) !== Number(row.player_id)) return false;
-  if (rule.match_day_from && row.day < rule.match_day_from) return false;
-  if (rule.match_day_to && row.day > rule.match_day_to) return false;
-  if (rule.match_text && !String(row.detail).includes(rule.match_text)) return false;
-  return true;
-}
-
-// Treść pokazywana graczom: nadpisanie wpisu bije regułę, reguła bije oryginał.
-// Zwraca też, skąd wzięła się podmiana — panel pokazuje to przy wierszu.
-function slActivityPublicDetail(row, mod) {
-  if (row.public_detail != null) return { detail: row.public_detail, redacted_by: 'wpis' };
-  const rule = mod.rules.find(r => r.action === 'redact' && r.replacement && slActivityRuleMatches(r, row));
-  if (rule) return { detail: rule.replacement, redacted_by: `reguła #${rule.id}` };
-  return { detail: row.detail, redacted_by: null };
-}
-
-// Dlaczego wpis jest niewidoczny (albo null, gdy jest widoczny).
-function slActivityHiddenBy(row, mod) {
-  if (row.visibility === 'hidden') return 'wpis';
-  if (row.visibility === 'shown') return null;
-  const rule = mod.rules.find(r => r.action === 'hide' && slActivityRuleMatches(r, row));
-  if (rule) return `reguła #${rule.id}`;
-  if (mod.types[row.type] === false) return 'typ';
-  return null;
-}
-
-// JEDYNA ścieżka odczytu dziennika dla graczy. Woła ją i publiczny endpoint, i podgląd
-// w panelu admina — dzięki temu „Podgląd gracza" nie może się rozjechać z tym, co gracze
-// naprawdę widzą. Lista dni jest bramkowana TYM SAMYM predykatem, inaczej dzień ukryty
-// co do wpisu i tak świeciłby w rozwijanym wyborze daty.
-function slPublicActivity({ date = null, limit = 150 } = {}) {
-  const mod = slActivityModeration();
-  const hidden = slActivityHiddenSql(mod);
-  const where = [`NOT ${hidden.sql}`];
-  const args = [...hidden.args];
-  if (date) { where.push('a.day = ?'); args.push(date); }
-
-  const rows = db.prepare(`
-    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.day, a.created_at, a.ref,
-           s.avatar_updated_at
-    FROM sl_activity a JOIN players p ON p.id = a.player_id
-    LEFT JOIN sl_state s ON s.player_id = a.player_id
-    WHERE ${where.join(' AND ')}
-    ORDER BY a.id DESC LIMIT ?
-  `).all(...args, Math.min(300, Math.max(1, limit)));
-
-  const dates = db.prepare(`
-    SELECT DISTINCT a.day FROM sl_activity a
-    WHERE NOT ${hidden.sql}
-    ORDER BY a.day DESC LIMIT 60
-  `).all(...hidden.args).map(r => r.day);
-
-  return {
-    entries: rows.map(r => ({
-      id: r.id,
-      player_id: r.player_id,
-      nickname: r.nickname,
-      type: r.type,
-      detail: slActivityPublicDetail(r, mod).detail,
-      date: r.day,
-      created_at: r.created_at,
-      ref: r.ref,
-      // Do rzędu awatarów w zwiniętym bloku. Bierze się WYŁĄCZNIE z `player_id` wpisu,
-      // więc nie pokazuje nikogo, kogo nie widać już jako nicku w rozwiniętym bloku.
-      avatar_url: slAvatarUrl(r.player_id, r.avatar_updated_at)
-    })),
-    dates
-  };
-}
-
-
-// Etykiety power-upów do czytelnych wpisów w dzienniku i na Discordzie.
-const SL_POWERUP_LABELS = { freeze: 'Freeze', curse: 'Curse', double_move: 'Extra Move', shield: 'Shield' };
+// ── SILNIK PLANSZY ── aktywny sezon, pola, ruch, rozstaje i zbicia (lib/board.js).
+// Musi powstać przed aktywacją planszy przy starcie (slActivateBoardOnStartup niżej).
+const {
+  slSetBoard, slCurrentBoard, slTileOf, slBoardSize, slBoardPayload, slBoardMap, d6,
+  slStepMove, slResolveTileEffect, slApplyKnockback, SL_POINTS_PER_PIP, SL_POINTS_PER_TILE,
+  slLapPoints
+} = require('./lib/board')({
+  db, slBonusesOff, slLogPoints, slLogActivity, slMetaGet, SL_FIRST_SEASON_NAME
+});
 
 // ── META (klucz-wartość) ──
 function slMetaGet(key) {
@@ -2277,17 +864,65 @@ function slSeasonMoveFloor() {
 // newSeason = admin ŚWIADOMIE zaczyna sezon (także ponownie ten sam) — wtedy od tego miejsca
 // liczy się rozbicie punktów „ten sezon". Reset pozycji przy starcie po edycji pliku
 // planszy sezonu nie zaczyna.
+function slInstallBoardRows(season, resetPositions, newSeason) {
+  slSeedBoardRows(season);
+  const n = resetPositions ? slResetPositionsToStart(season.size) : 0;
+  if (newSeason) slMarkSeasonStart();
+  slMetaSet('active_board', season.id);
+  slMetaSet('board_size', season.size);
+  return n;
+}
+
 function slInstallBoard(season, resetPositions, newSeason = false) {
-  const moved = transaction(() => {
-    slSeedBoardRows(season);
-    const n = resetPositions ? slResetPositionsToStart(season.size) : 0;
-    if (newSeason) slMarkSeasonStart();
-    slMetaSet('active_board', season.id);
-    slMetaSet('board_size', season.size);
-    return n;
-  });
-  slBoard = season; // dopiero po udanej transakcji — przy błędzie zostaje stara plansza
+  const moved = transaction(() => slInstallBoardRows(season, resetPositions, newSeason));
+  slSetBoard(season); // dopiero po udanej transakcji — przy błędzie zostaje stara plansza
   return moved;
+}
+
+// ── ZAMKNIĘCIE SEZONU ──
+// Zdjęcie rankingu do archiwum, zerowanie gry i nowa plansza — w JEDNEJ transakcji, żeby
+// żaden rzut nie wpadł pomiędzy archiwum a zerowanie. Zerujemy wszystko, co daje przewagę:
+// punkty, coins, okrążenia, ekwipunek, czekające ataki i tarcze, dokupione dziś Extra Move.
+// Zostają kostiumy (kosmetyka, zapłacone i tak) i dzienny licznik rzutów — zmiana sezonu
+// w środku dnia nie ma dawać nikomu dodatkowych rzutów.
+//
+// Rozbicie punktów (sl_points_log) kasujemy w całości: suma starego sezonu żyje już
+// w archiwum, a stare wiersze po wyzerowaniu total_points rozjechałyby dymek. Stąd też
+// znika granica „ten sezon / wcześniej" — po zamknięciu wszystko w dymku to ten sezon.
+//
+// Plansza musi być nowa JUŻ w środku transakcji: slCloseFightForSeason startuje nowy cykl
+// bossa, a ten czyta bossa sezonowego z aktywnej planszy.
+function slCloseSeasonAndInstall(season) {
+  const prev = slCurrentBoard();
+  try {
+    return transaction(() => {
+      const closure = crowning.archiveSeason({
+        board: prev.id,
+        name: slSeasonLabel(prev.id),
+        moveFloor: slSeasonMoveFloor(),
+        candies: seasonal.candyMap(),
+        tileOf: slTileOf
+      });
+      db.exec(`
+        UPDATE sl_state SET abs_pos = 0, laps = 0, balance = 0, total_points = 0,
+          extra_rolls = 0, extra_rolls_date = NULL;
+        DELETE FROM sl_inventory;
+        DELETE FROM sl_effects WHERE status = 'pending';
+        DELETE FROM sl_points_log;
+        DELETE FROM sl_meta WHERE key = 'season_points_floor';
+      `);
+      // Gdyby admin przełączył potem planszę BEZ zamykania, dymek pokaże to jako „wcześniej".
+      slMetaSet('season_prior_label', 'Poprzednia plansza');
+      seasonal.resetAll(); // kocioł, cukierki na polach i rejestr — liczba cukierków jest w archiwum
+      const moved = slInstallBoardRows(season, true, false);
+      slSetBoard(season);
+      const fight = boss.slCloseFightForSeason();
+      return { closure, moved, fight };
+    });
+  } catch (e) {
+    slSetBoard(prev);
+    throw e;
+  }
 }
 
 (function slActivateBoardOnStartup() {
@@ -2307,26 +942,15 @@ function slInstallBoard(season, resetPositions, newSeason = false) {
   const changed = storedSize != null && (season.id !== wanted || Number(storedSize) !== season.size);
   const moved = slInstallBoard(season, changed);
   console.log(`Snakes & Ladders: sezon "${season.id}" (${season.name}) — ${season.size} pól, siatka ${season.cols}×${season.rows}`
+    + (season.testing ? ' [W TESTACH]' : '')
     + (changed ? `; plansza się zmieniła, ${moved} graczy wraca na pole 0` : ''));
+  // Sezon po premierze (bez `testing`) nie powinien zmieniać liczby pól bez migracji:
+  // reset pozycji to jeszcze nic, ale rozbicie punktów, cukierki na polach i historia
+  // ruchów odnoszą się do starych numerów. Głośno w logu, żeby nie przeszło niezauważone.
+  if (changed && !season.testing) {
+    console.error(`Snakes & Ladders: UWAGA — liczba pól sezonu "${season.id}" zmieniła się po premierze (${storedSize} → ${season.size}). Czy była do tego migracja?`);
+  }
 })();
-
-// Wiersz sl_board w kształcie dla logiki i frontu: `faces` z tekstu "3,6" na listę liczb.
-function slBoardRow(t) {
-  const out = { position: t.position, kind: t.kind, target: t.target, value: t.value };
-  if (t.kind === 'fork') {
-    out.alt_target = t.alt_target;
-    out.faces = String(t.faces || '').split(',').filter(Boolean).map(Number);
-  }
-  return out;
-}
-
-function slBoardMap() {
-  const map = {};
-  for (const t of db.prepare('SELECT position, kind, target, value, alt_target, faces FROM sl_board').all()) {
-    map[t.position] = slBoardRow(t);
-  }
-  return map;
-}
 
 // Zwraca (i w razie potrzeby tworzy) rekord stanu gracza.
 function slEnsureState(playerId) {
@@ -2353,16 +977,6 @@ function slAddPowerup(playerId, type, delta) {
   `).run(playerId, type, delta, delta);
 }
 
-function d6() {
-  return 1 + Math.floor(Math.random() * 6);
-}
-
-// Losuje siłę pojedynczego wypchnięcia (w polach) z zakresu SL_KNOCKBACK_TILES_BACK_MIN..MAX.
-function slKnockbackTilesBack() {
-  const span = SL_KNOCKBACK_TILES_BACK_MAX - SL_KNOCKBACK_TILES_BACK_MIN + 1;
-  return SL_KNOCKBACK_TILES_BACK_MIN + Math.floor(Math.random() * span);
-}
-
 // Ile ruchów ma DZIŚ dany gracz: bazowy limit plus dodatkowe sloty kupione Extra
 // Move'em. Dodatki liczą się tylko w dniu, w którym power-up został użyty — inny dzień
 // (albo pusta data) znaczy zero, więc kolumny nie trzeba zerować o północy. `st` to
@@ -2372,12 +986,6 @@ function slDailyRollsFor(st, today) {
   return SL_DAILY_ROLLS + Math.max(0, extra);
 }
 
-// Pola na planszy = abs_pos zwinięty do 0..(liczba pól - 1)
-function slTileOf(absPos) {
-  const size = slBoardSize();
-  return ((absPos % size) + size) % size;
-}
-
 // URL zdjęcia profilowego gracza — z parametrem wersji (data ostatniej zmiany), żeby
 // przeglądarki od razu widziały nowe zdjęcie po re-uploadzie, a nie stare z cache'u.
 // null, gdy gracz jeszcze nie wgrał zdjęcia (avatar_updated_at puste).
@@ -2385,240 +993,6 @@ function slAvatarUrl(playerId, avatarUpdatedAt) {
   if (!avatarUpdatedAt) return null;
   const v = Date.parse(avatarUpdatedAt.replace(' ', 'T') + 'Z') || Date.now();
   return `/avatars/${playerId}.jpg?v=${v}`;
-}
-
-// ── SHIELD ──
-// Aktywna tarcza = wpis 'shield' w sl_effects ze statusem 'pending'. Zużywa się
-// w momencie, w którym ktoś rzuca na gracza Freeze albo Curse: atak nie dochodzi
-// do skutku (zapisujemy go jako 'blocked'), a tarcza znika.
-function slActiveShield(playerId) {
-  return db.prepare(
-    `SELECT * FROM sl_effects WHERE target_player_id = ? AND type = 'shield' AND status = 'pending' ORDER BY id LIMIT 1`
-  ).get(playerId) || null;
-}
-
-function slHasShield(playerId) {
-  return !!slActiveShield(playerId);
-}
-
-// Rozstrzyga efekt pola dla JUŻ WYLICZONEJ pozycji lądowania (drabina/wąż/bonus).
-// Współdzielona przez zwykły ruch (slStepMove), knockback i klątwę „Chaos" — każdy,
-// kto ląduje na nowym polu (nawet nie przez normalny rzut), odpala jego efekt tak samo.
-// `invertBoard` (klątwa „Odwrócone Zasady") sprawia, że drabiny działają jak węże i
-// odwrotnie na TEN JEDEN ruch: cel odbija się względem pola lądowania (2×landed - target),
-// więc drabina w górę o X pól staje się zjazdem w dół o X pól, i vice versa.
-// Przy ODWRÓCONYCH ZASADACH (klątwa 5) szukamy połączenia, które normalnie KOŃCZY się na
-// danym polu — bo na ten ruch przechodzi się je w drugą stronę, z celu do źródła.
-// Gdyby po edycji planszy w adminie dwa połączenia celowały w to samo pole, wygrywa to
-// o najniższym numerze pola, żeby wynik był powtarzalny, a nie zależny od kolejności klucza.
-function slReverseLink(board, tile) {
-  let found = null;
-  for (const key of Object.keys(board)) {
-    const t = board[key];
-    if (t.kind !== 'ladder' && t.kind !== 'snake' && t.kind !== 'fork') continue;
-    // Rozwidlona drabina ma DWA górne końce — z każdego z nich zjeżdża się na jej start.
-    if (Number(t.target) !== tile && !(t.kind === 'fork' && Number(t.alt_target) === tile)) continue;
-    if (!found || Number(t.position) < Number(found.position)) found = t;
-  }
-  return found;
-}
-
-function slResolveTileEffect(landedAbs, board, invertBoard = false) {
-  let abs = Math.max(0, landedAbs); // nie schodzimy poniżej startu (np. klątwa Odwrotny Ruch)
-  let tilePoints = 0;
-  let note = null;
-  const landed = slTileOf(abs);
-  const base = abs - landed;   // pole 0 bieżącego okrążenia — skok liczymy względem niego
-  const tile = board[landed];
-
-  // ODWRÓCONE ZASADY: nie liczymy żadnego lustra, tylko przechodzimy TO SAMO połączenie od
-  // drugiego końca. Staniesz na ogonie węża (na jego celu) — wjeżdżasz do głowy; staniesz
-  // na szczycie drabiny — zjeżdżasz na dół. Oba końce są prawdziwymi polami planszy, więc
-  // z definicji nie da się wyjechać poza nią ani zmienić okrążenia — żadnego przycinania.
-  // Wejście od „normalnej" strony (dół drabiny, głowa węża) na ten ruch nic nie robi:
-  // połączenie po odwróceniu po prostu się tam nie zaczyna.
-  const reverse = invertBoard ? slReverseLink(board, landed) : null;
-
-  let forkRoll = null;
-  let forkAt = null; // pole rozwidlenia — front stawia tam pionek na czas animacji rzutu
-  if (reverse) {
-    abs = base + Number(reverse.position);
-    note = reverse.kind === 'snake' ? 'ladder' : 'snake'; // drabina od góry to zjazd, i odwrotnie
-  } else if (tile && !invertBoard && tile.kind === 'fork') {
-    // ROZWIDLONA DRABINA: dodatkowy rzut rozstrzyga, którą odnogą się idzie. Losujemy tu,
-    // na serwerze — tak jak każdy rzut — a wynik wraca w `forkRoll`, żeby ruch, dziennik
-    // i front pokazały, co wypadło. Rzut rozwidlenia nie daje punktów za oczka: to tylko
-    // wybór odnogi, a postęp po planszy i tak policzy się z dystansu.
-    forkRoll = d6();
-    forkAt = landed;
-    const win = (tile.faces || []).includes(forkRoll);
-    abs = base + Number(win ? tile.target : tile.alt_target);
-    note = win ? 'fork_win' : 'fork_lose';
-  } else if (tile && !invertBoard && (tile.kind === 'ladder' || tile.kind === 'snake')) {
-    // Skok na planszy przekładamy na zmianę abs_pos (drabina w górę, wąż w dół),
-    // zachowując bieżące okrążenie jako bazę.
-    abs = base + tile.target;
-    if (abs < 0) abs = 0; // nie schodzimy poniżej startu
-    note = tile.kind;
-  } else if (tile && tile.kind === 'bonus' && !seasonal.bonusesOff()) {
-    // Bonusów klątwa nie dotyczy — działają tak samo w obie strony.
-    // W dni drzwi „cukierek albo psikus" (hide_bonuses) bonusy są zdjęte z planszy.
-    tilePoints += tile.value;
-    note = 'bonus';
-  }
-  return { abs, tilePoints, note, forkRoll, forkAt };
-}
-
-// Wykonuje pojedynczy krok ruchu o `roll` pól, uwzględniając węże/drabiny/bonusy.
-// Zwraca { absAfter, tilePoints, note } dla tego kroku.
-function slStepMove(absBefore, roll, board, invertBoard = false) {
-  const resolved = slResolveTileEffect(absBefore + roll, board, invertBoard);
-  return { absAfter: resolved.abs, tilePoints: resolved.tilePoints, note: resolved.note, forkRoll: resolved.forkRoll, forkAt: resolved.forkAt };
-}
-
-// ── KNOCKBACK ──
-// Znajduje gracza (poza wykluczonymi) stojącego na danym polu — po numerze pola
-// (abs_pos modulo rozmiar planszy), bo to WSPÓLNA, zapętlona plansza.
-function slFindOccupant(tile, excludeIds) {
-  const rows = db.prepare(`
-    SELECT s.player_id, s.abs_pos, p.nickname
-    FROM sl_state s JOIN players p ON p.id = s.player_id
-  `).all();
-  return rows.find(r => !excludeIds.has(r.player_id) && slTileOf(r.abs_pos) === tile) || null;
-}
-
-// Gracz, który ląduje na zajętym polu, wypycha okupanta o losowe
-// SL_KNOCKBACK_TILES_BACK_MIN..MAX pól do tyłu (losowane osobno dla każdej ofiary)
-// — ale najdalej na pole 0 BIEŻĄCEGO okrążenia: cofnięcie nigdy nie przenosi
-// ofiary na poprzednią pętlę ani nie odbiera jej okrążenia. Do tego zabiera mu
-// SL_KNOCKBACK_COIN_STEAL
-// coins (maks. tyle, ile ofiara ma na koncie) i oddaje je temu, kto akurat spowodował
-// TO konkretne wypchnięcie. Punkty do rankingu idą OSOBNO: stałe SL_KNOCKBACK_POINTS,
-// niezależnie od tego, ile dało się zabrać. Przy kaskadzie zbijający to nie zawsze roller:
-// gdy wypchnięty gracz sam wyląduje na kimś, to ON staje się "zbijającym" dla kolejnej
-// ofiary w łańcuchu.
-// Pole, na które trafia ofiara, odpala węża/drabinę/bonus normalnie (slResolveTileEffect)
-// — jeśli to przerzuci ją na KOLEJNE zajęte pole, kaskada leci dalej stamtąd. Każde
-// wypchnięcie trafia też do dziennika aktywności ofiary (i zbijającego, przy kradzieży).
-// Pole 0 (start planszy/okrążenia) jest bezpieczne — stojących tam graczy NIE da się
-// wypchnąć, więc kaskada urywa się, gdy trafi na kogoś stojącego akurat na starcie.
-// Odmiana „pole/pola/pól" — dziennik czyta się jak zdanie, więc „-3 pól" kłuje w oczy.
-function slTilesWord(n) {
-  const abs = Math.abs(n);
-  if (abs === 1) return 'pole';
-  const last = abs % 10;
-  const lastTwo = abs % 100;
-  return last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14) ? 'pola' : 'pól';
-}
-
-function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, turnRef = null) {
-  const pushedIds = new Set([rollerPlayerId]);
-  const chain = [];
-  // ── KOLEJNOŚĆ WPISÓW W DZIENNIKU ──
-  // Zapisujemy CHRONOLOGICZNIE, w kolejności, w jakiej chcemy je przeczytać: najpierw
-  // kto zbił, potem dokąd ofiara poleciała, na końcu co ją tam spotkało — i tak krok
-  // po kroku przez całą kaskadę. Front rysuje turę jako blok i sortuje podlinijki
-  // ROSNĄCO po `id` (patrz renderActivity), więc kolejność zapisu JEST kolejnością na
-  // ekranie. Kiedyś było odwrotnie — wpisy szły od ostatniego domina, żeby płaski feed
-  // `id DESC` czytał się chronologicznie. Po wprowadzeniu bloków ta sztuczka zaczęła
-  // działać przeciwko nam, więc jej nie ma. Cena: w płaskim widoku panelu admina
-  // kaskada czyta się od końca — to narzędzie moderacji, nie narracja.
-  let targetTile = slTileOf(landingAbsPos);
-  let pusherId = rollerPlayerId;
-  let pusherNickname = rollerNickname;
-  for (let i = 0; i < 200; i++) { // bezpiecznik przeciw pętli nieskończonej
-    if (targetTile === 0) break; // pole 0 jest bezpieczne — nikogo stamtąd nie wypychamy
-    const occ = slFindOccupant(targetTile, pushedIds);
-    if (!occ) break;
-    const fromAbs = Number(occ.abs_pos);
-    // Siła wypchnięcia jest losowa przy każdym zbiciu — patrz slKnockbackTilesBack().
-    // Cofnięcie zatrzymuje się na polu 0 BIEŻĄCEGO okrążenia: wypchnięcie nigdy nie
-    // zabiera całego okrążenia. Gracz tuż po starcie kolejnej pętli (np. pole 2) ląduje
-    // na polu 0 tej pętli, a nie na końcówce poprzedniej — dlatego do dziennika i do
-    // odpowiedzi trafia tilesBack, czyli faktyczne cofnięcie po przycięciu, nie samo
-    // wylosowanie.
-    const lapStartAbs = fromAbs - slTileOf(fromAbs);
-    const knockedAbs = Math.max(lapStartAbs, fromAbs - slKnockbackTilesBack());
-    const tilesBack = fromAbs - knockedAbs;
-    const resolved = slResolveTileEffect(knockedAbs, board);
-    const toAbs = resolved.abs;
-    const bonusPoints = resolved.tilePoints;
-
-    const victimRow = db.prepare('SELECT balance FROM sl_state WHERE player_id = ?').get(occ.player_id);
-    const stolen = Math.min(SL_KNOCKBACK_COIN_STEAL, Math.max(0, Number(victimRow.balance)));
-
-    db.prepare(`
-      UPDATE sl_state
-      SET abs_pos = ?, laps = ?, balance = balance + ?, total_points = total_points + ?
-      WHERE player_id = ?
-    `).run(toAbs, Math.floor(toAbs / slBoardSize()), bonusPoints - stolen, bonusPoints, occ.player_id);
-
-    // Wypchnięty mógł wylądować na polu bonusowym — to jego punkty z BONUSU, nie z kostki:
-    // nie rzucał, tylko został tam przesunięty.
-    slLogPoints(occ.player_id, 'bonus', bonusPoints);
-
-    // Coins: przelew od ofiary (przycięty do jej portfela). Punkty: stała nagroda za zbicie,
-    // także gdy portfel ofiary był pusty — patrz SL_KNOCKBACK_POINTS.
-    const pointsWon = SL_KNOCKBACK_POINTS;
-    db.prepare('UPDATE sl_state SET balance = balance + ?, total_points = total_points + ? WHERE player_id = ?')
-      .run(stolen, pointsWon, pusherId);
-    slLogPoints(pusherId, 'knockback', pointsWon);
-
-    // Pole, na które gracz REALNIE został cofnięty — zanim zadziałała drabina/wąż.
-    // Bez tego dziennik sklejał dwa różne ruchy w jeden i wychodziło „z pola 7 → 17
-    // (-4 pola)", czyli skok DO PRZODU opisany jako cofnięcie o cztery pola.
-    const knockedTile = slTileOf(knockedAbs);
-    const entry = {
-      player_id: occ.player_id,
-      nickname: occ.nickname,
-      from_tile: slTileOf(fromAbs),
-      knocked_tile: knockedTile,
-      to_tile: slTileOf(toAbs),
-      tiles_back: tilesBack,
-      tile_effect: resolved.note,
-      bonus_points: bonusPoints,
-      coins_stolen: stolen,
-      points_won: pointsWon,
-      stolen_by: pusherNickname
-    };
-    chain.push(entry);
-
-    // Wypychający dostaje wpis ZAWSZE, także gdy nie było czego ukraść. Wcześniej ta linia
-    // siedziała pod `if (stolen > 0)`, więc zbicie gracza z pustym portfelem nie zostawiało
-    // po sobie w dzienniku ŻADNEGO śladu po stronie zbijającego — a to jego akcja i chce ją
-    // u siebie zobaczyć (dziennik podświetla wpisy po player_id, patrz renderActivity).
-    // UWAGA: w tym tekście nie może paść słowo „Wypchnięty". Cofanie całego dnia szuka ofiar
-    // przez `detail LIKE '%Wypchnięty%'` na wpisach typu knockback (patrz /admin/day/rollback)
-    // i policzyłoby zbijającego jako kogoś, kogo trzeba ręcznie przestawić na planszy.
-    slLogActivity(pusherId, 'knockback', stolen > 0
-      ? `💰 Zbiłeś ${occ.nickname} z pola ${entry.from_tile}: +${pointsWon} pkt i ${stolen} coins zabranych!`
-      : `💥 Zbiłeś ${occ.nickname} z pola ${entry.from_tile}: +${pointsWon} pkt — coins do zabrania nie miał.`, turnRef);
-
-    const bits = [`z pola ${entry.from_tile} → ${knockedTile} (-${tilesBack} ${slTilesWord(tilesBack)})`];
-    if (resolved.note === 'bonus') bits.push(`⭐ +${bonusPoints} pkt bonusu`);
-    if (stolen > 0) bits.push(`💰 stracił ${stolen} coins na rzecz ${pusherNickname}`);
-    slLogActivity(occ.player_id, 'knockback', `💥 Wypchnięty przez ${pusherNickname} ${bits.join(' ')}`, turnRef);
-
-    // Drabina i wąż to OSOBNY ruch, więc dostają własny wpis — najpierw „zbity na pole 3",
-    // potem „drabina z 3 na 17". Bonus zostaje w wierszu wypchnięcia, bo nie przesuwa
-    // pionka, tylko dosypuje punkty.
-    if (resolved.note === 'ladder') {
-      slLogActivity(occ.player_id, 'knockback', `🪜 Z pola ${knockedTile} wjechał drabiną na ${entry.to_tile}`, turnRef);
-    } else if (resolved.note === 'snake') {
-      slLogActivity(occ.player_id, 'knockback', `🐍 Z pola ${knockedTile} zjechał wężem na ${entry.to_tile}`, turnRef);
-    } else if (resolved.forkRoll != null) {
-      // Wypchnięty na rozwidloną drabinę też rzuca o odnogę — to ten sam efekt pola.
-      slLogActivity(occ.player_id, 'knockback', `🪜🎲 Z pola ${knockedTile} na rozwidloną drabinę: wypadło ${resolved.forkRoll} → pole ${entry.to_tile}`, turnRef);
-    }
-
-    pushedIds.add(occ.player_id);
-    pusherId = occ.player_id;
-    pusherNickname = occ.nickname;
-    if (fromAbs === toAbs) break; // brak realnej zmiany pozycji — koniec kaskady
-    targetTile = slTileOf(toAbs);
-  }
-
-  return chain;
 }
 
 // ── MIGRACJA (jednorazowa): retroaktywne dogranie punktów za kradzieże przy
@@ -2680,20 +1054,6 @@ function slApplyKnockback(rollerPlayerId, landingAbsPos, board, rollerNickname, 
   slMetaSet('double_move_instant_migrated', '1');
 })();
 
-
-// Buduje publiczny opis planszy (do rysowania w UI). Front nie zna żadnego kształtu na
-// sztywno: rysuje pola tam, gdzie każe `path`, więc nowy sezon = nowy plik, bez zmian w JS.
-function slBoardPayload() {
-  const tiles = db.prepare('SELECT position, kind, target, value, alt_target, faces FROM sl_board ORDER BY position').all().map(slBoardRow);
-  return {
-    id: slBoard.id, name: slBoard.name, theme: slBoard.theme, effects: slBoard.effects,
-    size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows,
-    path: slBoard.path, loop: slBoard.loop, tiles,
-    view: slBoard.view,
-    lap_points: slLapPoints(),
-    season_prior_label: slMetaGet('season_prior_label') || SL_FIRST_SEASON_NAME
-  };
-}
 
 // Pozycje wszystkich graczy na wspólnej planszy (widoczne dla każdego).
 // TYLKO gracze ze zdjęciem profilowym — bez zdjęcia nie widać ich na planszy i nie da
@@ -2774,9 +1134,12 @@ function slLeaderboard(meId) {
   // Polowanie na cukierki (sezon z events.candy) nie ma osobnego rankingu — liczba 🍬
   // stoi w wierszu gracza obok punktów. null = sezon bez cukierków.
   const candies = seasonal.candyMap();
+  // Medale za podium zamkniętych sezonów — przy nicku, niezależnie od bieżących punktów.
+  const medals = crowning.medalsMap();
   return rows.map((r, i) => ({
     rank: i + 1,
     candies: candies ? (candies.get(r.player_id) || 0) : null,
+    medals: medals.get(r.player_id) || [],
     player_id: r.player_id,
     nickname: r.nickname,
     total_points: Number(r.total_points),
@@ -2795,96 +1158,13 @@ function slLeaderboard(meId) {
 // a po jego zakończeniu kontrybutorzy dostają nagrody wg wybranego podziału.
 
 
-// ══ DISCORD — SZYNA ZDARZEŃ ══
-// Zdarzenia gry lecą przez jedną szynę: każdy typ ma własny przełącznik, trzymany
-// w sl_meta (klucz 'discord_events'), więc da się je włączać/wyłączać z panelu admina
-// bez restartu. Webhook bierzemy z SNAKES_DISCORD_WEBHOOK_URL, a gdy go nie ma —
-// z DISCORD_WEBHOOK_URL (ten sam, co Wordle). Wysyłka jest „fire & forget":
-// błąd Discorda nigdy nie wywraca ruchu gracza.
-const SL_DISCORD_WEBHOOK_URL = process.env.SNAKES_DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL || '';
-const SNAKES_URL = (process.env.APP_URL || 'https://frog03-21535.wykr.es/').replace(/\/+$/, '') + '/snakes';
-
-// Domyślnie ON to rzeczy „warte pingu": ataki, tarcze, węże/drabiny, kamienie milowe
-// co-opu i dzienne podsumowanie. Codzienny wynik każdego rzutu i Extra Move są
-// domyślnie OFF, żeby nie zasypywać kanału.
-const SL_EVENT_DEFAULTS = {
-  roll_result:        false,
-  tile_landing:       true,
-  powerup_freeze:     true,
-  powerup_curse:      true,
-  shield_block:       true,
-  double_move:        false,
-  knockback:          true,
-  coop_milestone:     true,
-  coop_completed:     true,
-  leaderboard_daily:  true
-};
-
-const SL_EVENT_LABELS = {
-  roll_result:        'Wynik dziennego rzutu',
-  tile_landing:       'Wejście na węża / drabinę',
-  powerup_freeze:     'Użycie Freeze (kto na kogo)',
-  powerup_curse:      'Klątwy (rzucenie — bez celu i wariantu; odpalenie)',
-  shield_block:       'Shield zablokował atak',
-  double_move:        'Użycie Extra Move',
-  knockback:          'Wypchnięcie z zajętego pola (i efekt domina)',
-  coop_milestone:     'Pula co-op przekroczyła próg',
-  coop_completed:     'Wydarzenie co-op ukończone (nagrody wypłacone, kolejna edycja rusza)',
-  leaderboard_daily:  'Dzienne podsumowanie rankingu'
-};
-
-function slEventsConfig() {
-  let stored = {};
-  try {
-    stored = JSON.parse(slMetaGet('discord_events') || '{}');
-  } catch {
-    stored = {};
-  }
-  const cfg = {};
-  for (const key of Object.keys(SL_EVENT_DEFAULTS)) {
-    cfg[key] = typeof stored[key] === 'boolean' ? stored[key] : SL_EVENT_DEFAULTS[key];
-  }
-  return cfg;
-}
-
-function slSetEventsConfig(patch) {
-  const cfg = slEventsConfig();
-  for (const [key, val] of Object.entries(patch || {})) {
-    if (key in SL_EVENT_DEFAULTS) cfg[key] = !!val;
-  }
-  slMetaSet('discord_events', JSON.stringify(cfg));
-  return cfg;
-}
-
-function slEventEnabled(type) {
-  return slEventsConfig()[type] === true;
-}
-
-async function slPostDiscord(payload) {
-  if (!SL_DISCORD_WEBHOOK_URL) return { skipped: 'brak webhooka' };
-  const r = await fetch(SL_DISCORD_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (!r.ok) throw new Error(`Discord ${r.status}: ${await r.text()}`);
-  return { sent: true };
-}
-
-// Główny punkt wejścia szyny. `build` to funkcja zwracająca treść (leniwie — nie
-// budujemy wiadomości, gdy zdarzenie jest wyłączone). Nigdy nie rzuca wyjątkiem.
-function slEmit(type, build) {
-  try {
-    if (!SL_DISCORD_WEBHOOK_URL) return;
-    if (!slEventEnabled(type)) return;
-    const content = build();
-    if (!content) return;
-    slPostDiscord(typeof content === 'string' ? { content } : content)
-      .catch(err => console.error(`Snakes/Discord [${type}]:`, err.message));
-  } catch (err) {
-    console.error(`Snakes/Discord [${type}] — błąd budowania wiadomości:`, err.message);
-  }
-}
+// ── DISCORD ── szyna zdarzeń: przełączniki, wysyłka, slEmit (lib/discord.js).
+const {
+  SNAKES_URL, SL_DISCORD_WEBHOOK_URL, slEmit, slPostDiscord, slEventsConfig, SL_EVENT_LABELS,
+  SL_EVENT_DEFAULTS, slSetEventsConfig
+} = require('./lib/discord')({
+  slMetaGet, slMetaSet
+});
 
 // ── DZIENNE PODSUMOWANIE RANKINGU ──
 // Tykamy co minutę (jak scheduler Wordle) i raz dziennie, o SNAKES_SUMMARY_HOUR,
@@ -2964,7 +1244,7 @@ boss.startDeadlineScheduler();
 // bez roku, żeby sezon działał co roku bez zmian. `key` odróżnia edycje z różnych lat —
 // Dynia z 2026 nie blokuje Dyni z 2027.
 function slSpecialBossNow() {
-  const sb = slBoard.special_boss;
+  const sb = slCurrentBoard().special_boss;
   if (!sb) return null;
   const y = Number(todayWaw().slice(0, 4));
   const at = (mmdd, hour = 0) => {
@@ -2973,24 +1253,42 @@ function slSpecialBossNow() {
   };
   const [attackDay, attackHour] = sb.attack_at.split(' ');
   return {
-    key: `${slBoard.id}-${y}`, name: sb.name, emoji: sb.emoji, hp_per_workday: sb.hp_per_workday,
+    key: `${slCurrentBoard().id}-${y}`, name: sb.name, emoji: sb.emoji, hp_per_workday: sb.hp_per_workday,
     attackMs: at(attackDay, Number(attackHour))
   };
 }
 
 // ── KOSTIUMY ── czysta kosmetyka pionka za coins (lib/costumes.js). Ta sama fabryka co
 // boss: helpery przychodzą w deps, jeden uchwyt bazy.
-const costumes = require('./lib/costumes')({ db, transaction, slLogActivity, slEnsureState });
+// Pierwszy sezon w UI nazywa się „Snakes Game", nie jak plik planszy (patrz dymek gracza).
+function slSeasonLabel(id) {
+  return id === seasons.DEFAULT_ID ? SL_FIRST_SEASON_NAME : ((seasons.get(id) || {}).name || id);
+}
+
+const costumes = require('./lib/costumes')({
+  db, transaction, slLogActivity, slEnsureState, slMetaGet, slMetaSet,
+  activeSeasonId: () => slCurrentBoard().id,
+  seasonLabel: slSeasonLabel,
+});
 costumes.initSchema();
-costumes.registerRoutes(app, { authPlayer, buildState: playerId => slBuildState(playerId) });
+costumes.registerRoutes(app, { authPlayer, checkAdmin, buildState: playerId => slBuildState(playerId) });
+
+// Silnik planszy (lib/board.js) powstaje wcześniej niż moduł sezonowy, więc o zdjęte bonusy
+// (drzwi z hide_bonuses) pyta przez tę funkcję — po `seasonal` sięga dopiero w trakcie rzutu.
+function slBonusesOff() { return seasonal.bonusesOff(); }
 
 // ── MECHANIKI SEZONOWE ── kocioł, cukierek albo psikus, cukierki (lib/seasonal.js).
 // Aktywną planszę podajemy funkcją, nie wartością — admin może zmienić sezon w locie.
 const seasonal = require('./lib/seasonal')({
   db, transaction, slLogActivity, slLogPoints, slEmit, todayWaw, isWeekendStr,
-  getSeason: () => slBoard, tileOf: slTileOf, boardSize: slBoardSize
+  getSeason: slCurrentBoard, tileOf: slTileOf, boardSize: slBoardSize
 });
 seasonal.initSchema();
+
+// ── ZAMKNIĘCIE SEZONU ── archiwum rankingu, medale, ukoronowanie (lib/crowning.js).
+const crowning = require('./lib/crowning')({ db, ensureColumn, slAvatarUrl });
+crowning.initSchema();
+crowning.registerRoutes(app, { authPlayer });
 
 // ── MIGRACJA (jednorazowa): DOŁADOWANIE „bank się pomylił" — każdy gracz dostaje
 // SL_BANK_ERROR_GRANT coins do portfela. Jednorazowy prezent od admina przy okazji
@@ -3037,7 +1335,10 @@ function slBuildState(playerId) {
   const st = slEnsureState(playerId);
   const shop = slShopPayload(playerId); // raz — sięga do bazy po oczekującą Drożyznę
   const today = todayWaw();
-  const isWeekend = isWeekendStr(today);
+  // „Weekend" = dzień, w którym gra jest zamknięta z powodu weekendu. Z włączonymi w panelu
+  // weekendami (testy) sobota i niedziela zachowują się jak zwykły dzień.
+  const playHours = slPlayHours();
+  const isWeekend = isWeekendStr(today) && !playHours.weekends;
   const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
   const dailyRolls = slDailyRollsFor(st, today);
   const rollsRemainingToday = Math.max(0, dailyRolls - rollsUsedToday);
@@ -3059,8 +1360,8 @@ function slBuildState(playerId) {
       extra_rolls_today: dailyRolls - SL_DAILY_ROLLS,
       is_weekend: isWeekend,
       office_open: officeOpen,
-      office_start_hour: SL_PLAY_START_HOUR,
-      office_end_hour: SL_PLAY_END_HOUR,
+      office_start_hour: playHours.start,
+      office_end_hour: playHours.end,
       office_closes_at: officeOpen ? new Date(slOfficeCloseMs()).toISOString() : null,
       next_move_at: new Date(slNextOpenMs()).toISOString(),
       can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend && officeOpen,
@@ -3076,9 +1377,24 @@ function slBuildState(playerId) {
     costumes: costumes.slCostumeShop(playerId),
     season_events: seasonal.payload(playerId),
     coop: boss.slCoopPayload(playerId),
+    // Zamknięte sezony (zakładki w rankingu) i podium do obejrzenia raz po zamknięciu.
+    seasons_archive: crowning.closures(),
+    crowning: crowning.crowningFor(playerId),
     server_date: today
   };
 }
+
+// ── SKLEP I POWER-UPY ── cennik, klątwy, tarcza i trasy sklepu (lib/shop.js).
+// Podpięte tu, a nie przy stałych, bo trasy potrzebują bossa, sezonu i stanu gracza.
+const {
+  SL_POWERUP_TYPES, slShopPayload, slHasShield, SL_CURSE_PRICE_VARIANT, slCurseAdjustRoll,
+  SL_CURSE_COIN_STEAL, SL_CURSE_LABELS, SL_CURSE_DESCRIPTIONS, SL_POWERUP_COSTS,
+  SL_POWERUP_LABELS
+} = require('./lib/shop')({
+  db, app, authPlayer, transaction, slEnsureState, slInventory, slAddPowerup, slLogActivity,
+  slBuildState, slEmit, todayWaw, isWeekendStr, slPlayHours, slOfficeOpenAt,
+  SL_MAX_EXTRA_ROLLS, SL_DAILY_ROLLS
+});
 
 // ── ENDPOINTY — SNAKES & LADDERS ──
 
@@ -3119,19 +1435,9 @@ app.get('/api/snakes/board', (req, res) => {
     board: slBoardPayload(),
     players: slPlayersPayload(null),
     leaderboard: slLeaderboard(null),
+    seasons_archive: crowning.closures(),
     coop: boss.slCoopPayload(null)
   });
-});
-
-// GET /api/snakes/activity?date=YYYY-MM-DD&limit=150 — publiczny dziennik aktywności
-// (ruchy, sklep, wpłaty do puli, knockback) do przeglądania w prawej kolumnie UI.
-// Bez filtra dnia zwraca po prostu najnowsze wpisy ze wszystkich dni.
-app.get('/api/snakes/activity', (req, res) => {
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null;
-  const limit = parseInt(req.query.limit, 10) || 150;
-  // Cała treść przechodzi przez moderację widoku — endpoint jest publiczny (bez tokenu),
-  // więc to JEDYNE miejsce decydujące, co biuro widzi (patrz slPublicActivity).
-  res.json(slPublicActivity({ date, limit }));
 });
 
 // POST /api/snakes/roll — jedyny dzienny ruch gracza (rzut kostką).
@@ -3153,14 +1459,14 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   }
 
   // Bramka: w weekend nie gramy — dokładnie jak w Wordle.
-  if (isWeekendStr(today)) {
+  if (isWeekendStr(today) && !slPlayHours().weekends) {
     return res.status(400).json({ error: 'W weekend nie gramy — wróć w poniedziałek.', is_weekend: true });
   }
 
   // Bramka: gra biurowa — rzucamy tylko w godzinach pracy (czasu Warszawy).
   if (!slOfficeOpenAt()) {
     return res.status(400).json({
-      error: `Rzucamy tylko w godzinach ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 — to gra biurowa.`,
+      error: `Rzucamy tylko w godzinach ${slPlayHours().start}:00–${slPlayHours().end}:00 — to gra biurowa.`,
       office_closed: true,
       next_open: new Date(slNextOpenMs()).toISOString()
     });
@@ -3389,7 +1695,7 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   });
 
   if (result.locked) {
-    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00 (albo dołóż sobie ruch Extra Move'em).` });
+    return res.status(400).json({ error: `Wykorzystałeś już dzisiejsze ${result.daily_rolls} ruchy — wróć jutro między ${slPlayHours().start}:00 a ${slPlayHours().end}:00 (albo dołóż sobie ruch Extra Move'em).` });
   }
 
   // Plansza u gracza była nieaktualna — rzut się NIE odbył (limit dzienny nietknięty).
@@ -3454,7 +1760,8 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
             title: `Edycja #${result.boss_hit.victory.cycle}`,
             url: SNAKES_URL,
             description: `Ostateczny cios (${result.boss_hit.damage} obr.) zadał **${nickname}**. Wpłacający (${result.boss_hit.victory.contributors}) dzielą **${result.boss_hit.victory.points_awarded} pkt** i odzyskują **${result.boss_hit.victory.coins_refunded}** z wpłaconych **${result.boss_hit.victory.coins_paid}** coins.`
-              + boss.slBossPayoutLines(result.boss_hit.victory),
+              + boss.slBossPayoutLines(result.boss_hit.victory)
+              + (result.boss_hit.victory.season_over ? '\n\n🏁 To był boss sezonu — do końca sezonu walk z bossem już nie będzie.' : ''),
             color: 0x53D06B
           }]
         }));
@@ -3475,339 +1782,6 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
   res.json({ move: result, state: slBuildState(playerId) });
 });
 
-// POST /api/snakes/shop/buy { type } — kup power-up za punkty.
-app.post('/api/snakes/shop/buy', authPlayer, (req, res) => {
-  const playerId = req.player.id;
-  const nickname = req.player.nickname;
-  const type = String(req.body.type || '');
-  if (!SL_POWERUP_TYPES.includes(type)) {
-    return res.status(400).json({ error: 'Nieznany power-up' });
-  }
-  const baseCost = slPowerupBaseCost(type, playerId);
-  const priceCurseLabel = SL_CURSE_LABELS[SL_CURSE_PRICE_VARIANT];
-
-  const out = transaction(() => {
-    const st = slEnsureState(playerId);
-
-    // KLĄTWA DROŻYZNA: czeka w kolejce jak każda inna, ale odpala się dopiero TUTAJ —
-    // przy pierwszym zakupie po jej rzuceniu. Zużywa się WYŁĄCZNIE przy udanym zakupie:
-    // gdy graczowi zabraknie coins, klątwa zostaje na kolejną próbę (inaczej dałoby się
-    // ją zdjąć klikaniem „Kup" bez grosza przy duszy).
-    const priceCurse = slPendingPriceCurse(playerId);
-
-    // ── ODSŁONIĘCIE ──
-    // Pierwsza próba zakupu pod ukrytą Drożyzną NIE kupuje niczego i NIE rusza salda:
-    // wstrzymujemy ją, zapalamy klątwę i oddajemy świeży cennik z podwyżką. Dopiero
-    // kolejne kliknięcie kupuje — po cenie, którą gracz ma już przed oczami.
-    // Dzięki temu nie trzeba wybierać między „witryna kłamie" a „klątwa zdradza się przed
-    // czasem": do tej chwili nic nie było widać, a mimo to nikt nie zapłacił więcej,
-    // niż zobaczył. Zakup jest wstrzymany, a nie anulowany — to celowo ma być moment,
-    // w którym gracz decyduje jeszcze raz, już znając cenę.
-    if (priceCurse && !priceCurse.revealed_at) {
-      db.prepare(`UPDATE sl_effects SET revealed_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(priceCurse.id);
-      // ŚWIADOMIE BEZ WPISU W DZIENNIKU. Dziennik jest publiczny, a wpis „zakup
-      // wstrzymany" zdradziłby tarczę okrężną drogą: wszyscy zobaczyliby, że gracz
-      // właśnie coś kupował, a gdyby kupił Shield — po którym wpisu nie ma (patrz niżej)
-      // — zostałby ślad „próbował" bez „kupił", czyli jednoznaczna informacja, co kupił.
-      // Ofiara i tak wie swoje: dostaje toast od ręki, a w sklepie wisi ostrzeżenie aż
-      // do zakupu. W dzienniku ląduje dopiero sam zakup, czyli moment, w którym klątwa
-      // realnie zabolała.
-      return { revealed: true, base_cost: baseCost, cost: slShopPriceOf(type, true, playerId) };
-    }
-
-    // Sufit ekwipunku Extra Move — sprawdzany PO odsłonięciu Drożyzny (ta niczego nie
-    // pobiera), a PRZED pobraniem coins.
-    if (type === 'double_move' && (slInventory(playerId).double_move || 0) >= SL_EXTRA_MOVE_MAX_OWNED) {
-      return { full: true };
-    }
-
-    const cost = slShopPriceOf(type, !!priceCurse, playerId);
-    // Cena Extra Move zmienia się razem z rankingiem. Jeśli od odświeżenia sklepu gracz
-    // zmienił miejsce, NIE pobieramy innej kwoty, niż widział — wstrzymujemy zakup (nic nie
-    // znika z konta) i odsyłamy świeży cennik. Stary front bez `expected_cost` kupuje jak dawniej.
-    const expected = req.body.expected_cost != null ? Number(req.body.expected_cost) : null;
-    if (type === 'double_move' && expected != null && expected !== cost) {
-      return { price_changed: true, cost, expected };
-    }
-    if (st.balance < cost) return { poor: true, balance: st.balance, cost, cursed: !!priceCurse };
-
-    db.prepare('UPDATE sl_state SET balance = balance - ? WHERE player_id = ?').run(cost, playerId);
-    slAddPowerup(playerId, type, 1);
-    if (priceCurse) {
-      db.prepare(`UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(priceCurse.id);
-    }
-    // TARCZA NIE ZOSTAWIA ŚLADU W DZIENNIKU — ani przy zakupie, ani przy użyciu (patrz
-    // /shop/use). Cała jej wartość polega na tym, że atakujący nie wie, czy trafi w mur:
-    // gdyby feed pokazywał „kupił Shield", wszyscy po prostu omijaliby tego gracza.
-    // Saldo innych graczy nie jest publiczne (patrz slLeaderboard), więc brak wpisu
-    // naprawdę niczego nie zdradza.
-    if (type !== 'shield') {
-      // Zakup, na którym odpaliła Drożyzna, jest zarazem odpaleniem klątwy — dostaje typ
-      // 'curse_fired', żeby kupujący widział go podświetlonego jak każdą inną klątwę.
-      slLogActivity(playerId, priceCurse ? 'curse_fired' : 'shop_buy',
-        `🛒 Kupił ${SL_POWERUP_LABELS[type]} (-${cost} coins)${priceCurse ? ` — klątwa ${priceCurseLabel} podbiła cenę o ${cost - baseCost}` : ''}`);
-    }
-    // Ten wpis jest publiczny, a przy zakupie tarczy zdradziłby ją okrężną drogą: „ktoś
-    // przepłacił", a w feedzie ani śladu zakupu — czyli kupił Shield. Świadomy koszt:
-    // rzucający klątwę traci powiadomienie w tym jednym przypadku, ale tarcza zostaje
-    // szczelna. Kupujący i tak widzi klątwę u siebie w toaście.
-    if (priceCurse && priceCurse.source_player_id && type !== 'shield') {
-      slLogActivity(priceCurse.source_player_id, 'curse_fired',
-        `🧾 Twoja klątwa ${priceCurseLabel} odpaliła — ${nickname} przepłacił o ${cost - baseCost} coins!`);
-    }
-    return { poor: false, cost, cursed: !!priceCurse, extra: cost - baseCost };
-  });
-
-  // Zakup wstrzymany przez świeżo odsłoniętą Drożyznę. 409, a nie 400: to nie jest błąd
-  // gracza, tylko stan, który się właśnie zmienił — front ma przerysować sklep (nowe ceny
-  // przychodzą w `state`) i pokazać powiadomienie, a nie zwykły komunikat o błędzie.
-  if (out.revealed) {
-    return res.status(409).json({
-      error: `${priceCurseLabel}! Twój zakup został wstrzymany — ceny w sklepie idą w górę o ${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}% do najbliższego zakupu. ${SL_POWERUP_LABELS[type]} kosztuje teraz ${out.cost} zamiast ${out.base_cost}.`,
-      price_curse_revealed: true,
-      curse: { label: priceCurseLabel, markup_percent: Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100) },
-      type,
-      cost: out.cost,
-      base_cost: out.base_cost,
-      state: slBuildState(playerId)
-    });
-  }
-
-  if (out.price_changed) {
-    return res.status(409).json({
-      error: `Cena Extra Move zmieniła się, bo zmieniło się Twoje miejsce w rankingu — teraz ${out.cost} coins zamiast ${out.expected}. Nic nie zostało pobrane, kliknij „Kup" jeszcze raz.`,
-      price_changed: true,
-      cost: out.cost,
-      state: slBuildState(playerId)
-    });
-  }
-
-  if (out.full) {
-    return res.status(400).json({
-      error: `Masz już ${SL_EXTRA_MOVE_MAX_OWNED} Extra Move — więcej nie da się trzymać (tyle można użyć jednego dnia). Najpierw któregoś użyj.`
-    });
-  }
-
-  if (out.poor) {
-    // Cena z klątwy nie jest zagadką w momencie, w którym zaczyna boleć — mówimy wprost,
-    // czemu w sklepie widniało mniej.
-    return res.status(400).json({
-      error: `Za mało coins — koszt ${out.cost}${out.cursed ? ` (klątwa ${priceCurseLabel}: +${Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)}%)` : ''}, masz ${out.balance}.`,
-      price_curse: out.cursed ? { label: priceCurseLabel, cost: out.cost, base_cost: baseCost } : null
-    });
-  }
-
-  // Klątwa ujawnia się dokładnie w chwili, w której zadziałała — tak jak każda inna.
-  // Wyjątek: zakup tarczy zostaje niewidoczny nawet wtedy, bo komunikat nazwałby power-up
-  // (a sama kwota i tak by go zdradziła). Kupujący widzi klątwę u siebie w toaście.
-  if (out.cursed && type !== 'shield') {
-    slEmit('powerup_curse', () =>
-      `🧾 **${nickname}** wpadł na klątwę **${priceCurseLabel}** — za ${SL_POWERUP_LABELS[type]} zapłacił ${out.cost} zamiast ${baseCost} coins.`);
-  }
-
-  res.json({
-    success: true,
-    cost: out.cost,
-    base_cost: baseCost,
-    price_curse: out.cursed ? { label: priceCurseLabel, extra: out.extra } : null,
-    state: slBuildState(playerId)
-  });
-});
-
-// POST /api/snakes/shop/use { type, target_player_id? } — użyj power-up z ekwipunku.
-// Freeze/Curse wymagają celu (innego gracza). Extra Move i Shield działają na siebie.
-// Jeśli cel ma aktywny Shield, atak zostaje ZABLOKOWANY: tarcza znika, atak nie działa
-// (power-up atakującego i tak się zużywa — ryzyko wpisane w atak).
-// Freeze, Curse i Shield lądują w sl_effects i czekają na swój moment; Extra Move jako
-// jedyny działa NATYCHMIAST — dokłada ruch do dzisiejszej puli, do wykonania od razu.
-app.post('/api/snakes/shop/use', authPlayer, (req, res) => {
-  const playerId = req.player.id;
-  const nickname = req.player.nickname;
-  const today = todayWaw();
-  const type = String(req.body.type || '');
-  if (!SL_POWERUP_TYPES.includes(type)) {
-    return res.status(400).json({ error: 'Nieznany power-up' });
-  }
-
-  // Extra Move daje ruch OD RAZU, więc poza oknem gry nie ma czego dać — zamiast
-  // spalić power-up na ruch, którego i tak nie da się wykonać, odmawiamy użycia.
-  // (Freeze/Curse/Shield celowo bez tej bramki: one czekają na swój moment.)
-  if (type === 'double_move') {
-    if (isWeekendStr(today)) {
-      return res.status(400).json({ error: 'W weekend nie gramy — zostaw Extra Move na poniedziałek.', is_weekend: true });
-    }
-    if (!slOfficeOpenAt()) {
-      return res.status(400).json({
-        error: `Extra Move daje ruch od ręki, a biuro jest zamknięte — użyj go między ${SL_PLAY_START_HOUR}:00 a ${SL_PLAY_END_HOUR}:00.`,
-        office_closed: true
-      });
-    }
-  }
-  const needsTarget = SL_SHIELD_BLOCKS.includes(type); // freeze / curse
-  let targetId = playerId;
-  let targetNick = nickname;
-
-  if (needsTarget) {
-    targetId = parseInt(req.body.target_player_id, 10);
-    if (!Number.isInteger(targetId)) {
-      return res.status(400).json({ error: 'Wskaż gracza, na którego użyjesz power-upa.' });
-    }
-    if (targetId === playerId) {
-      return res.status(400).json({ error: 'Freeze i Curse rzucasz na INNEGO gracza.' });
-    }
-    const target = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(targetId);
-    if (!target) return res.status(404).json({ error: 'Nie ma takiego gracza.' });
-    targetNick = target.nickname;
-    slEnsureState(targetId); // upewnij się, że cel ma stan gry
-  }
-
-  const out = transaction(() => {
-    const inv = slInventory(playerId);
-    if (inv[type] <= 0) return { none: true };
-
-    // Shield można trzymać tylko jeden naraz — drugi byłby wyrzuceniem punktów.
-    if (type === 'shield' && slHasShield(playerId)) return { already: true };
-
-    // Extra Move ma dzienny sufit (SL_MAX_EXTRA_ROLLS) — sprawdzamy go PRZED zużyciem
-    // sztuki, żeby odbity użytkownik nie stracił przedmiotu za nic.
-    const stBefore = type === 'double_move' ? slEnsureState(playerId) : null;
-    const extraToday = stBefore && stBefore.extra_rolls_date === today ? Number(stBefore.extra_rolls || 0) : 0;
-    if (type === 'double_move' && extraToday >= SL_MAX_EXTRA_ROLLS) {
-      return { capped: true, max_extra: SL_MAX_EXTRA_ROLLS, daily_max: SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS };
-    }
-
-    // LIMIT KOLEJKI KLĄTW (patrz SL_CURSE_MAX_PENDING_*) — sprawdzany PRZED zużyciem
-    // sztuki, tak jak sufit Extra Move. Najpierw limit własny, bo jego odmowa nie zdradza
-    // niczego, czego rzucający sam nie wie; limit celu dopiero, gdy własny przeszedł.
-    // Tarcza celu ma tu pierwszeństwo: z tarczą klątwa i tak by się nie zakolejkowała,
-    // więc nie odmawiamy, tylko pozwalamy jej się odbić (gałąź TARCZA CELU niżej).
-    if (type === 'curse' && !slActiveShield(targetId)) {
-      const q = db.prepare(`
-        SELECT COUNT(*) AS total, COALESCE(SUM(source_player_id = ?), 0) AS mine
-        FROM sl_effects WHERE target_player_id = ? AND type = 'curse' AND status = 'pending'
-      `).get(playerId, targetId);
-      if (Number(q.mine) >= SL_CURSE_MAX_PENDING_PER_CASTER) return { curse_cap: 'mine' };
-      if (Number(q.total) >= SL_CURSE_MAX_PENDING_PER_TARGET) return { curse_cap: 'target' };
-    }
-
-    slAddPowerup(playerId, type, -1);
-
-    // EXTRA MOVE: nie czeka na następną turę — od razu dokłada JEDEN ruch ponad
-    // dzienny limit, do wykonania natychmiast (przycisk „Rzuć" odblokowuje się w tej
-    // samej odpowiedzi). Dodatkowe sloty żyją tylko dziś: extra_rolls_date pilnuje, żeby
-    // niewykorzystane przepadły o północy razem z resztą limitu.
-    if (type === 'double_move') {
-      db.prepare('UPDATE sl_state SET extra_rolls = ?, extra_rolls_date = ? WHERE player_id = ?')
-        .run(extraToday + 1, today, playerId);
-      return { none: false, blocked: false, variant: null, extra_roll: true };
-    }
-
-    // TARCZA CELU: przechwytuje Freeze/Curse zanim staną się efektem na turę.
-    if (needsTarget) {
-      const shield = slActiveShield(targetId);
-      if (shield) {
-        db.prepare(`UPDATE sl_effects SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP WHERE id = ?`)
-          .run(shield.id);
-        db.prepare(`
-          INSERT INTO sl_effects (target_player_id, source_player_id, type, variant, status, consumed_at)
-          VALUES (?, ?, ?, ?, 'blocked', CURRENT_TIMESTAMP)
-        `).run(targetId, playerId, type, null);
-        return { none: false, blocked: true };
-      }
-    }
-
-    // Curse: losujemy wariant (patrz SL_CURSE_LABELS) już TERAZ, w momencie rzucenia —
-    // ale NIE zdradzamy go NIKOMU, także rzucającemu (nie ma go w odpowiedzi ani w toaście).
-    // Rzucający kupuje loterię, więc i on dowiaduje się, co wylosował, dopiero gdy klątwa
-    // odpali (patrz POST /api/snakes/roll i /shop/buy — tam dostaje własny wpis).
-    // Wariant losujemy teraz tylko dlatego, że Drożyzna czeka na zakup, a nie na ruch.
-    const variant = type === 'curse' ? (1 + Math.floor(Math.random() * SL_CURSE_VARIANTS)) : null;
-
-    db.prepare(`
-      INSERT INTO sl_effects (target_player_id, source_player_id, type, variant)
-      VALUES (?, ?, ?, ?)
-    `).run(targetId, playerId, type, variant);
-
-    return { none: false, blocked: false };
-  });
-
-  if (out.none) {
-    return res.status(400).json({ error: 'Nie masz tego power-upa w ekwipunku.' });
-  }
-  if (out.curse_cap === 'mine') {
-    return res.status(400).json({
-      error: `Twoja klątwa na ${targetNick} jeszcze nie odpaliła — kolejną rzucisz, gdy ta zadziała. Sztuka zostaje w ekwipunku.`
-    });
-  }
-  if (out.curse_cap === 'target') {
-    return res.status(400).json({
-      error: `Nad ${targetNick} wisi już komplet klątw (${SL_CURSE_MAX_PENDING_PER_TARGET}) — poczekaj, aż któraś odpali. Sztuka zostaje w ekwipunku.`
-    });
-  }
-  if (out.already) {
-    return res.status(400).json({ error: 'Masz już aktywną tarczę — poczekaj, aż coś zablokuje.' });
-  }
-  if (out.capped) {
-    return res.status(400).json({
-      error: `Dziś wykorzystałeś już ${out.max_extra} dodatkowe ruchy z Extra Move — dzienny limit to ${out.daily_max} rzutów. Sztuka została w ekwipunku, użyjesz jej jutro.`
-    });
-  }
-
-  // ── DZIENNIK AKTYWNOŚCI ──
-  // ATAKI NIE NAZYWAJĄ CELU. Freeze i Curse dostają wpis mówiący tylko, że ktoś zaatakował
-  // — biuro ma wiedzieć, że coś się dzieje (to zmienia rachuby), ale kto oberwał, wie
-  // wyłącznie rzucający. Ofiara nie dostaje własnego wpisu i nie widzi nic w swoim panelu;
-  // dowie się dopiero przy odpaleniu: Freeze i większość klątw gdy kliknie „Rzuć", a
-  // Drożyzna przy najbliższym zakupie. Dopiero wtedy POST /api/snakes/roll (albo /shop/buy)
-  // dopisuje obu stronom pełną wersję z nazwiskiem i wariantem.
-  // Wyjątek: zablokowanie tarczą (gałąź niżej) — atak przepadł, więc nie ma już czego kryć.
-  const label = SL_POWERUP_LABELS[type];
-  if (out.blocked) {
-    slLogActivity(playerId, 'shop_use', `${label} na ${targetNick} zablokowany tarczą`);
-    slLogActivity(targetId, 'shop_use', `🛡️ Zablokował ${label} od ${nickname} tarczą`);
-  } else if (type === 'freeze') {
-    slLogActivity(playerId, 'shop_use', `❄️ Użył Freeze — kogo zamroził, okaże się przy jego następnym ruchu`);
-  } else if (out.extra_roll) {
-    slLogActivity(playerId, 'shop_use', `⏩ Użył ${label} — dodatkowy ruch do wykonania od razu`);
-  } else if (needsTarget) {
-    // KLĄTWA ZOSTAWIA DOKŁADNIE JEDEN WPIS — rzucającego, BEZ celu i BEZ wariantu.
-    // Dziennik jest publiczny, więc nazwanie celu ("Użył Curse na Bartka") mówiło ofierze
-    // wprost, że coś na niej wisi — a klątwa ma się ujawniać dopiero, gdy odpali. Z tego
-    // samego powodu zniknął wpis kierowany do celu. Dokładnie tak samo zachowuje się
-    // Freeze (gałąź wyżej) i to jest wzorzec dla obu ataków.
-    slLogActivity(playerId, 'shop_use', `💀 Rzucił klątwę — na kogo i jaka, okaże się dopiero, gdy odpali`);
-  } else if (type === 'shield') {
-    // Cisza — tarcza ujawnia się WYŁĄCZNIE wtedy, gdy coś zablokuje (gałąź out.blocked
-    // wyżej dopisuje wpis obu stronom). Inaczej cały jej sens znika.
-  } else {
-    slLogActivity(playerId, 'shop_use', `Użył ${label}`);
-  }
-
-  // ── ZDARZENIA DISCORD ──
-  // Freeze celowo nie ma tu emisji — dopiero gdy odpali (patrz POST /api/snakes/roll).
-  if (out.blocked) {
-    slEmit('shield_block', () =>
-      `🛡️ **${targetNick}** zablokował tarczą ${type === 'freeze' ? 'Freeze' : 'Curse'} od **${nickname}**! Tarcza zużyta.`);
-  } else if (type === 'curse') {
-    // Bez nazwiska celu — Discord czyta całe biuro, więc podanie ofiary zdradzałoby ją
-    // dokładnie tak samo jak wpis w dzienniku. Kto oberwał, wyjdzie przy odpaleniu.
-    slEmit('powerup_curse', () => `💀 **${nickname}** rzucił klątwę — na kogo i jaką, przekonacie się, gdy odpali.`);
-  } else if (out.extra_roll) {
-    slEmit('double_move', () => `⏩ **${nickname}** użył Extra Move — dołożył sobie ruch ponad dzienny limit i rzuca od razu.`);
-  }
-
-  res.json({
-    success: true,
-    applied_to: targetId,
-    blocked: !!out.blocked,
-    extra_roll: !!out.extra_roll, // Extra Move: ruch dołożony do dzisiejszej puli, do wykonania od ręki
-    // Celowo BEZ wariantu klątwy — nie zna go nawet rzucający, dopóki klątwa nie odpali.
-    state: slBuildState(playerId)
-  });
-});
-
 // GET /api/snakes/players — lekka lista graczy do wyboru celu power-upa.
 app.get('/api/snakes/players', authPlayer, (req, res) => {
   res.json({ players: slPlayersPayload(req.player.id) });
@@ -3815,871 +1789,23 @@ app.get('/api/snakes/players', authPlayer, (req, res) => {
 
 // Trasa POST /api/snakes/coop/contribute mieszka w lib/boss.js (registerRoutes).
 
-// GET /api/snakes/admin/settings?password= — konfiguracja zdarzeń + stan co-opu
-app.get('/api/snakes/admin/settings', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  res.json({
-    events: slEventsConfig(),
-    labels: SL_EVENT_LABELS,
-    defaults: SL_EVENT_DEFAULTS,
-    webhook_configured: !!SL_DISCORD_WEBHOOK_URL,
-    summary_hour: SL_SUMMARY_HOUR,
-    board: { id: slBoard.id, name: slBoard.name, size: slBoardSize(), cols: slBoard.cols, rows: slBoard.rows },
-    powerup_costs: SL_POWERUP_COSTS,
-    // Panel pokazuje koszty pod nazwami, które widzi gracz — inaczej admin czytałby
-    // surowy klucz `double_move`, gdy reszta gry mówi o nim „Extra Move".
-    powerup_labels: SL_POWERUP_LABELS,
-    boss_enabled: boss.slBossEnabled(),
-    // null = boss wyłączony; panel czyta to jako „nie ma czym sterować" (patrz renderInfo).
-    coop: boss.slBossEnabled() ? boss.slCoopPayload(null) : null
-  });
-});
-
-// POST /api/snakes/admin/reset { password } — twardy reset CAŁEJ gry Snakes do stanu
-// zerowego: każdy gracz wraca na pole 0 z saldem/punktami 0, ekwipunkiem power-upów
-// wyczyszczonym i bez oczekujących efektów (Freeze/Curse/Shield/Extra Move). Historia
-// ruchów i dziennik aktywności są kasowane, a pula co-op wraca do świeżej edycji #1
-// z bazowym progiem/czasem (patrz slCurrentCoop). Gracze i ich AWATARY
-// (pionki) NIE są ruszane — konta w Snakes zostają, tylko ich postęp w grze wraca do zera.
-// Wordle jest kompletnie nietknięte (osobne tabele). Nieodwracalne — potwierdzenie
-// (i podwójne potwierdzenie w UI) leży po stronie panelu admina.
-app.post('/api/snakes/admin/reset', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-
-  const out = transaction(() => {
-    const playersAffected = Number(db.prepare('SELECT COUNT(*) AS c FROM sl_state').get().c);
-    db.exec(`
-      UPDATE sl_state SET abs_pos = 0, laps = 0, balance = 0, total_points = 0,
-        last_move_date = NULL, rolls_today = 0, last_move_at = NULL;
-      DELETE FROM sl_moves;
-      DELETE FROM sl_inventory;
-      DELETE FROM sl_effects;
-      DELETE FROM sl_activity;
-      DELETE FROM sl_points_log;
-    `);
-    // ŚCIEŻKA COFANIA #4 — wszystko po bossie (cykle, obrażenia, rejestr wypłat) kasuje
-    // moduł, żeby lista tabel do wyczyszczenia mieszkała tam, gdzie te tabele powstają.
-    boss.slResetBossData();
-    costumes.slResetCostumes(); // reset = zerowe konto, więc i szafa pusta
-    seasonal.resetAll();
-    // sl_coop pusty → następne wywołanie slCurrentCoop() samo założy świeżą edycję #1,
-    // zakotwiczoną od teraz (dokładnie jak przy zupełnie nowej instalacji).
-    return { players_affected: playersAffected, coop: boss.slCoopPayload(null) };
-  });
-
-  slEmit('coop_completed', () => '🔄 **Admin zresetował grę Snakes & Ladders** — wszyscy wracają na start z zerowym kontem.');
-
-  res.json({ success: true, ...out });
-});
-
-// GET /api/snakes/admin/seasons?password= — lista sezonów z boards/ (tylko poprawne
-// pliki; błędne lądują w logu przy starcie) i to, który jest aktywny.
-app.get('/api/snakes/admin/seasons', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  res.json({ active: slBoard.id, seasons: seasons.list() });
-});
-
-// POST /api/snakes/admin/season { password, board } — przełącza sezon planszy. Wszyscy
-// wracają na pole 0 (okrążenia, punkty, coins i ekwipunek zostają), a ruchów sprzed zmiany
-// nie da się już cofnąć (patrz slResetPositionsToStart). Ponowne włączenie AKTYWNEGO
-// sezonu też resetuje pozycje — to świadome: „zacznijmy sezon od nowa".
-app.post('/api/snakes/admin/season', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const season = seasons.get(String(req.body.board || ''));
-  if (!season) return res.status(404).json({ error: 'Nie ma takiego sezonu (albo jego plik ma błąd — patrz logi serwera).' });
-
-  const previous = slBoard.id;
-  const moved = slInstallBoard(season, true, true);
-  console.log(`Snakes/Admin: sezon ${previous} → ${season.id} (${season.size} pól), ${moved} graczy na polu 0`);
-  // Sezon z własnym bossem (special_boss) wystawia go OD RAZU, a nie przy kolejnej edycji.
-  boss.slEnsureSpecialBoss();
-  slPostDiscord({ content: `🗺️ **Nowy sezon planszy: ${season.name}!** Wszyscy startują od pola 0 — punkty i coins zostają.` })
-    .catch(err => console.error('Snakes/Discord [season]:', err.message));
-
-  res.json({ success: true, active: season.id, players_moved: moved, board: slBoardPayload() });
-});
-
-// GET /api/snakes/admin/players — lista graczy z ich stanem w Snakes & Ladders
-// (tylko ci, którzy mieli już z grą kontakt — sl_state powstaje leniwie przy pierwszym
-// zapytaniu o stan). Do wyboru gracza w akcjach admina niżej.
-app.get('/api/snakes/admin/players', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const today = todayWaw();
-  const rows = db.prepare(`
-    SELECT s.player_id, p.nickname, s.abs_pos, s.laps, s.balance, s.total_points, s.last_move_date, s.rolls_today,
-           s.extra_rolls, s.extra_rolls_date
-    FROM sl_state s JOIN players p ON p.id = s.player_id
-    ORDER BY p.nickname COLLATE NOCASE ASC
-  `).all();
-  res.json({
-    players: rows.map(r => {
-      const rollsUsedToday = r.last_move_date === today ? Number(r.rolls_today) : 0;
-      const dailyRolls = slDailyRollsFor(r, today);
-      return {
-        player_id: r.player_id,
-        nickname: r.nickname,
-        tile: slTileOf(r.abs_pos),
-        laps: Number(r.laps),
-        balance: Number(r.balance),
-        total_points: Number(r.total_points),
-        last_move_date: r.last_move_date,
-        rolls_used_today: rollsUsedToday,
-        daily_rolls: dailyRolls,
-        moved_today: rollsUsedToday >= dailyRolls
-      };
-    }),
-    today
-  });
-});
-
-// DELETE /api/snakes/admin/players/:id — usuwa gracza WYŁĄCZNIE z trybu Snakes.
-// Kasuje jego stan, ekwipunek, dziennik ruchów, aktywne/przychodzące efekty i wpłaty
-// do puli co-op. Konto (players) i dane Wordle zostają nietknięte — to ten sam login,
-// więc gracz może dalej grać w Wordle, a w Snakes wystartuje od zera przy następnym
-// wejściu (sl_state tworzy się leniwie).
-app.delete('/api/snakes/admin/players/:id', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  transaction(() => {
-    db.prepare('DELETE FROM sl_moves WHERE player_id = ?').run(playerId);
-    db.prepare('DELETE FROM sl_inventory WHERE player_id = ?').run(playerId);
-    db.prepare('DELETE FROM sl_effects WHERE target_player_id = ? OR source_player_id = ?').run(playerId, playerId);
-    boss.slClearPlayerBossData(playerId); // ŚCIEŻKA COFANIA #5 — wkłady i wypłaty bossa
-    costumes.slClearPlayerCostumes(playerId);
-    seasonal.clearPlayer(playerId);
-    db.prepare('DELETE FROM sl_activity WHERE player_id = ?').run(playerId);
-    db.prepare('DELETE FROM sl_points_log WHERE player_id = ?').run(playerId);
-    db.prepare('DELETE FROM sl_state WHERE player_id = ?').run(playerId);
-  });
-
-  res.json({ success: true, deleted: player.nickname });
-});
-
-// POST /api/snakes/admin/players/:id/grant-move { password, date? } — oddaje graczowi
-// JEDEN dodatkowy ruch danego dnia (domyślnie dziś, wg czasu Warszawy) — z SL_DAILY_ROLLS
-// dostępnych ruchów cofa licznik zużycia o jeden i kasuje ostatni zapisany ruch z tego
-// dnia. NIE cofa punktów/pozycji z ruchów już wykonanych — to dodatkowa szansa, nie
-// cofnięcie. Wołane wielokrotnie odda kolejne sloty (aż do pełnego dziennego limitu).
-app.post('/api/snakes/admin/players/:id/grant-move', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
-
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  const result = transaction(() => {
-    const st = slEnsureState(playerId);
-    if (st.last_move_date !== date) return { already_full: true };
-    const used = Number(st.rolls_today);
-    if (used <= 0) return { already_full: true };
-    db.prepare('DELETE FROM sl_moves WHERE player_id = ? AND move_date = ? AND move_seq = ?')
-      .run(playerId, date, used);
-    db.prepare('UPDATE sl_state SET rolls_today = ? WHERE player_id = ?').run(used - 1, playerId);
-    return { already_full: false, rolls_used_today: used - 1 };
-  });
-
-  if (result.already_full) {
-    return res.status(400).json({ error: `${player.nickname} ma już pełny limit ruchów na ${date}.` });
-  }
-  res.json({ success: true, nickname: player.nickname, date, rolls_used_today: result.rolls_used_today, daily_rolls: SL_DAILY_ROLLS });
-});
-
-// POST /api/snakes/admin/settings { password, events: { typ: bool } } — przełącz zdarzenia
-app.post('/api/snakes/admin/settings', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const events = slSetEventsConfig(req.body.events);
-  res.json({ success: true, events });
-});
-
-// POST /api/snakes/admin/discord-test { password } — testowy strzał w webhooka
-app.post('/api/snakes/admin/discord-test', async (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  if (!SL_DISCORD_WEBHOOK_URL) {
-    return res.status(400).json({ error: 'Brak webhooka — ustaw SNAKES_DISCORD_WEBHOOK_URL lub DISCORD_WEBHOOK_URL w .env' });
-  }
-  try {
-    await slPostDiscord({ content: '🐍 Test webhooka Office Snakes & Ladders — działa!' });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
-// POST /api/snakes/admin/coop/complete { password, force? } — zamknij wydarzenie i wypłać
-// nagrody ręcznie. Normalnie robi to sama mechanika bossa (HP=0 przy rzucie/ataku, albo
-// timeout w schedulerze) — ten endpoint to głównie fallback na wypadek utkniętego eventu.
-// `force: true` domyka event NAWET jeśli boss żyje (bez premii za pokonanie — jak timeout).
-// Trasy admina od bossa (coop/complete, coop/config, coop/boss, coop/toggle,
-// coop/revert-rewards) mieszkają w lib/boss.js (registerRoutes).
-
-// ── STEROWANIE HISTORIĄ ──
-// Dziennik aktywności i ruchy do przeglądania oraz kasowania z panelu. Filtry są
-// opcjonalne i składają się ze sobą (data + gracz + typ), więc jednym zapytaniem da się
-// zejść od „wszystko z dziś" do „tylko wypchnięcia tego jednego gracza".
-// Kasowanie dotyczy WYŁĄCZNIE dziennika — to log, nie stan gry, więc usunięcie wpisu
-// niczego nie cofa (od cofania są undo-move i rollback dnia).
-function slAdminActivityFilter(query) {
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(query.date || '') ? query.date : null;
-  const playerId = query.player_id ? parseInt(query.player_id, 10) : null;
-  const type = query.type ? String(query.type) : null;
-  const where = [];
-  const args = [];
-  if (date) { where.push('a.day = ?'); args.push(date); }
-  if (Number.isInteger(playerId)) { where.push('a.player_id = ?'); args.push(playerId); }
-  if (type) { where.push('a.type = ?'); args.push(type); }
-  return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args, date, playerId, type };
-}
-
-// Admin widzi WSZYSTKO — także wpisy ukryte przed graczami — bo to jego pulpit moderacji.
-// Do każdego wiersza dokładamy stan widoku: czy widać, jaka treść idzie do graczy i KTO
-// o tym zdecydował (wpis / reguła #N / typ), żeby dało się kliknąć w przyczynę.
-app.get('/api/snakes/admin/activity', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
-  const f = slAdminActivityFilter(req.query);
-  const mod = slActivityModeration();
-
-  const rows = db.prepare(`
-    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.visibility, a.day, a.created_at
-    FROM sl_activity a JOIN players p ON p.id = a.player_id
-    ${f.sql} ORDER BY a.id DESC LIMIT ?
-  `).all(...f.args, limit);
-
-  const entries = rows.map(r => {
-    const hiddenBy = slActivityHiddenBy(r, mod);
-    const pub = slActivityPublicDetail(r, mod);
-    return {
-      ...r,
-      visible: !hiddenBy,
-      hidden_by: hiddenBy,
-      effective_detail: pub.detail,
-      redacted_by: pub.redacted_by
-    };
-  });
-
-  const total = db.prepare(`SELECT COUNT(*) AS c FROM sl_activity a ${f.sql}`).get(...f.args).c;
-
-  res.json({
-    success: true,
-    entries,
-    total: Number(total),
-    shown: entries.length,
-    hidden_shown: entries.filter(e => !e.visible).length,
-    // Do wypełnienia filtrów w panelu — dni i typy, które faktycznie w bazie są.
-    days: db.prepare('SELECT DISTINCT day FROM sl_activity ORDER BY day DESC LIMIT 60').all().map(r => r.day),
-    types: db.prepare('SELECT DISTINCT type FROM sl_activity ORDER BY type').all().map(r => r.type)
-  });
-});
-
-// POST /api/snakes/admin/activity/:id/visibility { password, visibility?, public_detail? } —
-// nadpisanie POJEDYNCZEGO wpisu, najwyższa warstwa moderacji.
-//   visibility: 'hidden' (ukryj mimo wszystko) | 'shown' (pokaż mimo reguł) | null (wróć pod reguły)
-//   public_detail: tekst dla graczy | null (przywróć oryginał)
-// Pola są niezależne — podaje się tylko te, które faktycznie się zmienia.
-app.post('/api/snakes/admin/activity/:id/visibility', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const id = parseInt(req.params.id, 10);
-  const hasVisibility = 'visibility' in req.body;
-  const hasDetail = 'public_detail' in req.body;
-  const visibility = req.body.visibility == null ? null : String(req.body.visibility);
-  const publicDetail = req.body.public_detail == null ? null : String(req.body.public_detail).trim();
-
-  if (hasVisibility && visibility !== null && !['shown', 'hidden'].includes(visibility)) {
-    return res.status(400).json({ error: "visibility musi być 'shown', 'hidden' albo null." });
-  }
-  if (hasDetail && publicDetail !== null && (!publicDetail || publicDetail.length > 300)) {
-    return res.status(400).json({ error: 'Podmieniona treść musi mieć od 1 do 300 znaków (albo null, żeby wrócić do oryginału).' });
-  }
-  if (!hasVisibility && !hasDetail) {
-    return res.status(400).json({ error: 'Nie podano żadnej zmiany.' });
-  }
-
-  const row = db.prepare('SELECT * FROM sl_activity WHERE id = ?').get(id);
-  if (!row) return res.status(404).json({ error: 'Nie ma takiego wpisu.' });
-
-  if (hasVisibility) db.prepare('UPDATE sl_activity SET visibility = ? WHERE id = ?').run(visibility, id);
-  if (hasDetail) db.prepare('UPDATE sl_activity SET public_detail = ? WHERE id = ?').run(publicDetail, id);
-
-  const fresh = db.prepare(`
-    SELECT a.id, a.player_id, p.nickname, a.type, a.detail, a.public_detail, a.visibility, a.day, a.created_at
-    FROM sl_activity a JOIN players p ON p.id = a.player_id WHERE a.id = ?
-  `).get(id);
-  const mod = slActivityModeration();
-  const hiddenBy = slActivityHiddenBy(fresh, mod);
-  const pub = slActivityPublicDetail(fresh, mod);
-
-  res.json({
-    success: true,
-    entry: { ...fresh, visible: !hiddenBy, hidden_by: hiddenBy, effective_detail: pub.detail, redacted_by: pub.redacted_by }
-  });
-});
-
-// POST /api/snakes/admin/activity/visibility/bulk { password, action, date?, player_id?, type? } —
-// nieniszczący następca kasowania hurtem: ustawia nadpisanie na WSZYSTKICH wpisach
-// pasujących do filtra. `action`: 'hide' | 'show' | 'clear' (zdejmij nadpisanie i wróć
-// pod reguły). Pusty filtr jest dozwolony — nic nie ginie, wszystko da się cofnąć.
-app.post('/api/snakes/admin/activity/visibility/bulk', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const action = String(req.body.action || '');
-  if (!['hide', 'show', 'clear'].includes(action)) {
-    return res.status(400).json({ error: "action musi być 'hide', 'show' albo 'clear'." });
-  }
-  const f = slAdminActivityFilter(req.body);
-  const visibility = action === 'hide' ? 'hidden' : action === 'show' ? 'shown' : null;
-
-  const upd = db.prepare(`
-    UPDATE sl_activity SET visibility = ?
-    WHERE id IN (SELECT a.id FROM sl_activity a ${f.sql})
-  `).run(visibility, ...f.args);
-
-  res.json({ success: true, action, changed: upd.changes, date: f.date, player_id: f.playerId, type: f.type });
-});
-
-// GET/POST /api/snakes/admin/activity/types — domyślna widoczność CAŁYCH kategorii wpisów.
-// Najszersza warstwa: wyłączenie typu chowa go graczom wszędzie, ale reguły i nadpisania
-// pojedynczych wpisów nadal mogą go przywrócić.
-app.get('/api/snakes/admin/activity/types', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  res.json({ success: true, types: slActivityTypesConfig(), labels: SL_ACTIVITY_TYPES });
-});
-
-app.post('/api/snakes/admin/activity/types', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  res.json({ success: true, types: slSetActivityTypesConfig(req.body.types), labels: SL_ACTIVITY_TYPES });
-});
-
-// GET /api/snakes/admin/activity/rules — reguły wraz z licznikiem: ilu wpisów każda
-// DZIŚ dotyczy. Bez tego licznika admin dodaje regułę w ciemno i nie wie, co właśnie zniknęło.
-app.get('/api/snakes/admin/activity/rules', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const mod = slActivityModeration();
-  const rows = db.prepare(`
-    SELECT a.id, a.player_id, a.type, a.detail, a.day, a.visibility, a.public_detail FROM sl_activity a
-  `).all();
-  const players = db.prepare('SELECT id, nickname FROM players').all();
-  const nickById = new Map(players.map(p => [p.id, p.nickname]));
-
-  res.json({
-    success: true,
-    rules: mod.rules.map(r => ({
-      ...r,
-      enabled: !!r.enabled,
-      player_nickname: r.match_player_id != null
-        ? (nickById.get(Number(r.match_player_id)) || '(gracz usunięty)')
-        : null,
-      matches: rows.filter(row => slActivityRuleMatches({ ...r, enabled: 1 }, row)).length
-    })),
-    types: SL_ACTIVITY_TYPES,
-    players: players.map(p => ({ player_id: p.id, nickname: p.nickname }))
-  });
-});
-
-// POST /api/snakes/admin/activity/rules { password, id?, ... } — dodaje regułę albo
-// (gdy podano `id`) zmienia istniejącą. Puste pola dopasowania znaczą „dowolne", więc
-// reguła bez żadnego z nich łapie cały dziennik — to świadomie dozwolone, bo odwracalne.
-app.post('/api/snakes/admin/activity/rules', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const id = req.body.id != null ? parseInt(req.body.id, 10) : null;
-  const action = String(req.body.action || 'hide');
-  const str = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
-  const replacement = str(req.body.replacement);
-  const matchType = str(req.body.match_type);
-  const matchPlayerId = req.body.match_player_id != null && String(req.body.match_player_id) !== ''
-    ? parseInt(req.body.match_player_id, 10) : null;
-  const dayFrom = str(req.body.match_day_from);
-  const dayTo = str(req.body.match_day_to);
-  const matchText = str(req.body.match_text);
-  const note = str(req.body.note);
-  const enabled = req.body.enabled == null ? 1 : (req.body.enabled ? 1 : 0);
-
-  if (!['hide', 'redact'].includes(action)) {
-    return res.status(400).json({ error: "action musi być 'hide' albo 'redact'." });
-  }
-  if (action === 'redact' && !replacement) {
-    return res.status(400).json({ error: 'Reguła podmieniająca treść wymaga tekstu zastępczego.' });
-  }
-  if (matchType && !(matchType in SL_ACTIVITY_TYPES)) {
-    return res.status(400).json({ error: `Nieznany typ wpisu. Dostępne: ${Object.keys(SL_ACTIVITY_TYPES).join(', ')}.` });
-  }
-  for (const [label, day] of [['od', dayFrom], ['do', dayTo]]) {
-    if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-      return res.status(400).json({ error: `Data „${label}" musi mieć format YYYY-MM-DD.` });
-    }
-  }
-  if (dayFrom && dayTo && dayFrom > dayTo) {
-    return res.status(400).json({ error: 'Data „od" jest późniejsza niż „do".' });
-  }
-  if (matchPlayerId != null && !Number.isInteger(matchPlayerId)) {
-    return res.status(400).json({ error: 'Nieprawidłowy gracz.' });
-  }
-
-  if (id != null) {
-    const exists = db.prepare('SELECT id FROM sl_activity_rules WHERE id = ?').get(id);
-    if (!exists) return res.status(404).json({ error: 'Nie ma takiej reguły.' });
-    db.prepare(`
-      UPDATE sl_activity_rules SET enabled = ?, action = ?, replacement = ?, match_type = ?,
-        match_player_id = ?, match_day_from = ?, match_day_to = ?, match_text = ?, note = ?
-      WHERE id = ?
-    `).run(enabled, action, replacement, matchType, matchPlayerId, dayFrom, dayTo, matchText, note, id);
-    return res.json({ success: true, id, updated: true });
-  }
-
-  const ins = db.prepare(`
-    INSERT INTO sl_activity_rules (enabled, action, replacement, match_type, match_player_id,
-      match_day_from, match_day_to, match_text, note)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(enabled, action, replacement, matchType, matchPlayerId, dayFrom, dayTo, matchText, note);
-
-  res.json({ success: true, id: Number(ins.lastInsertRowid), updated: false });
-});
-
-// DELETE /api/snakes/admin/activity/rules/:id — kasuje regułę. Wpisy, które chowała,
-// wracają natychmiast: nic w nich nie było zapisane.
-app.delete('/api/snakes/admin/activity/rules/:id', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const del = db.prepare('DELETE FROM sl_activity_rules WHERE id = ?').run(parseInt(req.params.id, 10));
-  if (!del.changes) return res.status(404).json({ error: 'Nie ma takiej reguły.' });
-  res.json({ success: true, deleted: 1 });
-});
-
-// GET /api/snakes/admin/activity/preview — dziennik DOKŁADNIE tak, jak widzą go gracze.
-// Woła tę samą funkcję co endpoint publiczny, więc podgląd nie może kłamać.
-app.get('/api/snakes/admin/activity/preview', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null;
-  const view = slPublicActivity({ date, limit: parseInt(req.query.limit, 10) || 150 });
-  const totalAll = db.prepare(
-    `SELECT COUNT(*) AS c FROM sl_activity a ${date ? 'WHERE a.day = ?' : ''}`
-  ).get(...(date ? [date] : [])).c;
-  res.json({ success: true, ...view, total_all: Number(totalAll), hidden_count: Number(totalAll) - view.entries.length });
-});
-
-app.delete('/api/snakes/admin/activity/:id', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const id = parseInt(req.params.id, 10);
-  const del = db.prepare('DELETE FROM sl_activity WHERE id = ?').run(id);
-  if (!del.changes) return res.status(404).json({ error: 'Nie ma takiego wpisu.' });
-  res.json({ success: true, deleted: 1 });
-});
-
-// POST /api/snakes/admin/activity/purge { password, date?, player_id?, type? } — kasuje
-// WSZYSTKIE wpisy pasujące do filtra. Pusty filtr czyści cały dziennik, więc wymagamy
-// wtedy jawnego `confirm_all`, żeby nie dało się tego zrobić przypadkiem.
-app.post('/api/snakes/admin/activity/purge', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const f = slAdminActivityFilter(req.body);
-  if (!f.sql && req.body.confirm_all !== true) {
-    return res.status(400).json({ error: 'Pusty filtr wyczyściłby cały dziennik — dodaj filtr albo confirm_all: true.' });
-  }
-  const del = db.prepare(`DELETE FROM sl_activity WHERE id IN (SELECT a.id FROM sl_activity a ${f.sql})`).run(...f.args);
-  res.json({ success: true, deleted: del.changes, date: f.date, player_id: f.playerId, type: f.type });
-});
-
-// GET /api/snakes/admin/moves?date=&player_id= — ruchy (nie dziennik) do podglądu:
-// z czego, na co, ile punktów. Stąd widać np. gracza, który zrobił ich dziś podejrzanie dużo.
-app.get('/api/snakes/admin/moves', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null;
-  const playerId = req.query.player_id ? parseInt(req.query.player_id, 10) : null;
-  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
-
-  const where = [];
-  const args = [];
-  if (date) { where.push('m.move_date = ?'); args.push(date); }
-  if (Number.isInteger(playerId)) { where.push('m.player_id = ?'); args.push(playerId); }
-  const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-  const moves = db.prepare(`
-    SELECT m.id, m.player_id, p.nickname, m.move_date, m.move_seq, m.rolls,
-           m.from_abs, m.to_abs, m.points, m.note, m.created_at
-    FROM sl_moves m JOIN players p ON p.id = m.player_id
-    ${sql} ORDER BY m.id DESC LIMIT ?
-  `).all(...args, limit).map(m => ({ ...m, from_tile: slTileOf(m.from_abs), to_tile: slTileOf(m.to_abs) }));
-
-  // Ile ruchów kto zrobił w wybranym dniu — od razu widać przekroczenia limitu.
-  const perPlayer = db.prepare(`
-    SELECT p.nickname, COUNT(*) AS moves, SUM(m.points) AS points
-    FROM sl_moves m JOIN players p ON p.id = m.player_id
-    ${sql} GROUP BY m.player_id, p.nickname ORDER BY moves DESC
-  `).all(...args);
-
-  res.json({
-    success: true, moves, per_player: perPlayer,
-    daily_max: SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS,
-    days: db.prepare('SELECT DISTINCT move_date FROM sl_moves ORDER BY move_date DESC LIMIT 60').all().map(r => r.move_date)
-  });
-});
-
-// ── COFNIĘCIE CAŁEGO DNIA GRY ──
-// Kasuje wszystko, co wydarzyło się danego dnia, i stawia graczy tam, gdzie stali o 8:00.
-// Pozycję startową bierzemy z `from_abs` PIERWSZEGO ruchu gracza tego dnia — to dokładnie
-// pole, z którego zaczynał, zanim cokolwiek dziś rzucił. Punkty z tego dnia (a więc i
-// monety, bo rzut dolicza je do obu) odejmujemy, z podłogą na zerze.
-// Czego to NIE robi (świadomie):
-//   • nie zwraca monet wydanych w sklepie ani na ataki — kupione power-upy zostają
-//     w ekwipunku, wydane monety przepadają,
-//   • nie odkręca monet ukradzionych przy wypchnięciu/klątwie — kwota była przycinana do
-//     salda ofiary, więc realnie zabrana wartość nigdzie nie została zapisana,
-//   • nie kasuje oczekujących Freeze/Curse — atak padł, cel dowie się przy swoim ruchu.
-// Uwaga na wypchniętych: gracz, którego ktoś dziś zbił ZANIM sam zdążył rzucić, wróci na
-// pole sprzed swojego pierwszego rzutu, czyli już po wypchnięciu (a gracz, który dziś
-// wcale nie rzucał, zostaje tam, gdzie go zbito) — wypchnięcia nie mają w bazie zapisu
-// pozycji sprzed, więc tego jednego nie da się odtworzyć automatycznie. Takich graczy
-// zwracamy w `pushed_not_restored`, żeby dało się ich poprawić ręcznie z panelu.
-function slRollbackDay(date) {
-  return transaction(() => {
-    const movers = db.prepare(`
-      SELECT m.player_id, p.nickname, SUM(m.points) AS points, COUNT(*) AS moves
-      FROM sl_moves m JOIN players p ON p.id = m.player_id
-      WHERE m.move_date = ? GROUP BY m.player_id, p.nickname
-    `).all(date);
-
-    const firstOfDay = db.prepare(`
-      SELECT from_abs FROM sl_moves WHERE player_id = ? AND move_date = ?
-      ORDER BY move_seq ASC, id ASC LIMIT 1
-    `);
-    const restore = db.prepare(`
-      UPDATE sl_state
-      SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?), balance = MAX(0, balance - ?),
-          rolls_today = 0, last_move_date = NULL, last_move_at = NULL
-      WHERE player_id = ?
-    `);
-
-    const details = [];
-    for (const m of movers) {
-      const startAbs = Number(firstOfDay.get(m.player_id, date).from_abs);
-      const pts = Number(m.points);
-      restore.run(startAbs, Math.floor(startAbs / slBoardSize()), pts, pts, m.player_id);
-      details.push({
-        player_id: m.player_id, nickname: m.nickname, moves: Number(m.moves),
-        points_removed: pts, back_to_tile: slTileOf(startAbs)
-      });
-    }
-
-    // Kto dziś oberwał wypchnięciem, a sam nie rzucał — jego pozycji nie mamy z czego
-    // odtworzyć. Zbieramy listę do zgłoszenia adminowi, ZANIM skasujemy dziennik.
-    const pushedNotRestored = db.prepare(`
-      SELECT DISTINCT a.player_id, p.nickname
-      FROM sl_activity a JOIN players p ON p.id = a.player_id
-      WHERE a.day = ? AND a.type = 'knockback' AND a.detail LIKE '%Wypchnięty%'
-        AND a.player_id NOT IN (SELECT player_id FROM sl_moves WHERE move_date = ?)
-    `).all(date, date).map(r => r.nickname);
-
-    // Gracze bez ruchów, ale z licznikiem/slotami z tego dnia (np. kupili Extra Move
-    // i nie zdążyli go zużyć) — też wracają do czystego limitu.
-    db.prepare(`UPDATE sl_state SET rolls_today = 0, last_move_date = NULL, last_move_at = NULL WHERE last_move_date = ?`).run(date);
-    db.prepare(`UPDATE sl_state SET extra_rolls = 0, extra_rolls_date = NULL WHERE extra_rolls_date = ?`).run(date);
-
-    const moves = db.prepare('DELETE FROM sl_moves WHERE move_date = ?').run(date);
-    // Rozbicie punktów z tego dnia znika razem z ruchami — inaczej kategorie zostałyby
-    // z punktami, których w total_points już nie ma, i pula „sprzed podziału" zeszłaby
-    // na minus. Kasujemy po `day`, bo dokładnie po to ta kolumna jest.
-    db.prepare('DELETE FROM sl_points_log WHERE day = ?').run(date);
-    // ŚCIEŻKA COFANIA #1 — wypłaty i kary bossa z tego dnia wracają na konta, a obrażenia
-    // zadane tego dnia wracają bossowi na pasek (o ile walka wciąż trwa).
-    const bossBack = boss.slRevertBossDay(date);
-    seasonal.revertDay(date);
-    const activity = db.prepare('DELETE FROM sl_activity WHERE day = ?').run(date);
-
-    return {
-      date,
-      players: details.length,
-      moves_deleted: moves.changes,
-      activity_deleted: activity.changes,
-      points_removed: details.reduce((a, d) => a + d.points_removed, 0),
-      boss_payouts_reverted: bossBack.payouts_reverted,
-      boss_hp_restored: bossBack.hp_restored,
-      pushed_not_restored: pushedNotRestored,
-      details
-    };
-  });
-}
-
-// ── COFANIE DNIA: WYŁĄCZONE ──
-// Funkcja czeka na przebudowę i do tego czasu jest zablokowana — świadoma decyzja
-// właściciela, nie awaria. Powody, dla których lepiej jej teraz nie używać:
-//   • odejmuje za dużo coins: rzut dopisuje do salda `earned - curseCoinSteal`, a cofanie
-//     zdejmuje pełne `earned` z obu kolumn, więc kto był pod klątwą Kieszonkowiec, traci
-//     50 coins za dużo (`sl_moves` nie pamięta dziś tej różnicy),
-//   • nie odkręca coins ukradzionych przy wypchnięciu ani wydanych w sklepie,
-//   • gracza, którego ktoś tego dnia zbił, a on sam nie rzucał, trzeba poprawić ręcznie,
-//   • od czasu przebudowy bossa dotyka też wypłat, kar i HP (slRevertBossDay), więc pomyłka
-//     kosztuje więcej niż kiedyś.
-// `slRollbackDay` ZOSTAJE nietknięta — przebudowa ma od czego wyjść, a przy okazji wołają
-// ją narzędzia bossa. Odblokowanie to zmiana tej jednej stałej na `true`.
-const SL_DAY_ROLLBACK_ENABLED = false;
-
-// POST /api/snakes/admin/day/rollback { password, date? } — cofa cały dzień gry do stanu
-// z 8:00 (domyślnie dzisiejszy, wg czasu Warszawy). Patrz slRollbackDay po szczegóły tego,
-// co wraca, a co zostaje. Nieodwracalne — potwierdzenie leży po stronie panelu.
-// Blokada siedzi TUTAJ, a nie tylko w panelu: trasa jest wystawiona na świat i schowanie
-// przycisku niczego by nie zamknęło.
-app.post('/api/snakes/admin/day/rollback', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  if (!SL_DAY_ROLLBACK_ENABLED) {
-    return res.status(503).json({
-      error: 'Cofanie dnia jest wyłączone — funkcja czeka na przebudowę (m.in. odejmuje za dużo coins po klątwie Kieszonkowiec i nie odkręca kradzieży przy wypchnięciu). Do pojedynczych poprawek użyj „Cofnij ostatni ruch" albo ręcznej edycji gracza.',
-      disabled: true
-    });
-  }
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.body.date || '') ? req.body.date : todayWaw();
-  // Dzień z ruchami sprzed zmiany sezonu odpada w całości: ich from_abs to pole na innej
-  // planszy (patrz slResetPositionsToStart). Częściowe cofnięcie dnia byłoby gorsze niż żadne.
-  const preSeason = db.prepare('SELECT COUNT(*) AS c FROM sl_moves WHERE move_date = ? AND id <= ?')
-    .get(date, slSeasonMoveFloor()).c;
-  if (Number(preSeason) > 0) {
-    return res.status(409).json({ error: `Tego dnia (${date}) zmienił się sezon planszy — ruchy sprzed zmiany stały na innej planszy, więc dnia nie da się cofnąć.` });
-  }
-  const out = slRollbackDay(date);
-  console.log(`Snakes/Admin: cofnięto dzień ${date} — ${out.players} graczy, ${out.moves_deleted} ruchów, ${out.points_removed} pkt odjęte`);
-  res.json({ success: true, ...out });
-});
-
-// POST /api/snakes/admin/players/:id/stats { password, balance?, total_points? } — ręczna
-// korekta salda (monet) i/lub sumy punktów gracza. Wartości ustawiane WPROST (nie delta),
-// bo panel pokazuje obok aktualne liczby. Nie rusza pozycji na planszy ani ekwipunku.
-app.post('/api/snakes/admin/players/:id/stats', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-
-  // Każde pole osobno opcjonalne — panel wysyła tylko to, co admin faktycznie zmienił.
-  const num = (v) => (v != null ? parseInt(v, 10) : null);
-  const balance = num(req.body.balance);
-  const totalPoints = num(req.body.total_points);
-  const tile = num(req.body.tile);
-  const laps = num(req.body.laps);
-  const rollsToday = num(req.body.rolls_today);
-  const extraRolls = num(req.body.extra_rolls);
-
-  const bad = (v, min, max, label) =>
-    v != null && (!Number.isInteger(v) || v < min || (max != null && v > max)) ? label : null;
-  const err = bad(balance, 0, null, 'Coins muszą być liczbą całkowitą ≥ 0.')
-    || bad(totalPoints, 0, null, 'Punkty muszą być liczbą całkowitą ≥ 0.')
-    || bad(tile, 0, slBoardSize() - 1, `Pole musi być z zakresu 0–${slBoardSize() - 1}.`)
-    || bad(laps, 0, null, 'Okrążenia muszą być liczbą całkowitą ≥ 0.')
-    || bad(rollsToday, 0, null, 'Zużyte rzuty muszą być liczbą całkowitą ≥ 0.')
-    || bad(extraRolls, 0, SL_MAX_EXTRA_ROLLS, `Dodatkowe sloty: 0–${SL_MAX_EXTRA_ROLLS}.`);
-  if (err) return res.status(400).json({ error: err });
-
-  if ([balance, totalPoints, tile, laps, rollsToday, extraRolls].every(v => v == null)) {
-    return res.status(400).json({ error: 'Nie podano żadnej zmiany.' });
-  }
-
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  const out = transaction(() => {
-    const st = slEnsureState(playerId);
-    const today = todayWaw();
-
-    // Pozycja na planszy to para (okrążenie, pole) — trzymana jako jedna liczba abs_pos.
-    // Admin podaje ją tak, jak ją widzi w UI, więc składamy z powrotem tutaj.
-    const nextTile = tile != null ? tile : slTileOf(Number(st.abs_pos));
-    const nextLaps = laps != null ? laps : Number(st.laps);
-    const nextAbs = nextLaps * slBoardSize() + nextTile;
-
-    // Licznik zużytych rzutów liczy się dla dnia z last_move_date — ustawiając go ręcznie
-    // trzeba przypiąć go do DZIŚ, inaczej zmiana nie miałaby żadnego skutku.
-    const nextRolls = rollsToday != null ? rollsToday : (st.last_move_date === today ? Number(st.rolls_today) : 0);
-    const nextMoveDate = rollsToday != null ? (nextRolls > 0 ? today : null) : st.last_move_date;
-
-    db.prepare(`
-      UPDATE sl_state SET
-        balance = ?, total_points = ?, abs_pos = ?, laps = ?,
-        rolls_today = ?, last_move_date = ?,
-        extra_rolls = ?, extra_rolls_date = ?
-      WHERE player_id = ?
-    `).run(
-      balance != null ? balance : Number(st.balance),
-      totalPoints != null ? totalPoints : Number(st.total_points),
-      nextAbs, nextLaps,
-      nextRolls, nextMoveDate,
-      extraRolls != null ? extraRolls : Number(st.extra_rolls || 0),
-      extraRolls != null ? (extraRolls > 0 ? today : null) : st.extra_rolls_date,
-      playerId
-    );
-    return slAdminPlayerDetail(playerId);
-  });
-
-  res.json({ success: true, nickname: player.nickname, player: out });
-});
-
-// GET /api/snakes/admin/player/:id?password= — komplet tego, co o graczu wie tryb Snakes:
-// stan, ekwipunek, oczekujące na niego efekty, ostatnie ruchy i wpisy w dzienniku.
-// Jeden strzał zamiast pięciu — panel otwiera ten szczegół po kliknięciu w gracza.
-function slAdminPlayerDetail(playerId) {
-  const st = slEnsureState(playerId);
-  const today = todayWaw();
-  const p = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  const rollsUsedToday = st.last_move_date === today ? Number(st.rolls_today) : 0;
-  return {
-    player_id: playerId,
-    nickname: p ? p.nickname : null,
-    tile: slTileOf(Number(st.abs_pos)),
-    abs_pos: Number(st.abs_pos),
-    laps: Number(st.laps),
-    balance: Number(st.balance),
-    total_points: Number(st.total_points),
-    rolls_used_today: rollsUsedToday,
-    daily_rolls: slDailyRollsFor(st, today),
-    extra_rolls: st.extra_rolls_date === today ? Number(st.extra_rolls || 0) : 0,
-    max_extra_rolls: SL_MAX_EXTRA_ROLLS,
-    last_move_date: st.last_move_date,
-    has_avatar: !!st.avatar_updated_at,
-    inventory: slInventory(playerId),
-    effects: db.prepare(`
-      SELECT e.id, e.type, e.variant, e.created_at, p2.nickname AS source_nickname
-      FROM sl_effects e LEFT JOIN players p2 ON p2.id = e.source_player_id
-      WHERE e.target_player_id = ? AND e.status = 'pending' ORDER BY e.id
-    `).all(playerId),
-    moves: db.prepare(`
-      SELECT id, move_date, move_seq, rolls, from_abs, to_abs, points, note, created_at
-      FROM sl_moves WHERE player_id = ? ORDER BY id DESC LIMIT 15
-    `).all(playerId).map(m => ({ ...m, from_tile: slTileOf(m.from_abs), to_tile: slTileOf(m.to_abs) })),
-    activity: db.prepare(`
-      SELECT id, type, detail, day, created_at FROM sl_activity
-      WHERE player_id = ? ORDER BY id DESC LIMIT 15
-    `).all(playerId)
-  };
-}
-
-app.get('/api/snakes/admin/player/:id', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-  const player = db.prepare('SELECT id FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-  res.json({ success: true, player: slAdminPlayerDetail(playerId) });
-});
-
-// POST /api/snakes/admin/players/:id/inventory { password, type, qty|delta } — ustawia
-// stan ekwipunku wprost (`qty`) albo zmienia go o `delta` (przyciski +/- w panelu).
-app.post('/api/snakes/admin/players/:id/inventory', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-  const type = String(req.body.type || '');
-  const qty = req.body.qty != null ? parseInt(req.body.qty, 10) : null;
-  const delta = req.body.delta != null ? parseInt(req.body.delta, 10) : null;
-
-  if (!SL_POWERUP_TYPES.includes(type)) {
-    return res.status(400).json({ error: `Nieznany power-up. Dostępne: ${SL_POWERUP_TYPES.join(', ')}.` });
-  }
-  if (qty == null && delta == null) return res.status(400).json({ error: 'Podaj qty albo delta.' });
-  if (qty != null && (!Number.isInteger(qty) || qty < 0)) {
-    return res.status(400).json({ error: 'Liczba sztuk musi być liczbą całkowitą ≥ 0.' });
-  }
-  if (delta != null && !Number.isInteger(delta)) {
-    return res.status(400).json({ error: 'Zmiana musi być liczbą całkowitą.' });
-  }
-
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  const out = transaction(() => {
-    slEnsureState(playerId);
-    const current = slInventory(playerId)[type];
-    const next = Math.max(0, qty != null ? qty : current + delta);
-    db.prepare(`
-      INSERT INTO sl_inventory (player_id, type, qty) VALUES (?, ?, ?)
-      ON CONFLICT(player_id, type) DO UPDATE SET qty = excluded.qty
-    `).run(playerId, type, next);
-    return slAdminPlayerDetail(playerId);
-  });
-
-  res.json({ success: true, nickname: player.nickname, type, player: out });
-});
-
-// POST /api/snakes/admin/players/:id/effects/clear { password, effect_id? } — kasuje
-// oczekujące na graczu efekty (Freeze/Curse/Shield). Bez `effect_id` zdejmuje wszystkie.
-// Efekt znika bez śladu w dzienniku — to narzędzie naprawcze, nie ruch w grze.
-app.post('/api/snakes/admin/players/:id/effects/clear', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-  const effectId = req.body.effect_id != null ? parseInt(req.body.effect_id, 10) : null;
-
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  const out = transaction(() => {
-    const del = effectId != null
-      ? db.prepare(`DELETE FROM sl_effects WHERE id = ? AND target_player_id = ? AND status = 'pending'`).run(effectId, playerId)
-      : db.prepare(`DELETE FROM sl_effects WHERE target_player_id = ? AND status = 'pending'`).run(playerId);
-    return { cleared: del.changes, player: slAdminPlayerDetail(playerId) };
-  });
-
-  res.json({ success: true, nickname: player.nickname, ...out });
-});
-
-// POST /api/snakes/admin/players/:id/undo-move { password } — cofa OSTATNI ruch gracza
-// naprawdę: wraca na pole sprzed niego (from_abs), odejmuje zdobyte w nim punkty i monety
-// oraz oddaje zużyty slot, żeby dało się rzucić jeszcze raz. To coś innego niż „Dodaj ruch",
-// które tylko oddaje slot i zostawia zdobycze — tu ruch znika, jakby go nie było.
-// Odkręca też obrażenia, które ten rzut zadał bossowi (wkład znika, HP wraca — patrz
-// slRevertBossDamageForRef). Nie odkręca za to reszty skutków ubocznych: kogo wtedy
-// wypchnął ani komu ukradł monety — tego wiersz ruchu nie pamięta.
-app.post('/api/snakes/admin/players/:id/undo-move', (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const playerId = parseInt(req.params.id, 10);
-
-  const player = db.prepare('SELECT id, nickname FROM players WHERE id = ?').get(playerId);
-  if (!player) return res.status(404).json({ error: 'Gracz nie istnieje' });
-
-  const out = transaction(() => {
-    const move = db.prepare('SELECT * FROM sl_moves WHERE player_id = ? ORDER BY id DESC LIMIT 1').get(playerId);
-    if (!move) return { none: true };
-    // Ruch z poprzedniego sezonu: from_abs wskazuje pole na innej planszy.
-    if (Number(move.id) <= slSeasonMoveFloor()) return { before_season: true };
-
-    const st = slEnsureState(playerId);
-    const fromAbs = Number(move.from_abs);
-    const pts = Number(move.points);
-    const sameDay = st.last_move_date === move.move_date;
-    const nextRolls = sameDay ? Math.max(0, Number(st.rolls_today) - 1) : Number(st.rolls_today);
-
-    // Kocioł, psikusy i cukierki tego ruchu (ten sam `ref`) odkręcamy PRZED odjęciem
-    // `earned` niżej. Tamto odejmowanie przycina saldo do zera — gdyby kocioł zabrał
-    // wcześniej 10 coins i zepchnął gracza nisko, przycięcie „zjadłoby" część `earned`,
-    // a zwrot z kotła dopisałby się potem w całości, czyli wydrukował coins.
-    seasonal.revertRef(`move:${move.id}`);
-
-    db.prepare(`
-      UPDATE sl_state SET abs_pos = ?, laps = ?, total_points = MAX(0, total_points - ?),
-        balance = MAX(0, balance - ?), rolls_today = ?
-      WHERE player_id = ?
-    `).run(fromAbs, Math.floor(fromAbs / slBoardSize()), pts, pts, nextRolls, playerId);
-
-    db.prepare('DELETE FROM sl_moves WHERE id = ?').run(move.id);
-    // Ruch ma własne wiersze rozbicia oznaczone kolumną "ref" — kasujemy dokładnie je, żeby
-    // cofnięcie jednego ruchu nie ruszyło pozostałych z tego samego dnia.
-    // UWAGA: string składamy w JS, a NIE w SQL-u przez ('move:' || ?). node:sqlite binduje
-    // liczbę JS jako REAL, więc taka konkatenacja daje 'move:16.0' zamiast 'move:16'
-    // i warunek po cichu nie trafia w nic — cofnięty ruch zostawiłby swoje punkty
-    // w rozbiciu, mimo że total_points już ich nie ma.
-    db.prepare('DELETE FROM sl_points_log WHERE ref = ?').run(`move:${move.id}`);
-    // ŚCIEŻKA COFANIA #2 — ten sam `ref` niesie obrażenia zadane bossowi tym rzutem.
-    const bossBack = boss.slRevertBossDamageForRef(`move:${move.id}`);
-    return {
-      none: false, move_date: move.move_date, move_seq: Number(move.move_seq),
-      points_removed: pts, back_to_tile: slTileOf(fromAbs),
-      boss_hp_restored: bossBack.hp_restored, player: slAdminPlayerDetail(playerId)
-    };
-  });
-
-  if (out.none) return res.status(400).json({ error: 'Ten gracz nie ma żadnego zapisanego ruchu.' });
-  if (out.before_season) return res.status(409).json({ error: 'Ostatni ruch tego gracza był jeszcze na planszy poprzedniego sezonu — nie da się go cofnąć.' });
-  res.json({ success: true, nickname: player.nickname, ...out });
+// ── PANEL ADMINA SNAKES ── ustawienia, sezony, gracze, cofanie, reset (routes/snakes-admin.js).
+// Na samym końcu, bo trasy sięgają po wszystko: bossa, sezon, kostiumy, rejestr sezonowy.
+require('./routes/snakes-admin')({
+  app, checkAdmin, slEventsConfig, SL_EVENT_LABELS, SL_EVENT_DEFAULTS, SL_DISCORD_WEBHOOK_URL,
+  SL_SUMMARY_HOUR, slBoardSize, slCurrentBoard, SL_POWERUP_COSTS, SL_POWERUP_LABELS,
+  slPlayHours, boss, db, SL_PLAY_META_START, SL_PLAY_META_END, SL_PLAY_META_WEEKENDS,
+  transaction, slMetaSet, costumes, seasonal, slEmit, seasons, slCloseSeasonAndInstall,
+  slInstallBoard, SNAKES_URL, slPostDiscord, slBoardPayload, todayWaw, slDailyRollsFor,
+  slTileOf, crowning, slEnsureState, SL_DAILY_ROLLS, slSetEventsConfig, SL_MAX_EXTRA_ROLLS,
+  slSeasonMoveFloor, slInventory, SL_POWERUP_TYPES
 });
 
 // Strona gry i panel admina trybu Snakes są rejestrowane WYŻEJ, przed express.static —
 // muszą tam być, żeby doklejać wersję do adresów snakes.js/snakes.css (patrz sendPage).
 
 app.listen(PORT, () => {
-  console.log(`Office Wordle — Serwer na http://localhost:${PORT}`);
-  // Znacznik wersji w logach — po deployu widać w `pm2 logs`, czy wstał nowy kod.
-  console.log(`Bonus za szybkość: pierwsze ${SPEED_BONUS_PLACES} osób dnia (+${SPEED_BONUS_PLACES}…+1 pkt)`);
-  console.log(`Snakes: ${SL_DAILY_ROLLS} ruchy dziennie, do wykorzystania ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 (pon–pt, Europe/Warsaw), bez odstępu między ruchami`);
-  startDiscordScheduler();
+  console.log(`Snakes Game — serwer na http://localhost:${PORT}`);
+  console.log(`Snakes: ${SL_DAILY_ROLLS} ruchy dziennie, domyślnie ${SL_PLAY_START_HOUR}:00–${SL_PLAY_END_HOUR}:00 (pon–pt, Europe/Warsaw; okno zmienia się w panelu admina), bez odstępu między ruchami`);
+  wordle.start();
 });

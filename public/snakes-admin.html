@@ -9,7 +9,18 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="stylesheet" href="/snakes.css" />
   <style>
-    .adm-wrap { max-width: 720px; margin: 24px auto; padding: 0 16px; }
+    .adm-wrap { max-width: 1440px; margin: 24px auto; padding: 0 16px; }
+    #login-card { max-width: 720px; margin-left: auto; margin-right: auto; }
+    /* Dwie kolumny: po lewej to, czym się pracuje na co dzień (gracze, dziennik — szerokie
+       wiersze), po prawej ustawienia. Kolumny są niezależne, więc karty różnej wysokości
+       nie zostawiają dziur jak w siatce z wierszami. Poniżej 1100px wracamy do jednej. */
+    .adm-cols { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .adm-col { min-width: 0; }
+    @media (max-width: 1100px) { .adm-cols { grid-template-columns: minmax(0, 1fr); } }
+    .hours-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .hours-row input[type=number] { width: 64px; background: var(--surface-alt); border: 1px solid var(--muted); border-radius: 8px; color: var(--text-primary); padding: 6px 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+    .hours-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--muted); color: var(--text-muted); margin-left: 6px; }
+    .hours-badge.is-custom { border-color: var(--gold); color: var(--gold); }
     .adm-card { background: var(--surface); border: 1px solid var(--muted); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
     .adm-card h3 { font-size: 15px; letter-spacing: 1px; margin-bottom: 12px; }
     .adm-login { display: flex; gap: 8px; }
@@ -103,231 +114,294 @@
 
     <!-- PANEL -->
     <div id="adm-panel" style="display:none">
-      <div class="adm-card">
-        <h3>🔔 ZDARZENIA WYSYŁANE NA DISCORDA</h3>
-        <div class="adm-note" id="webhook-note"></div>
-        <div id="events-list"></div>
-        <div class="adm-actions">
-          <button class="btn-primary" id="btn-save">Zapisz ustawienia</button>
-          <button class="btn-ghost" id="btn-test">Testuj webhook</button>
-        </div>
-      </div>
-
-      <div class="adm-card">
-        <h3>🗺️ SEZON PLANSZY</h3>
-        <div class="adm-stat" id="season-info">–</div>
-        <div class="adm-note" style="margin-top:12px">
-          Każdy sezon to plik <code>boards/&lt;nazwa&gt;.js</code> (kształt, drabiny, węże, bonusy,
-          motyw). Nowy plik pojawia się tu po restarcie serwera; plik z błędem nie pojawia się
-          wcale (powód jest w logach). Zmiana sezonu stawia <strong>wszystkich na polu 0</strong>.
-          Punkty, coins, okrążenia i ekwipunek zostają. Ruchów sprzed zmiany nie da się już
-          cofnąć (ani „cofnij ruch", ani cofnięcie dnia), bo stały na innej planszy.
-        </div>
-        <div class="adm-actions">
-          <select id="season-select" style="width:240px"></select>
-          <button class="btn-ghost" id="btn-season">Włącz sezon</button>
-        </div>
-      </div>
-
-      <div class="adm-card">
-        <h3>🤝 WYDARZENIE KOOPERACYJNE / 👹 BOSS</h3>
-        <div class="adm-stat" id="coop-info">–</div>
-        <div id="boss-info"></div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Włącznik bossa</strong> — wyłączenie chowa walkę wszystkim graczom (panel
-          pod planszą i punkt regulaminu znikają, rzuty przestają zadawać obrażenia, ręczny
-          wpłaty są zablokowane) i domyka trwającą walkę <strong>bez nagród i bez kar</strong>.
-          Włączenie startuje świeżą edycję z nowym bossem i nowym terminem. Punktów graczy
-          to nie rusza w żadną stronę.
-        </div>
-        <div class="adm-actions">
-          <button class="btn-ghost" id="btn-boss-toggle">–</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Ręczna kontrola bossa</strong> — HP i maksymalne HP ustawiasz wprost
-          (pasek liczy się od maksimum), nazwę zmieniasz w locie. Puste pole = bez zmian.
-        </div>
-        <div class="adm-actions">
-          <input type="number" id="boss-hp-input" min="0" step="1" placeholder="HP" style="width:90px" />
-          <input type="number" id="boss-maxhp-input" min="1" step="1" placeholder="max HP" style="width:90px" />
-          <input type="text" id="boss-name-input" placeholder="nazwa bossa" style="width:180px" />
-          <button class="btn-ghost" id="btn-boss-save">Zapisz bossa</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Zadaj obrażenia</strong> — delta: dodatnia zbija HP, ujemna leczy. Jeśli
-          wskażesz gracza, obrażenia policzą mu się jako wkład do podziału nagród (tak samo
-          jak zwykłe trafienie); bez gracza to korekta „od admina", która nikomu się nie liczy.
-          Zbicie HP do zera rozlicza walkę jako <strong>wygraną</strong> — nagrody lecą normalnie,
-          a kolejny boss budzi się od razu.
-        </div>
-        <div class="adm-actions">
-          <input type="number" id="boss-damage-input" step="1" placeholder="± obrażenia" style="width:120px" />
-          <select id="boss-damage-player" style="width:180px">
-            <option value="">— bez przypisania —</option>
-          </select>
-          <button class="btn-ghost" id="btn-boss-damage">Zadaj obrażenia</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Ustaw godzinę końcową walki</strong> — dokładny termin (data + godzina),
-          do którego trzeba pokonać AKTUALNEGO bossa. Działa zawsze, można zmieniać
-          dowolną liczbę razy — jeśli ustawisz termin, który już minął, walka rozlicza się
-          natychmiast (tak jakby czas właśnie upłynął).
-        </div>
-        <div class="adm-actions">
-          <input type="datetime-local" id="coop-deadline-input" style="width:200px" />
-          <button class="btn-ghost" id="btn-coop-deadline">Ustaw termin</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Startowe HP bossa</strong> — nie rusza bieżącej walki (HP jest już przyznane),
-          tylko zapisuje się jako baza dla WSZYSTKICH kolejnych edycji. Po wygranej kolejny
-          boss dostaje ×1,2 tej wartości, po przegranej ×0,9 (nie mniej niż baza).
-          Punkt odniesienia: 15 graczy dowozi z samych rzutów ~470–790 obrażeń dziennie.
-        </div>
-        <div class="adm-actions">
-          <input type="number" id="coop-threshold-input" min="1" step="1" placeholder="nowy próg" style="width:110px" />
-          <button class="btn-ghost" id="btn-coop-threshold">Zapisz próg</button>
-        </div>
-
-        <div class="adm-note" style="margin-top:12px">
-          <strong>Zamknij wydarzenie</strong> — domyka trwającą walkę i wypłaca nagrody.
-          Zaznacz „mimo że boss żyje”, żeby zamknąć bez pokonania (bez premii, jak przy
-          normalnym upływie czasu).
-        </div>
-        <div class="adm-actions">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-            <input type="checkbox" id="coop-force-checkbox" /> mimo że boss żyje
-          </label>
-          <button class="btn-ghost" id="btn-coop-complete">Zamknij wydarzenie i wypłać nagrody</button>
-        </div>
-      </div>
-
-      <div class="adm-card">
-        <h3>🎮 GRACZE</h3>
-        <div class="adm-note">
-          Kliknij <strong>Szczegóły</strong> przy graczu, żeby otworzyć pełne sterowanie:
-          pozycja na planszy, punkty i coins, zużyte rzuty, ekwipunek, oczekujące na niego
-          efekty oraz cofanie ostatniego ruchu.
-        </div>
-        <div id="players-list"></div>
-      </div>
-
-      <div class="adm-card">
-        <h3>📜 HISTORIA I WIDOCZNOŚĆ</h3>
-        <div class="adm-note">
-          <strong>Dziennik</strong> to log widoczny dla graczy — tu decydujesz, co z niego
-          widać. Ukrycie i podmiana treści <strong>niczego nie kasują</strong>: wpis zostaje
-          w bazie, a każdą decyzję cofasz jednym kliknięciem. O tym, czy wpis widać,
-          rozstrzygają trzy warstwy — <strong>pojedynczy wpis</strong> bije
-          <strong>regułę</strong>, reguła bije <strong>domyślną widoczność typu</strong>.
-          <strong>Ruchy</strong> pokazują, kto ile razy rzucał danego dnia. Do realnego
-          cofania skutków w grze służą „Cofnij ostatni ruch” przy graczu i „Cofnij cały dzień” niżej.
-        </div>
-        <div class="adm-actions">
-          <button class="btn-ghost hist-tab is-active" id="tab-activity">Dziennik</button>
-          <button class="btn-ghost hist-tab" id="tab-moves">Ruchy</button>
-          <button class="btn-ghost hist-tab" id="tab-visibility">Widoczność</button>
-          <button class="btn-ghost hist-tab" id="tab-preview">👁 Podgląd gracza</button>
-        </div>
-
-        <!-- Filtry — wspólne dla Dziennika, Ruchów i Podglądu -->
-        <div class="adm-actions" id="hist-filters">
-          <select id="hist-date" style="width:150px"><option value="">— wszystkie dni —</option></select>
-          <select id="hist-player" style="width:160px"><option value="">— wszyscy gracze —</option></select>
-          <select id="hist-type" style="width:150px"><option value="">— wszystkie typy —</option></select>
-          <button class="btn-ghost" id="btn-hist-refresh">Odśwież</button>
-        </div>
-
-        <!-- Akcje hurtowe: nieniszczące, działają na wszystko, co pasuje do filtra -->
-        <div class="adm-actions" id="hist-bulk">
-          <button class="btn-ghost" id="btn-bulk-hide">🙈 Ukryj wszystko z filtra</button>
-          <button class="btn-ghost" id="btn-bulk-show">👁 Pokaż wszystko z filtra</button>
-          <button class="btn-ghost" id="btn-bulk-clear">↩️ Wyczyść nadpisania</button>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:auto">
-            <input type="checkbox" id="hist-show-delete" /> pokaż kasowanie
-          </label>
-          <button class="btn-danger" id="btn-hist-purge" style="display:none">🗑 Kasuj wg filtra</button>
-        </div>
-
-        <div class="adm-stat" id="hist-summary" style="margin-top:10px">–</div>
-        <div id="hist-list"></div>
-
-        <!-- Zakładka WIDOCZNOŚĆ: domyślne typy + reguły -->
-        <div id="hist-visibility" style="display:none">
-          <div class="adm-note" style="margin-top:14px">
-            <strong>Domyślna widoczność typów</strong> — najszersza warstwa. Odznaczenie
-            chowa całą kategorię wpisów wszystkim graczom; reguła albo nadpisanie
-            pojedynczego wpisu nadal mogą coś z niej przywrócić.
+      <div class="adm-cols">
+        <!-- LEWA: praca na co dzień -->
+        <div class="adm-col">
+        <div class="adm-card">
+          <h3>🎮 GRACZE</h3>
+          <div class="adm-note">
+            Kliknij <strong>Szczegóły</strong> przy graczu, żeby otworzyć pełne sterowanie:
+            pozycja na planszy, punkty i coins, zużyte rzuty, ekwipunek, oczekujące na niego
+            efekty oraz cofanie ostatniego ruchu.
           </div>
-          <div id="vis-types"></div>
+          <div id="players-list"></div>
+        </div>
+
+        <div class="adm-card">
+          <h3>📜 HISTORIA I WIDOCZNOŚĆ</h3>
+          <div class="adm-note">
+            <strong>Dziennik</strong> to log widoczny dla graczy — tu decydujesz, co z niego
+            widać. Ukrycie i podmiana treści <strong>niczego nie kasują</strong>: wpis zostaje
+            w bazie, a każdą decyzję cofasz jednym kliknięciem. O tym, czy wpis widać,
+            rozstrzygają trzy warstwy — <strong>pojedynczy wpis</strong> bije
+            <strong>regułę</strong>, reguła bije <strong>domyślną widoczność typu</strong>.
+            <strong>Ruchy</strong> pokazują, kto ile razy rzucał danego dnia. Do realnego
+            cofania skutków w grze służą „Cofnij ostatni ruch” przy graczu i „Cofnij cały dzień” niżej.
+          </div>
           <div class="adm-actions">
-            <button class="btn-primary" id="btn-vis-types-save">Zapisz widoczność typów</button>
+            <button class="btn-ghost hist-tab is-active" id="tab-activity">Dziennik</button>
+            <button class="btn-ghost hist-tab" id="tab-moves">Ruchy</button>
+            <button class="btn-ghost hist-tab" id="tab-visibility">Widoczność</button>
+            <button class="btn-ghost hist-tab" id="tab-preview">👁 Podgląd gracza</button>
           </div>
 
-          <div class="adm-note" style="margin-top:16px">
-            <strong>Reguły</strong> — puste pole znaczy „dowolne”, więc reguła bez żadnego
-            dopasowania łapie cały dziennik. „Ukryj” chowa wpis, „Podmień treść” zostawia go
-            widocznym, ale z Twoim tekstem (oryginał zostaje w bazie i widzisz go tutaj).
-            Licznik pokazuje, ilu wpisów reguła dotyczy w tej chwili.
+          <!-- Filtry — wspólne dla Dziennika, Ruchów i Podglądu -->
+          <div class="adm-actions" id="hist-filters">
+            <select id="hist-date" style="width:150px"><option value="">— wszystkie dni —</option></select>
+            <select id="hist-player" style="width:160px"><option value="">— wszyscy gracze —</option></select>
+            <select id="hist-type" style="width:150px"><option value="">— wszystkie typy —</option></select>
+            <button class="btn-ghost" id="btn-hist-refresh">Odśwież</button>
           </div>
-          <div id="vis-rules"></div>
-          <div class="adm-actions" style="align-items:flex-end">
-            <select id="rule-action" style="width:130px">
-              <option value="hide">Ukryj</option>
-              <option value="redact">Podmień treść</option>
+
+          <!-- Akcje hurtowe: nieniszczące, działają na wszystko, co pasuje do filtra -->
+          <div class="adm-actions" id="hist-bulk">
+            <button class="btn-ghost" id="btn-bulk-hide">🙈 Ukryj wszystko z filtra</button>
+            <button class="btn-ghost" id="btn-bulk-show">👁 Pokaż wszystko z filtra</button>
+            <button class="btn-ghost" id="btn-bulk-clear">↩️ Wyczyść nadpisania</button>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:auto">
+              <input type="checkbox" id="hist-show-delete" /> pokaż kasowanie
+            </label>
+            <button class="btn-danger" id="btn-hist-purge" style="display:none">🗑 Kasuj wg filtra</button>
+          </div>
+
+          <div class="adm-stat" id="hist-summary" style="margin-top:10px">–</div>
+          <div id="hist-list"></div>
+
+          <!-- Zakładka WIDOCZNOŚĆ: domyślne typy + reguły -->
+          <div id="hist-visibility" style="display:none">
+            <div class="adm-note" style="margin-top:14px">
+              <strong>Domyślna widoczność typów</strong> — najszersza warstwa. Odznaczenie
+              chowa całą kategorię wpisów wszystkim graczom; reguła albo nadpisanie
+              pojedynczego wpisu nadal mogą coś z niej przywrócić.
+            </div>
+            <div id="vis-types"></div>
+            <div class="adm-actions">
+              <button class="btn-primary" id="btn-vis-types-save">Zapisz widoczność typów</button>
+            </div>
+
+            <div class="adm-note" style="margin-top:16px">
+              <strong>Reguły</strong> — puste pole znaczy „dowolne”, więc reguła bez żadnego
+              dopasowania łapie cały dziennik. „Ukryj” chowa wpis, „Podmień treść” zostawia go
+              widocznym, ale z Twoim tekstem (oryginał zostaje w bazie i widzisz go tutaj).
+              Licznik pokazuje, ilu wpisów reguła dotyczy w tej chwili.
+            </div>
+            <div id="vis-rules"></div>
+            <div class="adm-actions" style="align-items:flex-end">
+              <select id="rule-action" style="width:130px">
+                <option value="hide">Ukryj</option>
+                <option value="redact">Podmień treść</option>
+              </select>
+              <select id="rule-type" style="width:150px"><option value="">— dowolny typ —</option></select>
+              <select id="rule-player" style="width:150px"><option value="">— dowolny gracz —</option></select>
+              <input type="date" id="rule-day-from" title="od dnia" style="width:140px" />
+              <input type="date" id="rule-day-to" title="do dnia" style="width:140px" />
+            </div>
+            <div class="adm-actions">
+              <input type="text" id="rule-text" placeholder="fragment treści (opcjonalnie)" style="width:210px" />
+              <input type="text" id="rule-replacement" placeholder="tekst zastępczy (dla podmiany)" style="width:230px" />
+              <input type="text" id="rule-note" placeholder="notatka — po co ta reguła" style="width:200px" />
+              <button class="btn-primary" id="btn-rule-add">➕ Dodaj regułę</button>
+            </div>
+          </div>
+        </div>
+        </div>
+
+        <!-- PRAWA: ustawienia gry -->
+        <div class="adm-col">
+        <div class="adm-card" id="hours-card">
+          <h3>🕗 GODZINY GRY <span class="hours-badge" id="hours-badge">–</span></h3>
+          <div class="adm-note">
+            W jakich godzinach (czasu Warszawy) wolno rzucać i używać Extra Move. Koniec jest
+            wyłączny: <code>8–16</code> znaczy „od 8:00 do 15:59". <strong>0–24 z weekendami</strong>
+            zdejmuje blokadę całkiem — do testów. Limit ruchów dalej liczy się na dzień
+            kalendarzowy, więc szersze okno nie daje nikomu dodatkowych rzutów.
+            Regulamin na stronie gry ma godziny wpisane na sztywno i ich nie zmienia.
+          </div>
+          <div class="adm-stat" id="hours-info">–</div>
+          <div class="adm-actions hours-row">
+            <label>od <input type="number" id="hours-start" min="0" max="23" step="1" /></label>
+            <label>do <input type="number" id="hours-end" min="1" max="24" step="1" /></label>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px">
+              <input type="checkbox" id="hours-weekends" /> także w weekendy
+            </label>
+            <button class="btn-primary" id="btn-hours-save">Zapisz godziny</button>
+          </div>
+          <div class="adm-actions">
+            <button class="btn-ghost" id="btn-hours-open">🔓 Bez blokady (0–24, codziennie)</button>
+            <button class="btn-ghost" id="btn-hours-reset">↩️ Domyślne</button>
+          </div>
+        </div>
+
+        <div class="adm-card">
+          <h3>🗺️ SEZON PLANSZY</h3>
+          <div class="adm-stat" id="season-info">–</div>
+          <div class="adm-note" style="margin-top:12px">
+            Każdy sezon to plik <code>boards/&lt;nazwa&gt;.js</code> (kształt, drabiny, węże, bonusy,
+            motyw). Nowy plik pojawia się tu po restarcie serwera; plik z błędem nie pojawia się
+            wcale (powód jest w logach).<br><br>
+            <strong>Z zaznaczonym „zamknij sezon"</strong> (tak startuje każdy nowy sezon): ranking
+            idzie do archiwum, pierwsza trójka dostaje medale przy nicku, a <strong>wszyscy zaczynają
+            od zera</strong> — punkty, coins, okrążenia, ekwipunek, czekające ataki i tarcze. Trwająca
+            walka z bossem kończy się bez nagród i kar, rusza nowa. Zostają tylko kostiumy. Każdy,
+            kto grał w zamykanym sezonie, przy następnym wejściu zobaczy podium.<br>
+            <strong>Bez zaznaczenia</strong> (tylko na pomyłki i testy): zmienia się sama plansza,
+            wszyscy stają na polu 0, a reszta zostaje.<br><br>
+            Ruchów sprzed zmiany nie da się już cofnąć (ani „cofnij ruch", ani cofnięcie dnia),
+            bo stały na innej planszy. Zamknięcia sezonu nie da się cofnąć.
+          </div>
+          <div class="adm-actions">
+            <select id="season-select" style="width:240px"></select>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px">
+              <input type="checkbox" id="season-close" checked> zamknij sezon (podium i wszyscy od zera)
+            </label>
+            <button class="btn-ghost" id="btn-season">Włącz sezon</button>
+          </div>
+        </div>
+
+        <div class="adm-card">
+          <h3>🤝 WYDARZENIE KOOPERACYJNE / 👹 BOSS</h3>
+          <div class="adm-stat" id="coop-info">–</div>
+          <div id="boss-info"></div>
+
+          <div class="adm-note" style="margin-top:12px">
+            <strong>Włącznik bossa</strong> — wyłączenie chowa walkę wszystkim graczom (panel
+            pod planszą i punkt regulaminu znikają, rzuty przestają zadawać obrażenia, ręczny
+            wpłaty są zablokowane) i domyka trwającą walkę <strong>bez nagród i bez kar</strong>.
+            Włączenie startuje świeżą edycję z nowym bossem i nowym terminem. Punktów graczy
+            to nie rusza w żadną stronę.
+          </div>
+          <div class="adm-actions">
+            <button class="btn-ghost" id="btn-boss-toggle">–</button>
+          </div>
+
+          <div class="adm-note" style="margin-top:12px">
+            <strong>Ręczna kontrola bossa</strong> — HP i maksymalne HP ustawiasz wprost
+            (pasek liczy się od maksimum), nazwę zmieniasz w locie. Puste pole = bez zmian.
+          </div>
+          <div class="adm-actions">
+            <input type="number" id="boss-hp-input" min="0" step="1" placeholder="HP" style="width:90px" />
+            <input type="number" id="boss-maxhp-input" min="1" step="1" placeholder="max HP" style="width:90px" />
+            <input type="text" id="boss-name-input" placeholder="nazwa bossa" style="width:180px" />
+            <button class="btn-ghost" id="btn-boss-save">Zapisz bossa</button>
+          </div>
+
+          <div class="adm-note" style="margin-top:12px">
+            <strong>Zadaj obrażenia</strong> — delta: dodatnia zbija HP, ujemna leczy. Jeśli
+            wskażesz gracza, obrażenia policzą mu się jako wkład do podziału nagród (tak samo
+            jak zwykłe trafienie); bez gracza to korekta „od admina", która nikomu się nie liczy.
+            Zbicie HP do zera rozlicza walkę jako <strong>wygraną</strong> — nagrody lecą normalnie,
+            a kolejny boss budzi się od razu.
+          </div>
+          <div class="adm-actions">
+            <input type="number" id="boss-damage-input" step="1" placeholder="± obrażenia" style="width:120px" />
+            <select id="boss-damage-player" style="width:180px">
+              <option value="">— bez przypisania —</option>
             </select>
-            <select id="rule-type" style="width:150px"><option value="">— dowolny typ —</option></select>
-            <select id="rule-player" style="width:150px"><option value="">— dowolny gracz —</option></select>
-            <input type="date" id="rule-day-from" title="od dnia" style="width:140px" />
-            <input type="date" id="rule-day-to" title="do dnia" style="width:140px" />
+            <button class="btn-ghost" id="btn-boss-damage">Zadaj obrażenia</button>
+          </div>
+
+          <div class="adm-note" style="margin-top:12px">
+            <strong>Ustaw godzinę końcową walki</strong> — dokładny termin (data + godzina),
+            do którego trzeba pokonać AKTUALNEGO bossa. Działa zawsze, można zmieniać
+            dowolną liczbę razy — jeśli ustawisz termin, który już minął, walka rozlicza się
+            natychmiast (tak jakby czas właśnie upłynął).
           </div>
           <div class="adm-actions">
-            <input type="text" id="rule-text" placeholder="fragment treści (opcjonalnie)" style="width:210px" />
-            <input type="text" id="rule-replacement" placeholder="tekst zastępczy (dla podmiany)" style="width:230px" />
-            <input type="text" id="rule-note" placeholder="notatka — po co ta reguła" style="width:200px" />
-            <button class="btn-primary" id="btn-rule-add">➕ Dodaj regułę</button>
+            <input type="datetime-local" id="coop-deadline-input" style="width:200px" />
+            <button class="btn-ghost" id="btn-coop-deadline">Ustaw termin</button>
+          </div>
+
+          <div class="adm-note" style="margin-top:12px">
+            <strong>Startowe HP bossa</strong> — nie rusza bieżącej walki (HP jest już przyznane),
+            tylko zapisuje się jako baza dla WSZYSTKICH kolejnych edycji. Po wygranej kolejny
+            boss dostaje ×1,2 tej wartości, po przegranej ×0,9 (nie mniej niż baza).
+            Punkt odniesienia: 15 graczy dowozi z samych rzutów ~470–790 obrażeń dziennie.
+          </div>
+          <div class="adm-actions">
+            <input type="number" id="coop-threshold-input" min="1" step="1" placeholder="nowy próg" style="width:110px" />
+            <button class="btn-ghost" id="btn-coop-threshold">Zapisz próg</button>
+          </div>
+
+          <div class="adm-note" style="margin-top:12px">
+            <strong>Zamknij wydarzenie</strong> — domyka trwającą walkę i wypłaca nagrody.
+            Zaznacz „mimo że boss żyje”, żeby zamknąć bez pokonania (bez premii, jak przy
+            normalnym upływie czasu).
+          </div>
+          <div class="adm-actions">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+              <input type="checkbox" id="coop-force-checkbox" /> mimo że boss żyje
+            </label>
+            <button class="btn-ghost" id="btn-coop-complete">Zamknij wydarzenie i wypłać nagrody</button>
           </div>
         </div>
-      </div>
 
-      <div class="adm-card">
-        <h3>⚙️ KONFIGURACJA</h3>
-        <div class="adm-stat" id="cfg-info">–</div>
-      </div>
+        <div class="adm-card">
+          <h3>🔔 ZDARZENIA WYSYŁANE NA DISCORDA</h3>
+          <div class="adm-note" id="webhook-note"></div>
+          <div id="events-list"></div>
+          <div class="adm-actions">
+            <button class="btn-primary" id="btn-save">Zapisz ustawienia</button>
+            <button class="btn-ghost" id="btn-test">Testuj webhook</button>
+          </div>
+        </div>
 
-      <div class="adm-card" style="opacity:0.6">
-        <h3>↩️ COFNIJ CAŁY DZIEŃ <span style="font-size:11px;font-weight:400">— WYŁĄCZONE</span></h3>
-        <div class="adm-note">
-          <strong>Funkcja jest wyłączona i czeka na przebudowę.</strong> Powody: odejmowała
-          za dużo coins graczom, którzy byli tego dnia pod klątwą Kieszonkowiec, nie
-          odkręcała coins ukradzionych przy wypchnięciu ani wydanych w sklepie, a gracza
-          zbitego przez kogoś innego (który sam nie rzucał) i tak trzeba było poprawiać
-          ręcznie. Od przebudowy bossa dotyka dodatkowo wypłat, kar i HP, więc pomyłka
-          kosztuje więcej niż kiedyś.<br><br>
-          Do pojedynczych poprawek użyj <strong>„Cofnij ostatni ruch"</strong> przy graczu
-          albo ręcznej edycji jego punktów i coins.
+        <div class="adm-card">
+          <h3>💛 SKINY WSPARCIA (BLIK)</h3>
+          <div class="adm-note">
+            Gracz widzi w garderobie (zakładka „Golden Carrot") skin <strong>aktywnego sezonu</strong>
+            i instrukcję: BLIK na numer niżej, w tytule nick. Numer jest schowany, dopóki gracz
+            go nie kliknie. Pusty numer = wsparcie wyłączone. Po odebraniu BLIK-a wybierz, od kogo
+            jest, i przydziel skin — od razu ląduje na pionku. Skinów wsparcia <strong>nie kasuje</strong>
+            ani reset gry, ani usunięcie gracza ze Snakes; odebrać można tylko tutaj.
+          </div>
+          <div class="adm-actions">
+            <input type="tel" id="supporter-phone" placeholder="np. 600 123 456" style="width:180px" />
+            <button class="btn-ghost" id="btn-supporter-phone">Zapisz numer</button>
+          </div>
+          <div class="adm-actions">
+            <select id="supporter-player" style="width:180px"></select>
+            <select id="supporter-item" style="width:240px"></select>
+            <button class="btn-primary" id="btn-supporter-grant">Przydziel skin</button>
+          </div>
+          <div id="supporter-owners" style="margin-top:12px"></div>
         </div>
-        <div class="adm-actions">
-          <input type="date" id="rollback-date" disabled />
-          <button class="btn-ghost" id="btn-day-rollback" disabled title="Funkcja wyłączona — czeka na przebudowę">↩️ Cofnij dzień do 8:00</button>
-        </div>
-      </div>
 
-      <div class="adm-card" style="border-color: var(--danger)">
-        <h3 style="color: var(--danger)">⚠️ RESET GRY</h3>
-        <div class="adm-note">
-          Zeruje CAŁĄ grę Snakes: każdy gracz wraca na pole 0 z coins, punktami,
-          ekwipunkiem power-upów i oczekującymi efektami wyzerowanymi. Historia ruchów
-          i dziennik aktywności są kasowane, a pula co-op/boss wraca do świeżej edycji #1.
-          Gracze, ich pionki i zdjęcia profilowe <strong>zostają</strong> — resetuje się tylko
-          postęp w grze. Wordle jest nietknięte. <strong>Tej operacji nie da się cofnąć.</strong>
+        <div class="adm-card">
+          <h3>⚙️ KONFIGURACJA</h3>
+          <div class="adm-stat" id="cfg-info">–</div>
         </div>
-        <div class="adm-actions">
-          <button class="btn-danger" id="btn-game-reset">🔄 Zresetuj grę do zera</button>
+
+        <div class="adm-card" style="opacity:0.6">
+          <h3>↩️ COFNIJ CAŁY DZIEŃ <span style="font-size:11px;font-weight:400">— WYŁĄCZONE</span></h3>
+          <div class="adm-note">
+            <strong>Funkcja jest wyłączona i czeka na przebudowę.</strong> Powody: odejmowała
+            za dużo coins graczom, którzy byli tego dnia pod klątwą Kieszonkowiec, nie
+            odkręcała coins ukradzionych przy wypchnięciu ani wydanych w sklepie, a gracza
+            zbitego przez kogoś innego (który sam nie rzucał) i tak trzeba było poprawiać
+            ręcznie. Od przebudowy bossa dotyka dodatkowo wypłat, kar i HP, więc pomyłka
+            kosztuje więcej niż kiedyś.<br><br>
+            Do pojedynczych poprawek użyj <strong>„Cofnij ostatni ruch"</strong> przy graczu
+            albo ręcznej edycji jego punktów i coins.
+          </div>
+          <div class="adm-actions">
+            <input type="date" id="rollback-date" disabled />
+            <button class="btn-ghost" id="btn-day-rollback" disabled title="Funkcja wyłączona — czeka na przebudowę">↩️ Cofnij dzień do 8:00</button>
+          </div>
+        </div>
+
+        <div class="adm-card" style="border-color: var(--danger)">
+          <h3 style="color: var(--danger)">⚠️ RESET GRY</h3>
+          <div class="adm-note">
+            Zeruje CAŁĄ grę Snakes: każdy gracz wraca na pole 0 z coins, punktami,
+            ekwipunkiem power-upów i oczekującymi efektami wyzerowanymi. Historia ruchów
+            i dziennik aktywności są kasowane, a pula co-op/boss wraca do świeżej edycji #1.
+            Gracze, ich pionki i zdjęcia profilowe <strong>zostają</strong> — resetuje się tylko
+            postęp w grze. Wordle jest nietknięte. <strong>Tej operacji nie da się cofnąć.</strong>
+          </div>
+          <div class="adm-actions">
+            <button class="btn-danger" id="btn-game-reset">🔄 Zresetuj grę do zera</button>
+          </div>
+        </div>
         </div>
       </div>
     </div>
@@ -387,20 +461,121 @@
       cfg = await api('GET', `/api/snakes/admin/settings?password=${encodeURIComponent(pass)}`);
       renderEvents();
       renderInfo();
+      renderHours(cfg.play_hours);
       await loadSeasons();
       await loadPlayers();
+      await loadSupporter();
       await loadHistory();
     }
+
+    // ── GODZINY GRY ──
+    function renderHours(h) {
+      if (!h) return;
+      const open = h.start === 0 && h.end === 24 && h.weekends;
+      document.getElementById('hours-info').textContent = open
+        ? '🔓 Bez blokady — rzucać można o każdej porze, codziennie.'
+        : `Teraz: ${h.start}:00–${h.end}:00, ${h.weekends ? 'codziennie (z weekendami)' : 'pon–pt'}.`;
+      const badge = document.getElementById('hours-badge');
+      badge.textContent = h.custom ? 'zmienione' : `domyślne ${h.default_start}–${h.default_end}`;
+      badge.classList.toggle('is-custom', !!h.custom);
+      document.getElementById('hours-start').value = h.start;
+      document.getElementById('hours-end').value = h.end;
+      document.getElementById('hours-weekends').checked = !!h.weekends;
+    }
+
+    async function saveHours(body, okMsg) {
+      try {
+        const res = await api('POST', '/api/snakes/admin/play-hours', { password: pass, ...body });
+        renderHours(res.play_hours);
+        showToast(okMsg(res.play_hours));
+      } catch (e) {
+        showToast('❌ ' + e.message);
+      }
+    }
+
+    document.getElementById('btn-hours-save').addEventListener('click', () => saveHours({
+      start: Number(document.getElementById('hours-start').value),
+      end: Number(document.getElementById('hours-end').value),
+      weekends: document.getElementById('hours-weekends').checked
+    }, h => `🕗 Okno gry: ${h.start}:00–${h.end}:00${h.weekends ? ', codziennie' : ', pon–pt'}.`));
+    document.getElementById('btn-hours-open').addEventListener('click', () =>
+      saveHours({ start: 0, end: 24, weekends: true }, () => '🔓 Blokada zdjęta — gra otwarta całą dobę, codziennie.'));
+    document.getElementById('btn-hours-reset').addEventListener('click', () =>
+      saveHours({ reset: true }, h => `↩️ Domyślne okno: ${h.start}:00–${h.end}:00, pon–pt.`));
+
+    // ── SKINY WSPARCIA ──
+    async function loadSupporter() {
+      renderSupporter(await api('GET', `/api/snakes/admin/supporter?password=${encodeURIComponent(pass)}`));
+    }
+
+    function renderSupporter(data) {
+      setIfIdle('supporter-phone', data.phone || '');
+      const sel = document.getElementById('supporter-item');
+      const keep = sel.value;
+      // Domyślnie skin aktywnego sezonu — to ten, który gracze widzą w sklepie.
+      sel.innerHTML = data.items.map(i =>
+        `<option value="${esc(i.id)}"${i.season_active ? ' selected' : ''}>${esc(i.icon)} ${esc(i.name)} — ${esc(i.season_name)}${i.season_active ? ' (aktywny)' : ''}</option>`
+      ).join('');
+      if (keep && sel.querySelector(`option[value="${keep}"]`)) sel.value = keep;
+      const box = document.getElementById('supporter-owners');
+      box.innerHTML = data.owners.length
+        ? data.owners.map(o => `
+            <div class="pl-row" style="display:flex;gap:10px;align-items:center">
+              <span class="pl-name">${esc(o.nickname)}</span>
+              <span class="pl-stats">${esc(o.item_name)} · ${esc(fmtDate(o.granted_at))}</span>
+              <span class="pl-actions"><button class="btn-danger supporter-revoke" data-player="${o.player_id}" data-item="${esc(o.item)}" data-label="${esc(o.nickname)} — ${esc(o.item_name)}">Odbierz</button></span>
+            </div>`).join('')
+        : '<div class="adm-note">Nikt jeszcze nie ma skina wsparcia.</div>';
+    }
+
+    document.getElementById('btn-supporter-phone').addEventListener('click', async () => {
+      try {
+        const res = await api('POST', '/api/snakes/admin/supporter/phone', { password: pass, phone: document.getElementById('supporter-phone').value });
+        document.getElementById('supporter-phone').value = res.phone || '';
+        renderSupporter(res);
+        showToast(res.phone ? `💛 Numer zapisany: ${res.phone}` : '💛 Numer usunięty — wsparcie wyłączone.');
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('btn-supporter-grant').addEventListener('click', async () => {
+      const pl = document.getElementById('supporter-player');
+      const it = document.getElementById('supporter-item');
+      if (!pl.value || !it.value) return showToast('Wybierz gracza i skin.');
+      const who = pl.options[pl.selectedIndex].text;
+      const what = it.options[it.selectedIndex].text;
+      if (!confirm(`Przydzielić ${what} graczowi ${who}?\n\nRób to dopiero po sprawdzeniu, że BLIK doszedł.`)) return;
+      try {
+        const res = await api('POST', '/api/snakes/admin/supporter/grant', { password: pass, player_id: pl.value, item: it.value });
+        renderSupporter(res);
+        showToast(`💛 Przydzielono: ${res.nickname} — ${res.item_name}.`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    });
+
+    document.getElementById('supporter-owners').addEventListener('click', async e => {
+      const btn = e.target.closest('.supporter-revoke');
+      if (!btn) return;
+      if (!confirm(`Odebrać skin: ${btn.dataset.label}?`)) return;
+      try {
+        renderSupporter(await api('POST', '/api/snakes/admin/supporter/revoke', { password: pass, player_id: btn.dataset.player, item: btn.dataset.item }));
+        showToast('Skin odebrany.');
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
 
     async function loadSeasons() {
       const data = await api('GET', `/api/snakes/admin/seasons?password=${encodeURIComponent(pass)}`);
       const active = data.seasons.find(x => x.id === data.active);
       document.getElementById('season-info').innerHTML = active
-        ? `Aktywny: <strong>${esc(active.name)}</strong> (${esc(active.id)}) · ${active.size} pól na siatce ${active.cols}×${active.rows}`
+        ? `Aktywny: <strong>${esc(active.name)}</strong> (${esc(active.id)}) · ${active.size} pól na siatce ${active.cols}×${active.rows}${active.testing ? ' · <strong>w testach</strong>' : ''}`
         : `Aktywny: ${esc(data.active)}`;
       const sel = document.getElementById('season-select');
       sel.innerHTML = data.seasons.map(x =>
-        `<option value="${esc(x.id)}"${x.id === data.active ? ' selected' : ''}>${esc(x.name)} — ${x.size} pól${x.id === data.active ? ' (aktywny)' : ''}</option>`
+        `<option value="${esc(x.id)}"${x.id === data.active ? ' selected' : ''}>${esc(x.name)} — ${x.size} pól${x.testing ? ' · w testach' : ''}${x.id === data.active ? ' (aktywny)' : ''}</option>`
       ).join('');
     }
 
@@ -408,11 +583,17 @@
       const sel = document.getElementById('season-select');
       const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value;
       if (!sel.value) return;
-      if (!confirm(`Włączyć sezon „${label}"?\n\nWszyscy gracze wrócą na pole 0 (punkty, coins i okrążenia zostają), a ruchów sprzed zmiany nie da się już cofnąć.`)) return;
+      const close = document.getElementById('season-close').checked;
+      const msg = close
+        ? `ZAMKNĄĆ bieżący sezon i włączyć „${label}"?\n\nRanking pójdzie do archiwum, pierwsza trójka dostanie medale, a WSZYSCY zaczną od zera: punkty, coins, okrążenia i ekwipunek. Trwająca walka z bossem skończy się bez nagród. Zostają tylko kostiumy.\n\nTego nie da się cofnąć.`
+        : `Włączyć planszę „${label}" BEZ zamykania sezonu?\n\nWszyscy gracze wrócą na pole 0 (punkty, coins i okrążenia zostają), a ruchów sprzed zmiany nie da się już cofnąć.`;
+      if (!confirm(msg)) return;
       try {
-        const res = await api('POST', '/api/snakes/admin/season', { password: pass, board: sel.value });
+        const res = await api('POST', '/api/snakes/admin/season', { password: pass, board: sel.value, close });
         await loadSettings();
-        showToast(`🗺️ Sezon „${res.board.name}" włączony — ${res.players_moved} graczy na polu 0.`);
+        showToast(res.closure
+          ? `🏆 Sezon „${res.closure.name}" zamknięty (${res.closure.players} graczy w archiwum). Startuje „${res.board.name}".`
+          : `🗺️ Plansza „${res.board.name}" włączona — ${res.players_moved} graczy na polu 0.`);
       } catch (e) {
         showToast(e.message);
       }
@@ -431,6 +612,7 @@
 
     function renderPlayers(players) {
       renderDamagePlayerSelect(players);
+      fillSelect('supporter-player', players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`), '— od kogo BLIK? —');
       histPlayers = players;
       fillSelect('hist-player', players.map(p => `<option value="${p.player_id}">${esc(p.nickname)}</option>`), '— wszyscy gracze —');
       const list = document.getElementById('players-list');
@@ -1057,6 +1239,17 @@
         return;
       }
 
+      if (c.season_over) {
+        const so = c.season_over;
+        document.getElementById('coop-info').innerHTML =
+          `${esc(so.emoji)} <strong>Boss sezonu ${esc(so.name)}: ${so.defeated ? 'POKONANY' : so.settled ? 'ZAATAKOWAŁ (przegrana)' : 'termin minął bez walki'}</strong><br>` +
+          'To był jedyny boss tego sezonu — do jego końca żadna walka nie wystartuje (także po wyłączeniu i włączeniu bossa). ' +
+          'Wróci dopiero w sezonie bez bossa sezonowego albo w kolejnym roku.' +
+          renderPrevPayouts(c.previous_result);
+        document.getElementById('boss-info').innerHTML = '';
+        return;
+      }
+
       document.getElementById('coop-info').innerHTML =
         `Edycja #${c.cycle} · status: <strong>${esc(c.status)}</strong><br>` +
         (c.boss ? `Nagroda dla wpłacających: wpłata × ${c.boss.points_per_coin} w pkt · zwrot ${Math.round(c.boss.refund_rate * 100)}% wpłaty · ryczałt +${c.boss.fighter_points} pkt od ${c.boss.fighter_min_coins} coins · podium +${c.boss.podium_points.join('/+')} pkt · kamienie milowe 75/50/25% po +${c.boss.milestone_points} pkt<br>` : '') +
@@ -1185,7 +1378,7 @@
         cfg.coop = res.coop;
         renderInfo();
         showToast(res.resolved
-          ? `🏆 HP zeszło do zera — ${res.boss_name} pokonany, nagrody wypłacone, rusza edycja #${res.resolved.next_cycle.cycle}.`
+          ? `🏆 HP zeszło do zera — ${res.boss_name} pokonany, nagrody wypłacone, ${res.resolved.next_cycle ? `rusza edycja #${res.resolved.next_cycle.cycle}` : "to był boss sezonu — koniec walk w tym sezonie"}.`
           : `✅ ${res.boss_name}: HP ${res.hp}/${res.max_hp}`);
       } catch (e) {
         showToast(e.message);
@@ -1209,7 +1402,7 @@
         await loadPlayers();
         const credit = res.credited_to ? ` (zapisane na ${res.credited_to})` : '';
         showToast(res.resolved
-          ? `🏆 ${res.boss_name} pokonany${credit} — nagrody wypłacone, rusza edycja #${res.resolved.next_cycle.cycle}.`
+          ? `🏆 ${res.boss_name} pokonany${credit} — nagrody wypłacone, ${res.resolved.next_cycle ? `rusza edycja #${res.resolved.next_cycle.cycle}` : "to był boss sezonu — koniec walk w tym sezonie"}.`
           : `🗡️ ${damage > 0 ? `-${damage}` : `+${-damage}`} HP${credit} — ${res.boss_name}: ${res.hp}/${res.max_hp}`);
       } catch (e) {
         showToast(e.message);
