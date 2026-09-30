@@ -1364,6 +1364,11 @@ const SL_SHIELD_BLOCKS = ['freeze', 'curse'];
 // działają PO wyliczeniu ruchu (patrz obsługa w POST /api/snakes/roll).
 const SL_CURSE_VARIANTS = 8;
 const SL_CURSE_COIN_STEAL = 50; // ile coins zabiera Kieszonkowiec (wariant 3)
+// Minimum Kieszonkowca: kto ma mniej, i tak oddaje tyle, schodząc na minus (decyzja
+// właściciela, wrzesień 2026). Wcześniej klątwa była przycięta do portfela i na pustym
+// koncie nie robiła nic. To dalej PRZELEW (rzucający dostaje dokładnie tyle, ile ofiara
+// traci), więc coins nie są drukowane — dług działa jak po bossie.
+const SL_CURSE_COIN_STEAL_MIN = 25;
 // Drożyzna (wariant 8) jako JEDYNA klątwa nie odpala się na ruchu, tylko w sklepie.
 // Ma trzy stany — ukryta, odsłonięta, zużyta (patrz kolumna "revealed_at" niżej): pierwsza
 // próba zakupu jest WSTRZYMYWANA i tylko odsłania klątwę, podbijając ceny o ten mnożnik;
@@ -1474,7 +1479,7 @@ const SL_CURSE_LABELS = {
 const SL_CURSE_DESCRIPTIONS = {
   1: 'kość cofa zamiast pchać do przodu (np. rzut 4 = 4 pola W TYŁ)',
   2: 'rzut liczy się w połowie, w dół (rzut 5 = ruch o 2 pola)',
-  3: `traci ${SL_CURSE_COIN_STEAL} coins na rzecz tego, kto rzucił klątwę`,
+  3: `traci ${SL_CURSE_COIN_STEAL} coins na rzecz tego, kto rzucił klątwę (przy pustszym portfelu cały portfel, ale co najmniej ${SL_CURSE_COIN_STEAL_MIN} — także na minus)`,
   4: 'połowa punktów zdobytych tym ruchem przepada',
   5: 'na ten ruch drabiny i węże działa się od drugiego końca — ze szczytu drabiny zjeżdżasz na dół, z ogona węża wjeżdżasz do góry',
   6: 'po wylądowaniu losowy doskok o 1–3 pola w dowolną stronę',
@@ -3336,8 +3341,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
     if (curseVariant === 3) {
       // KIESZONKOWIEC: zabiera monety z BIEŻĄCEGO salda (sprzed doliczenia `earned`)
-      // na rzecz tego, kto rzucił klątwę — symetrycznie do kradzieży przy knockbacku.
-      curseCoinSteal = Math.min(SL_CURSE_COIN_STEAL, Math.max(0, Number(st.balance)));
+      // na rzecz tego, kto rzucił klątwę. W odróżnieniu od knockbacku NIE jest przycięty
+      // do zera: zabiera tyle, ile jest (do SL_CURSE_COIN_STEAL), ale nigdy mniej niż
+      // SL_CURSE_COIN_STEAL_MIN — brakująca reszta idzie w dług. Nie dorzucaj tu MAX(0, …).
+      curseCoinSteal = Math.max(SL_CURSE_COIN_STEAL_MIN,
+        Math.min(SL_CURSE_COIN_STEAL, Number(st.balance)));
       if (curseCoinSteal > 0 && curse.source_player_id) {
         db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?')
           .run(curseCoinSteal, curse.source_player_id);
