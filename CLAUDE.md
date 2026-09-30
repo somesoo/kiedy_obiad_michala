@@ -1,15 +1,69 @@
 # Kiedy obiad Michała — notatki dla Claude
 
-Biurowe gry dla ~15 osób. `server.js` (~4700 linii, Express) + `lib/boss.js` (walka
-z bossem), front to czysty JS/HTML/CSS w `public/` — **bez bundlera i bez kroku
-budowania**. Baza: SQLite przez `node:sqlite`. Wdrożenie: pm2 na małym VPS-ie, właściciel
-przeładowuje ręcznie.
+Biurowe gry dla ~15 osób. Express + SQLite (`node:sqlite`), front to czysty JS/HTML/CSS
+w `public/` — **bez bundlera i bez kroku budowania**. Wdrożenie: pm2 na małym VPS-ie,
+właściciel przeładowuje ręcznie. Serwis to dziś **Snakes Game** pod `/snakes` (`/`
+przekierowuje); zakończony Wordle żyje jako archiwum pod `/wordle`.
 
-`lib/boss.js` jest **fabryką**: `require('./lib/boss')({ db, transaction, … })` dostaje
-helpery ze `server.js` zamiast importować je z powrotem (inaczej byłby cykl importów,
-a przy jednym pliku bazy dwa uchwyty to „database is locked"). Podpięcie jest w jednym
-miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swoje tabele
-(`initSchema`), odpala migracje, rejestruje trasy i scheduler terminu.
+## Mapa modułów
+
+`server.js` (~1800 linii) to **rdzeń i miejsce spinania**: Express, baza, logowanie graczy,
+wersjonowanie frontu, schemat i migracje Snakes, stan gracza, rzut kostką i podpięcie
+modułów. Reszta siedzi w fabrykach:
+
+| Plik | Co | Podpięcie w `server.js` (szukaj) |
+|---|---|---|
+| `lib/time.js` | czas Warszawy, dni robocze (czyste funkcje) | `require('./lib/time')` |
+| `lib/wordle.js` | cały Wordle: schemat, hasła, słownik, trasy, Discord | `require('./lib/wordle')` |
+| `lib/activity.js` | dziennik: zapis, klucze tur, moderacja + trasy dziennika | `require('./lib/activity')` |
+| `lib/board.js` | **silnik planszy**: aktywny sezon, pola, ruch, rozstaje, zbicia, payload | `require('./lib/board')` |
+| `lib/discord.js` | szyna zdarzeń Discorda (`slEmit`, przełączniki) | `require('./lib/discord')` |
+| `lib/boss.js` | walka z bossem (schemat, rozliczenia, trasy, scheduler) | `const boss = require` |
+| `lib/costumes.js` | kostiumy i skiny wsparcia | `const costumes = require` |
+| `lib/seasonal.js` | kocioł, drzwi, cukierki (`events` z pliku planszy) | `const seasonal = require` |
+| `lib/crowning.js` | zamknięcie sezonu: archiwum, medale, ukoronowanie | `const crowning = require` |
+| `lib/shop.js` | power-upy, klątwy, cennik z rankingu, tarcza + trasy sklepu | `require('./lib/shop')` |
+| `routes/snakes-admin.js` | reszta panelu admina Snakes | `require('./routes/snakes-admin')` |
+| `lib/seasons.js`, `boards/*.js` | format i walidacja planszy, pliki sezonów | `require('./lib/seasons')` |
+
+**Fabryka** = `require('./lib/x')({ db, transaction, … })`: moduł dostaje helpery ze
+`server.js` zamiast importować je z powrotem (inaczej byłby cykl importów, a przy jednym
+pliku bazy dwa uchwyty to „database is locked"). Zwraca to, czego potrzebuje reszta, a
+`server.js` rozpakowuje to w `const { … } = require(…)(…)`.
+
+**Kolejność podpięć ma znaczenie (TDZ).** Dawniej wszystko było hoistowanymi funkcjami
+w jednym pliku, więc migracja przy starcie mogła wołać funkcję zdefiniowaną niżej. Eksport
+fabryki to `const` — przed linią podpięcia rzuca `ReferenceError`. Stąd zasady:
+- kod wykonywany przy starcie (IIFE migracji, aktywacja planszy) może wołać tylko to, co
+  podpięto WYŻEJ (albo hoistowane funkcje z `server.js`, które same tego nie robią),
+- zależności fabryki muszą istnieć w chwili podpięcia; po coś, co powstaje później, sięga
+  się przez hoistowaną funkcję-pośrednika (wzorzec: `slBonusesOff()` → `seasonal`),
+- **zmiennego stanu nie przekazuje się wartością**: aktywny sezon ma tylko jeden właściciel
+  (`lib/board.js`) i czyta się go przez `slCurrentBoard()`, a zmienia przez `slSetBoard()`.
+
+Front Snakes to kilka zwykłych `<script>` (kolejność w `snakes.html`): biblioteki rysunków
+`public/sl/art-effects.js` (`SL_EFFECTS`), `art-decor.js` (`SL_DECOR`), `art-costumes.js`
+(`SL_COSTUME_ART`), potem `sl/board.js` (rysowanie planszy i pionka), `sl/activity.js`,
+`sl/boss.js`, `sl/ranking.js`, a na końcu `public/snakes.js` (rdzeń: stan, API, logowanie,
+rzut, sklep; woła `init()`). Pliki dzielą globalne nazwy, więc **kod wykonywany przy
+wczytaniu pliku może sięgać tylko po ten plik i wcześniejsze** (listener z `openWardrobe`
+podanym wprost w pliku ładowanym przed jego definicją rozsypie stronę; strzałka
+`() => openWardrobe()` jest bezpieczna). Nowy plik frontu dopisz do `snakes.html` **i** do
+`SNAKES_SCRIPTS` w `server.js` — inaczej nie wejdzie do `?v=` i przeglądarki zostaną przy
+starej wersji.
+
+## Jak dodać nowy sezon (planszę)
+
+1. `boards/<id>.js` — kształt, drabiny, węże, bonusy, `events`, `view`, `special_boss`;
+   wzorce: `boards/default.js` (siatka), `boards/halloween.js` (układ swobodny). Z flagą
+   `testing: true`, dopóki nikt na nim naprawdę nie gra (patrz niżej).
+2. `public/themes/<motyw>.css` — kolory i style efektów (`fx-<nazwa>` na `<body>`).
+3. Nowe ozdoby → wpisy w `SL_DECOR` (`public/sl/art-decor.js`), nowe efekty → `SL_EFFECTS`
+   (`art-effects.js`), nowe kostiumy → katalog w `lib/costumes.js` + rysunek pod tym samym
+   id w `SL_COSTUME_ART` (`art-costumes.js`). Payload niesie tylko nazwy, nieznane są pomijane.
+4. Nowy RODZAJ pola albo nowa reguła ruchu → `lib/board.js` (`slResolveTileEffect`) i
+   rysowanie w `public/sl/board.js`; nowa mechanika sezonowa → `lib/seasonal.js`.
+5. Restart serwera (plansza z błędem nie trafi na listę, powód w logu) i przełączenie w panelu.
 
 **Nie ma testów, lintera ani CI.** Każda zmiana musi być sprawdzona ręcznie (patrz
 „Jak testować"). To główny powód, dla którego duże refaktory są tu złym pomysłem.
@@ -18,12 +72,13 @@ miejscu — szukaj `const boss = require('./lib/boss')`. Moduł sam zakłada swo
 
 | Obszar | Gdzie | Stan |
 |---|---|---|
-| **Snakes & Ladders** (prefiks `sl*`) | większość `server.js`, `public/snakes*` | **aktywna gra, tu idzie cała praca** |
+| **Snakes & Ladders** (prefiks `sl*`) | `server.js` + moduły z „Mapy modułów", `public/snakes*`, `public/sl/` | **aktywna gra, tu idzie cała praca** |
 | **Sezony planszy** | `boards/*.js`, `lib/seasons.js`, `public/themes/` | plansza = plik; admin przełącza sezon |
+| **Zamknięcie sezonu** | `lib/crowning.js`, `slCloseSeasonAndInstall` w `server.js` | archiwum rankingu, medale, podium, wszyscy od zera |
 | **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
-| **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/snakes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
-| **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/snakes.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
-| **Wordle po polsku** | ~20% `server.js`, `public/app.js`, `index.html` | **zakończony 2026-08-31** przez `GAME_END_AT`; `gameHasEnded()` zwraca `true`, gra jest trwale zablokowana. Nie inwestuj tu czasu bez wyraźnej prośby. |
+| **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/sl/art-costumes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
+| **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/sl/boss.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
+| **Wordle po polsku** (archiwum) | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **zakończony 2026-08-31** przez `GAME_END_AT`, trwale zablokowany i już nie wróci. Kod zostaje: strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). W rdzeniu zostało tylko to, czego używa też Snakes: `players`, `/api/register`, `/api/me`. Nie inwestuj tu czasu bez wyraźnej prośby. |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
 
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
@@ -48,16 +103,17 @@ w logu, gdy liczba pól sezonu bez `testing` się zmieniła.
 - **Liczba pól jest zmienna** — rozmiar zawsze przez `slBoardSize()`, nigdy ze stałej.
 - `sl_board` to **lustro** aktywnego pliku, reseedowane przy każdym starcie. Poprawka w pliku
   wchodzi po restarcie. Plik z błędem nie trafia na listę, powód jest w logu.
-- **Zmiana sezonu = wszyscy na polu 0** (`abs_pos = laps × nowy rozmiar`; okrążenia, punkty,
-  coins i ekwipunek zostają). `season_move_floor` zapamiętuje ostatni ruch starej planszy
-  i cofanie ruchu oraz dnia **odmawia** dla starszych ruchów, bo ich `from_abs` wskazuje pole
-  na innej planszy.
+- **Zmiana sezonu domyślnie ZAMYKA sezon** (patrz „Zamknięcie sezonu" niżej): wszyscy od zera.
+  Bez zamykania (`close: false`, tylko na pomyłki i testy) wszyscy stają na polu 0
+  (`abs_pos = laps × nowy rozmiar`), a okrążenia, punkty, coins i ekwipunek zostają.
+  W obu wariantach `season_move_floor` zapamiętuje ostatni ruch starej planszy i cofanie ruchu
+  oraz dnia **odmawia** dla starszych ruchów, bo ich `from_abs` wskazuje pole na innej planszy.
 - Front rysuje pola z `board.path` w gridzie **bez gapów**. Odstęp robi symetryczny `margin`
   na `.sl-cell`. Gap rozjechałby drogę i łączniki z kafelkami (`slGridPoint`).
 - Motyw: `public/themes/<theme>.css` doładowywany z payloadu, a efekty to klasy `fx-<nazwa>`
   na `<body>`. Warstwy efektów muszą żyć **poza** `#board-area`, bo `renderBoard` podmienia
   jej `innerHTML`. Efekty rysuje `renderSeasonEffects` do `#season-fx` (biblioteka
-  `SL_EFFECTS` w `snakes.js`); nieznana nazwa efektu jest pomijana.
+  `SL_EFFECTS` w `public/sl/art-effects.js`); nieznana nazwa efektu jest pomijana.
 
 **Układ swobodny (`layout: 'free'`, wzorzec: `boards/halloween.js`).** Pola nie siedzą
 w kratkach, tylko stoją w UŁAMKOWYCH punktach, więc droga może iść po krzywej (Noc Duchów
@@ -69,7 +125,7 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
 - Wygląd z pliku jedzie w `board.view` (`layout`, `tile`, `road: 'smooth'`, `closed`,
   `links: 'drawn'`, `loop_label`, `marks`, `confetti`, `decor`). Serwer tylko go przekazuje;
   front czyta przez `slBoardView()` z domyślnymi, więc plansza bez `view` wygląda klasycznie.
-- `decor` niesie tylko `kind` + pozycję. Rysunki SVG siedzą w `SL_DECOR` w `snakes.js`,
+- `decor` niesie tylko `kind` + pozycję. Rysunki SVG siedzą w `SL_DECOR` w `public/sl/art-decor.js`,
   a payload **nigdy** nie niesie znaczników — nieznany `kind` jest pomijany.
 - Tor zamknięty, który przecina sam siebie, rysuje drogę w **dwóch kawałkach** z własnym
   obrzeżem — drugi kładzie się na pierwszy jak mostek.
@@ -92,18 +148,65 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
 - Garderoba na planszy (`shop_at`) ma rozmiar liczony od WYSOKOŚCI planszy — plansza 'free'
   jest ~2× szersza niż wysoka i kwadrat liczony od szerokości nachodził na pola.
 
+## Zamknięcie sezonu — podium, medale, wszyscy od zera
+
+Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woła
+`slCloseSeasonAndInstall` — archiwum, zerowanie i nowa plansza lecą w **jednej** transakcji,
+żeby żaden rzut nie wpadł pomiędzy.
+
+- **Archiwum to zdjęcie, nie przeliczenie** (`sl_season_closures` + `sl_season_results`,
+  `lib/crowning.js`). Kolejność jak w rankingu: punkty, przy remisie okrążenia, potem pole
+  (`abs_pos`). Do archiwum trafia tylko ten, kto w sezonie grał (punkty ≠ 0 albo ruch po
+  `season_move_floor`) — gracz, który tylko zajrzał, nie zajmuje miejsca.
+- **Zerowane:** punkty, coins, okrążenia, pozycja, ekwipunek, czekające efekty (freeze, klątwy,
+  tarcze), dokupione dziś Extra Move, cały `sl_points_log` (rozbicie; suma żyje w archiwum),
+  rejestr sezonowy (kocioł, cukierki). Znika też `season_points_floor`, więc dymek pokazuje
+  jedno rozbicie. **Zostają:** kostiumy (także założone) i dzienny licznik rzutów.
+- **Boss:** trwająca walka kończy się BEZ nagród, kar i zwrotów (coins i tak są zerowane),
+  a nowy cykl startuje od bazowego progu (`slCloseFightForSeason`). `boss_season_cycle_floor`
+  to ostatni cykl starego sezonu — `slRevertBossRewards` i `slRevertBossDay` nie sięgają za
+  niego, bo odjęłyby stare nagrody od nowego zera. Reset gry zeruje tę granicę (cykle
+  numerują się wtedy od 1).
+- **Medale** (`medals` w wierszu rankingu) to miejsca 1–3 ze wszystkich zamknięć. Ranking ma
+  zakładki sezonów (`seasons_archive` w stanie, ranking zamkniętego: `GET /api/snakes/seasons/:id`).
+- **Ukoronowanie:** `crowning` w stanie gracza jest niepuste tylko dla OSTATNIEGO zamknięcia,
+  tylko dla tych, którzy są w jego wynikach, i tylko dopóki `sl_state.crowned_seen` < id
+  zamknięcia. Pamięć jest na serwerze, a nie w localStorage — raz na osobę, nie na urządzenie.
+  Front: `slMaybeCrown` w `public/sl/ranking.js`, nakładka w `<body>` (poza `#board-area`).
+- **Kostiumy mają `season`** w katalogu — kupić można tylko te z aktywnego sezonu (albo bez
+  `season`), a kupione wcześniej dalej się nosi. Obecny zestaw jest oznaczony `'halloween'`,
+  więc na planszy `default` nie jest w sprzedaży.
+- Reset gry **nie** rusza archiwum (to historia). Wyczyszczenie gracza kasuje jego wiersze
+  wyników, ale miejsc innych nie przenumerowuje.
+
 ## Boss sezonu (`special_boss` w pliku planszy)
 
 Sezon może mieć **jednego** bossa na cały czas trwania (Noc Duchów: Dynia Zagłady do nocy
-Halloween). `slEnsureSpecialBoss()` (start serwera, przełączenie sezonu, każdy tik
-schedulera) wystawia go OD RAZU: trwającą zwykłą walkę zamyka **bez nagród i bez kar**,
-a wpłacone w nią coins wracają wierszem `season_refund` w `sl_boss_payouts` (cofanie go
-widzi, bo czyta rejestr). HP = `hp_per_workday` × dni robocze do `attack_at`; termin zawsze
-`attack_at`. Daty w pliku są bez roku, a klucz edycji (`sl_coop.special` =
-`'halloween-2026'`) pilnuje, żeby po wygranej/przegranej boss nie wrócił w tym samym roku.
-Dni liczą się od NASTĘPNEGO dnia roboczego. Dynia ma 900 HP za dzień, czyli 18 000 przy
-włączeniu 2.10. To świadomie bardzo trudny boss: rzuty dają ~7 900 HP, resztę musi dołożyć
-prawie cały dochód ekipy. Przy dawnych 1100 był arytmetycznie nie do ubicia.
+Halloween) i jest to **jedyny boss tego sezonu** — zwykłe, losowe bossy się w nim nie pojawiają.
+Stan liczy `slSeasonBossState()` w `lib/boss.js`:
+
+- `'regular'` — sezon bez `special_boss`, zwykła rotacja bossów.
+- `'special'` — boss sezonu nie ma jeszcze wyniku i jest przed `attack_at`: ma walczyć TERAZ.
+  `slEnsureSpecialBoss()` (start serwera, przełączenie sezonu, każdy tik schedulera) wystawia
+  go OD RAZU: trwającą zwykłą walkę zamyka **bez nagród i bez kar**, a wpłacone w nią coins
+  wracają wierszem `season_refund` w `sl_boss_payouts` (cofanie go widzi, bo czyta rejestr).
+  Zwrot idzie tylko z TRWAJĄCEJ walki — z zamkniętej byłby drukowaniem coins.
+- `'over'` — boss sezonu wygrany albo przegrany w tym roku, albo minął `attack_at`: **do końca
+  sezonu nie ma żadnej walki**. `slCoopInsertCycle` wtedy niczego nie otwiera (wygrana,
+  przegrana, włącznik w panelu, zamknięcie sezonu dostają ostatni zamknięty cykl), payload ma
+  `boss: null` i `season_over`, a front pokazuje kartę z wynikiem zamiast walki.
+
+**Wynik to WYŁĄCZNIE prawdziwe rozliczenie**: `boss_defeated_at` albo wiersze `penalty`
+w rejestrze (`slSpecialSettledCycle`). Techniczne domknięcie walki (przełączenie albo
+zamknięcie sezonu, wyłącznik bossa) wynikiem nie jest, więc boss sezonu po nim wraca.
+Dawniej blokował go DOWOLNY cykl z kluczem edycji — każde przełączenie sezonu w testach
+„spalało" Dynię i Noc Duchów dostawała losowe bossy, także po jej pokonaniu (wrzesień 2026).
+
+HP = `hp_per_workday` × dni robocze do `attack_at` (co najmniej 1 dzień), liczone od
+NASTĘPNEGO dnia roboczego; termin zawsze `attack_at`. Daty w pliku są bez roku, a klucz edycji
+(`sl_coop.special` = `'halloween-2026'`) odróżnia lata. Dynia ma **800 HP za dzień** (decyzja
+właściciela), czyli 16 000 przy włączeniu 2.10. Świadomie trudna: rzuty dają ~7 900 HP, resztę
+muszą dołożyć wpłaty. Przy dawnych 1100 była arytmetycznie nie do ubicia.
 
 **Sezon z bossem trzeba wyłączyć przed 1.01 następnego roku.** Inaczej scheduler policzy
 termin na 31.10 kolejnego roku z nowym kluczem i wystawi Dynię z limitem 60 dni roboczych.
@@ -311,7 +414,7 @@ Dodając cokolwiek, co zapisuje punkty lub coins, sprawdź wszystkie pięć:
    sama funkcja żyje i sama woła `slRevertBossDay` oraz `seasonal.revertDay`, więc spójność
    nadal trzeba utrzymywać — to ją odblokuje się po przebudowie)
 2. cofnięcie ostatniego ruchu (`/admin/players/:id/undo-move`) — kasuje po `ref = move:<id>`
-3. cofnięcie nagród bossa (`slRevertBossRewards`)
+3. cofnięcie nagród bossa (`slRevertBossRewards`) — tylko cykle bieżącego sezonu
 4. reset całej gry (`/admin/reset`)
 5. wyczyszczenie gracza
 
@@ -394,7 +497,7 @@ kolejny restart go nie wskrzesza.
 
 Nazwa flagi niesie **wersję mechaniki**. Kolejna przebudowa, która ma wystartować bossa od
 nowa = podbicie numeru (`boss_relaunch_v3_done`); stara flaga zostaje i niczego nie blokuje.
-Ten sam wzorzec ma baner w UI (`BOSS_NOTICE_VERSION` w `public/snakes.js`) — podbicie
+Ten sam wzorzec ma baner w UI (`BOSS_NOTICE_VERSION` w `public/sl/boss.js`) — podbicie
 wersji sprawia, że ogłoszenie wraca wszystkim, także tym, którzy zamknęli poprzednie.
 
 ## Jak testować
@@ -413,12 +516,19 @@ rm -rf db   # na koniec
   więc do testów wystarczy sztuczny plik z poprawnym nagłówkiem.
 - Boss bywa domyślnie wyłączony — włącz przez `POST /api/snakes/admin/coop/toggle`.
 - Admin: GET/DELETE biorą `?password=`, POST bierze `{password}` w ciele.
-- Zawsze `node --check server.js`, `node --check lib/boss.js`, `node --check lib/seasons.js` i `node --check public/snakes.js`.
+- Zawsze `node --check` na każdym zmienionym pliku: `server.js`, `lib/*.js`, `routes/*.js`,
+  `public/snakes.js`, `public/sl/*.js`.
   Skrypt panelu admina siedzi inline w `snakes-admin.html` — trzeba go wyciąć, żeby
   sprawdzić składnię.
-- **Rzuty działają tylko w oknie gry** (pon–pt, 8:00–16:00). Testując w weekend, podnieś
-  serwer z atrapą zegara: `node --require faketime.js server.js`, gdzie preload nadpisuje
-  `global.Date` klasą przesuniętą o stałą różnicę. Nie modyfikuj do tego kodu projektu.
+- **Rzuty działają tylko w oknie gry** (domyślnie pon–pt, 8:00–16:00). Okno zmienia się
+  w panelu admina (karta „Godziny gry", `POST /api/snakes/admin/play-hours` z
+  `{start, end, weekends}` albo `{reset: true}`) i siedzi w `sl_meta`
+  (`play_start_hour`, `play_end_hour`, `play_weekends`). „Bez blokady" = 0–24 z weekendami.
+  Na produkcji pamiętaj wrócić do domyślnych — to ustawienie przeżywa restart. Serwer czyta
+  okno zawsze przez `slPlayHours()`, nigdy wprost ze stałych `SL_PLAY_*_HOUR` (to tylko
+  domyślne z env). Do testów konkretnej daty (np. Halloween) dalej przydaje się atrapa zegara:
+  `node --require faketime.js server.js`, gdzie preload nadpisuje `global.Date` klasą
+  przesuniętą o stałą różnicę. Nie modyfikuj do tego kodu projektu.
 - Bossa najszybciej ustawia się w dowolnym stanie przez `POST /api/snakes/admin/coop/boss`
   z `{hp}`, a przegraną wymusza `POST /api/snakes/admin/coop/config` z `deadline_at`
   w przeszłości (rozlicza się od razu, bez czekania na tik schedulera).
@@ -454,12 +564,13 @@ rm -rf db   # na koniec
     `knockback`/`bonus` w `sl_points_log` mają `ref = NULL`, więc naprawa wymaga najpierw
     zapisywania ich z `ref` tury.
   - **Zużytych Freeze i klątw.** Nie wracają do ekwipunku.
-- **Scheduler Discorda Wordle loguje „powiadomienie wysłane"**, choć wywołanie jest
-  zakomentowane.
+- **Scheduler Discorda Wordle (`lib/wordle.js`) loguje „powiadomienie wysłane"**, choć
+  wywołanie jest zakomentowane.
 - **~540 z 1397 linii `public/style.css` to martwy kod** po bukmacherce, ładowany na
   wszystkich stronach. Do tego `.lb-row`, `.lb-rank`, `.lb-nick` i `:root` są zdefiniowane
   po dwa razy — pierwszy zestaw jest w całości nadpisywany, więc zmiany w nim nie działają.
 - **Regulamin w `snakes.html` ma zaszyte na sztywno godziny gry (8:00–16:00)** w trzech
-  miejscach. Zmiana `SNAKES_PLAY_*_HOUR` sprawia, że zasady kłamią. Punkt o bossie jest
+  miejscach. Zmiana `SNAKES_PLAY_*_HOUR` albo okna w panelu admina sprawia, że zasady
+  kłamią (przycisk rzutu i odliczanie biorą godziny z payloadu, więc mówią prawdę). Punkt o bossie jest
   już wolny od tego problemu — składa go `slRenderBossRules()` ze stawek przysłanych
   w payloadzie, więc jest dobrym wzorcem na resztę.

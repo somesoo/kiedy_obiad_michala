@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="/style.css" />
   <style>
     body { display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; min-height: 100vh; }
     .admin-wrap { max-width: 760px; width: 100%; display: flex; flex-direction: column; gap: 20px; }
@@ -121,7 +121,7 @@
         <div class="success-msg" id="global-success"></div>
         <div class="error-msg" id="global-err"></div>
         <div class="season-summary" id="season-summary"></div>
-        <a href="/" class="back-link">← Wróć do gry</a>
+        <a href="/wordle" class="back-link">← Wróć do gry</a>
       </div>
     </div>
 
@@ -208,7 +208,7 @@
     });
 
     async function loadWords() {
-      const r = await fetch(`/api/admin/words?password=${encodeURIComponent(adminPassword)}`);
+      const r = await fetch(`/api/wordle/admin/words?password=${encodeURIComponent(adminPassword)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       wordsData = d.words;
@@ -222,7 +222,7 @@
       const errEl = document.getElementById('sets-err');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/sets?password=${encodeURIComponent(adminPassword)}`);
+        const r = await fetch(`/api/wordle/admin/sets?password=${encodeURIComponent(adminPassword)}`);
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         renderSets(d.sets);
@@ -268,7 +268,7 @@
       const okEl = document.getElementById('global-success');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/sets/${encodeURIComponent(id)}/load`, {
+        const r = await fetch(`/api/wordle/admin/sets/${encodeURIComponent(id)}/load`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword })
@@ -344,7 +344,7 @@
       const errEl = document.getElementById('word-err');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/word/${id}/reveal?password=${encodeURIComponent(adminPassword)}`);
+        const r = await fetch(`/api/wordle/admin/word/${id}/reveal?password=${encodeURIComponent(adminPassword)}`);
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         revealed[id] = d.word;
@@ -376,7 +376,7 @@
       const okEl = document.getElementById('global-success');
       errEl.textContent = '';
       try {
-        const r = await fetch('/api/admin/word', {
+        const r = await fetch('/api/wordle/admin/word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword, id, word, order_index })
@@ -402,7 +402,7 @@
       const errEl = document.getElementById('word-err');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/word/${id}`, {
+        const r = await fetch(`/api/wordle/admin/word/${id}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword })
@@ -422,7 +422,7 @@
       const errEl = document.getElementById('players-err');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/players?password=${encodeURIComponent(adminPassword)}`);
+        const r = await fetch(`/api/wordle/admin/players?password=${encodeURIComponent(adminPassword)}`);
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         renderPlayers(d.players);
@@ -452,7 +452,7 @@
       const errEl = document.getElementById('players-err');
       errEl.textContent = '';
       try {
-        const r = await fetch(`/api/admin/player/${id}`, {
+        const r = await fetch(`/api/wordle/admin/player/${id}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: adminPassword })

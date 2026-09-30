@@ -49,6 +49,9 @@
    wejście do zasad (panel boczny go nie ma), więc nadpisujemy selektorem po ID
    (nie istnieje w DOM Wordle, więc nic mu nie grozi), żeby był widoczny zawsze. */
 #btn-how { display: inline-block; }
+/* Wejście do archiwum Wordle (gra zakończona, strona pod /wordle). To <a>, a nie <button>,
+   więc zdejmujemy podkreślenie i wyrównujemy wygląd do sąsiedniego „Zasady". */
+#btn-wordle { display: inline-block; text-decoration: none; }
 
 /* ── KOLUMNA PLANSZY ── */
 .col-game {
@@ -887,6 +890,35 @@
   right: -3px;
   font-size: 13px;
   line-height: 1;
+}
+
+/* „Gdzie on jest?" — najechanie na wiersz rankingu (slSpotApply w sl/board.js). Reszta
+   planszy przygasa, pole gracza dostaje poświatę, a jego pionek pulsuje. Gdy pionek jest
+   schowany za „+N" (tłok na małym polu), pulsuje licznik. Poświata idzie przez box-shadow,
+   bo .sl-cell ma overflow: hidden i powiększony pionek zostałby przycięty. */
+.sl-cell { transition: opacity 0.15s, box-shadow 0.15s; }
+.sl-board.has-spot .sl-cell:not(.is-spot) { opacity: 0.35; }
+/* Selektor przez .has-spot, bo motywy (np. nagrobki Nocy Duchów) mają własne box-shadow
+   na polach z mocniejszym selektorem i przykryłyby poświatę. */
+.sl-board.has-spot .sl-cell.is-spot {
+  z-index: 3;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 18px 4px var(--accent);
+}
+.sl-pawn-wrap.is-spot { z-index: 2; }
+.sl-pawn-wrap.is-spot .sl-pawn-avatar,
+.sl-cell.is-spot .sl-pawn-more { animation: sl-spot-pulse 0.9s ease-in-out infinite; }
+@keyframes sl-spot-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 0 var(--accent); }
+  50%      { box-shadow: 0 0 0 2px var(--accent), 0 0 10px 5px var(--accent); }
+}
+/* Kostium z kształtem przycina zdjęcie (clip-path), więc poświata na awatarze by zniknęła —
+   świeci cały pionek przez drop-shadow, który idzie po obrysie. */
+.has-shape.sl-pawn-wrap.is-spot .sl-pawn-avatar { animation: none; box-shadow: none; }
+.has-shape.sl-pawn-wrap.is-spot { filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 2px var(--accent)); }
+@media (prefers-reduced-motion: reduce) {
+  .sl-pawn-wrap.is-spot .sl-pawn-avatar,
+  .sl-cell.is-spot .sl-pawn-more { animation: none; box-shadow: 0 0 0 3px var(--accent); }
 }
 
 .sl-legend {
@@ -1872,3 +1904,248 @@
 .special-boss-teaser ~ .boss-chip { margin-left: 0; }
 @keyframes special-teaser { 50% { box-shadow: 0 0 12px rgba(255, 138, 31, 0.55); } }
 @media (prefers-reduced-motion: reduce) { .special-boss-teaser { animation: none; } }
+
+/* ── SEZONY W RANKINGU I MEDALE ──
+   Zakładki pojawiają się dopiero po pierwszym zamknięciu sezonu (renderLbSeasonTabs).
+   Kolory medali są stałe, a nie z tokenów — motyw sezonu przemalowuje --gold na pomarańcz,
+   a złoto, srebro i brąz mają wyglądać tak samo w każdym sezonie. */
+.lb-seasons { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
+.lb-seasons[hidden] { display: none; }
+.lb-season-tab {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--muted);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lb-season-tab:hover { color: var(--text-primary); }
+.lb-season-tab.is-active { border-color: var(--accent); color: var(--text-primary); }
+.lb-season-live {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--accent);
+}
+.lb-medals {
+  font-size: 10px;
+  line-height: 1;
+  margin-right: auto; /* przyklejone do nicku, a nie rozepchnięte na środek wiersza */
+  flex-shrink: 0;
+  cursor: help;
+  white-space: nowrap;
+}
+.lb-medal-n { font-size: 9px; color: var(--text-muted); margin: 0 2px 0 1px; }
+.sl-tip-medals { font-size: 10px; color: var(--text-muted); margin: -2px 0 5px; }
+
+/* ── UKORONOWANIE (podium po zamknięciu sezonu) ──
+   Kolejność zdarzeń trzymają opóźnienia animacji: stopnie rosną od 3. do 1., po każdym
+   wskakuje jego gracz, potem nad zwycięzcą rozbłyskują promienie i spada korona. Na koniec
+   pojawiają się tekst i przycisk. Konfetti odpala JS w chwili lądowania korony (2,3 s). */
+.crown-overlay {
+  z-index: 300;
+  background: radial-gradient(ellipse at 50% 35%, rgba(60, 45, 10, 0.55), rgba(0, 0, 0, 0.92) 70%);
+  padding: 16px;
+}
+.crown-stage {
+  --c-gold: #F5C842;   --c-gold-2: #B8860B;
+  --c-silver: #DDE2EA; --c-silver-2: #8E97A5;
+  --c-bronze: #E3A56C; --c-bronze-2: #9A5A2A;
+  position: relative;
+  box-sizing: border-box;
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 22px 20px 20px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid rgba(245, 200, 66, 0.45);
+  box-shadow: 0 0 60px rgba(245, 200, 66, 0.18), 0 20px 50px rgba(0, 0, 0, 0.6);
+  text-align: center;
+  animation: crown-in 0.35s ease-out both;
+}
+.crown-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+.crown-close:hover { color: var(--text-primary); }
+.crown-kicker {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.crown-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 26px;
+  margin: 2px 0 0;
+  background: linear-gradient(180deg, #FFF3C4, var(--c-gold) 55%, var(--c-gold-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.crown-podium {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1.12fr 1fr;
+  align-items: end;
+  gap: 6px;
+  height: 270px;
+  margin: 14px 0 12px;
+}
+/* Promienie za zwycięzcą — wolno się kręcą, pojawiają się tuż przed koroną. */
+.crown-rays {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  width: 230px;
+  height: 230px;
+  margin-left: -115px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(rgba(245, 200, 66, 0.22) 0 10deg, transparent 10deg 24deg);
+  -webkit-mask: radial-gradient(circle, #000 20%, transparent 68%);
+  mask: radial-gradient(circle, #000 20%, transparent 68%);
+  opacity: 0;
+  animation: crown-rays-in 0.8s ease-out 1.9s forwards, crown-spin 18s linear 1.9s infinite;
+  pointer-events: none;
+}
+.crown-spot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  min-width: 0;
+}
+.crown-step {
+  width: 100%;
+  border-radius: 8px 8px 0 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  color: rgba(0, 0, 0, 0.35);
+  transform-origin: bottom;
+  animation: crown-rise 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+.crown-spot[data-place="1"] .crown-step { height: 112px; background: linear-gradient(180deg, var(--c-gold), var(--c-gold-2)); animation-delay: 1.2s; }
+.crown-spot[data-place="2"] .crown-step { height: 82px;  background: linear-gradient(180deg, var(--c-silver), var(--c-silver-2)); animation-delay: 0.75s; }
+.crown-spot[data-place="3"] .crown-step { height: 60px;  background: linear-gradient(180deg, var(--c-bronze), var(--c-bronze-2)); animation-delay: 0.3s; }
+.crown-spot.is-empty .crown-step { opacity: 0.35; }
+.crown-person {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
+  margin-bottom: 6px;
+  animation: crown-drop 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+.crown-spot[data-place="1"] .crown-person { animation-delay: 1.65s; }
+.crown-spot[data-place="2"] .crown-person { animation-delay: 1.2s; }
+.crown-spot[data-place="3"] .crown-person { animation-delay: 0.75s; }
+.crown-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--c-bronze);
+  background: var(--surface-alt);
+}
+.crown-spot[data-place="1"] .crown-avatar { width: 70px; height: 70px; border-color: var(--c-gold); box-shadow: 0 0 22px rgba(245, 200, 66, 0.55); }
+.crown-spot[data-place="2"] .crown-avatar { border-color: var(--c-silver); }
+.crown-avatar-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--text-primary);
+}
+/* „To ja" — ten sam akcent co w rankingu (is-me). */
+.crown-spot.is-me .crown-avatar { outline: 3px solid var(--accent); outline-offset: 2px; }
+.crown-spot.is-me .crown-name { color: var(--accent); }
+.crown-crown {
+  font-size: 34px;
+  line-height: 1;
+  margin-bottom: -6px;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+  animation: crown-fall 0.75s cubic-bezier(0.25, 1.5, 0.55, 1) 2.1s both;
+}
+.crown-medal { font-size: 22px; line-height: 1; margin-top: -14px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); }
+.crown-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.crown-pts { font-size: 11px; color: var(--text-muted); }
+.crown-me, .crown-next, .crown-go { animation: crown-fade 0.5s ease-out both; }
+.crown-me { font-size: 14px; color: var(--text-primary); animation-delay: 2.45s; }
+.crown-me strong { color: var(--accent); }
+.crown-next { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.45; animation-delay: 2.6s; }
+.crown-next strong { color: var(--text-primary); }
+.crown-go { margin-top: 14px; animation-delay: 2.75s; }
+
+@keyframes crown-in    { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+@keyframes crown-rise  { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes crown-drop  { from { opacity: 0; transform: translateY(-40px) scale(0.6); } to { opacity: 1; transform: none; } }
+@keyframes crown-fall  {
+  0%   { opacity: 0; transform: translateY(-140px) rotate(-30deg) scale(1.4); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes crown-fade  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes crown-rays-in { to { opacity: 1; } }
+@keyframes crown-spin  { to { transform: rotate(360deg); } }
+
+@media (max-width: 420px) {
+  .crown-stage { padding: 18px 12px 16px; }
+  .crown-title { font-size: 22px; }
+  .crown-podium { height: 240px; gap: 4px; }
+  .crown-avatar { width: 46px; height: 46px; }
+  .crown-spot[data-place="1"] .crown-avatar { width: 58px; height: 58px; }
+  .crown-spot[data-place="1"] .crown-step { height: 96px; }
+  .crown-spot[data-place="2"] .crown-step { height: 70px; }
+  .crown-spot[data-place="3"] .crown-step { height: 52px; }
+  .crown-name { font-size: 12px; }
+}
+
+/* Bez ruchu: od razu stan końcowy, promienie stoją. */
+@media (prefers-reduced-motion: reduce) {
+  .crown-stage, .crown-step, .crown-person, .crown-crown,
+  .crown-me, .crown-next, .crown-go { animation: none; }
+  .crown-rays { animation: none; opacity: 1; }
+}
+
+/* ── NAGŁÓWEK NA WĄSKIM TELEFONIE ──
+   Po zalogowaniu (Zasady + wyloguj + nick + coins) nagłówek był szerszy niż 375 px, więc
+   cała strona dostawała przewijanie w bok, a okna na position: fixed (podium, garderoba)
+   rozjeżdżały się poza ekran. Ściskamy odstępy i pozwalamy nickowi się skrócić. */
+@media (max-width: 480px) {
+  .header-inner { padding: 0 12px; gap: 8px; }
+  .header-logo { min-width: 0; }
+  .header-user { gap: 6px; min-width: 0; }
+  .user-nick { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-balance { min-width: 0; padding: 4px 8px; font-size: 12px; }
+}
