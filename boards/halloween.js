@@ -73,12 +73,9 @@ function buildPath() {
 
 module.exports = {
   name: 'Noc Duchów 🎃',
-  // SEZON W TESTACH (do premiery ok. 2.10.2026). Póki to `true`, liczbę pól, numery
-  // i ekonomię wolno zmieniać do woli — restart przy zmianie liczby pól i tak cofa
-  // wszystkich na start, a na produkcji nikt jeszcze na tej planszy nie grał. Po premierze
-  // przestaw na `false`: od tej chwili zmiana liczby pól albo przenumerowanie to ruszanie
+  // SEZON NA ŻYWO (premiera 30.09.2026). Zmiana liczby pól albo przenumerowanie to ruszanie
   // żywej gry (pozycje graczy, rozbicie punktów, cukierki na polach) i wymaga migracji.
-  testing: true,
+  testing: false,
   theme: 'halloween',
   effects: ['bats', 'fog'],
   grid: { cols: COLS, rows: ROWS },
@@ -138,8 +135,9 @@ module.exports = {
     // Pola 8 i 23 to cele łączników — tam drzwi mogą stać (to zdarzenie, nie pole specjalne).
     trick_or_treat: { tiles: [8, 14, 23, 30, 33, 38], treat_points: 8, candy_points: 3, trick_coins: 8 },
     // POLOWANIE NA CUKIERKI: 3 dziennie na losowych zwykłych polach (zostało ich 10),
-    // najwyżej 6 naraz.
-    candy: { per_day: 3, max_on_board: 6 },
+    // najwyżej 6 naraz. Każdy 🍬 daje 5 pkt, a kto na koniec sezonu ma ich najwięcej,
+    // dostaje kostium-nagrodę (na razie „❓", do zaprojektowania).
+    candy: { per_day: 3, max_on_board: 6, points: 5, prize: 'candy_hunter_prize' },
   },
 
   // BOSS SEZONU: Dynia Zagłady jest JEDYNYM bossem całej Nocy Duchów — pojawia się od razu

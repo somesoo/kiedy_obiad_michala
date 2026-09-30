@@ -25,6 +25,10 @@ const SL_COSTUME_ART = {
       + '<path class="c-stem" d="M19.4 15.4 Q19 12.6 21 11.8 L21.8 12.8 Q20.6 13.6 20.8 15.4 Z"/>'
       + '<path class="c-kcarve" d="M17 18.6 L18.6 17.2 L19 19.2 Z M23 18.6 L21.4 17.2 L21 19.2 Z M17.4 21 Q20 23.2 22.6 21 Z"/>'
       + '<path class="c-sparkle" d="M33 0 L34 3 L37 4 L34 5 L33 8 L32 5 L29 4 L32 3 Z"/>',
+    // Nagroda za polowanie na cukierki — TYMCZASOWY znak zapytania, dopóki kostium nie
+    // zostanie zaprojektowany (id w katalogu lib/costumes.js zostaje to samo).
+    candy_hunter_prize: '<circle class="c-mystery" cx="20" cy="16" r="14"/>'
+      + '<path class="c-mystery-mark" d="M15 12 Q15 6 20 6 Q25 6 25 11 Q25 14 21.5 16 Q20 17 20 20"/><circle class="c-mystery-dot" cx="20" cy="25" r="1.8"/>',
   },
   // Skrzydła: kształt LEWEGO skrzydła. Prawe to jego lustro zrobione w samym SVG (matrix),
   // a nie w CSS — dzięki temu animacja machania nie musi odbijać elementu i oba skrzydła

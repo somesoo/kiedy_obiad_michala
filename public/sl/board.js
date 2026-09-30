@@ -193,7 +193,7 @@ function slEventTiles(ev) {
     // Bez `weekdays` drzwi są otwarte codziennie — wtedy nie ma czego wypisywać.
     const days = (ev.trick_or_treat.weekdays || []).map(d => ['pon', 'wt', 'śr', 'czw', 'pt'][d - 1]).join(' i ');
     const st = ev.trick_or_treat.stakes;
-    const odds = st ? `cukierek (+${st.treat} pkt albo 🍬) lub psikus (−${st.trick} coins albo duch cofa)` : 'punkty albo psikus';
+    const odds = st ? `cukierek (+${st.treat} pkt albo 🍬 i +${st.candy} pkt) lub psikus (−${st.trick} coins albo duch cofa)` : 'punkty albo psikus';
     ev.trick_or_treat.tiles.forEach(t => {
       out[t] = ev.trick_or_treat.active
         ? { kind: 'door', active: true, icon: '🚪', title: `Cukierek albo psikus! 50/50: ${odds}.` }
@@ -201,7 +201,8 @@ function slEventTiles(ev) {
     });
   }
   if (ev.candy) {
-    ev.candy.tiles.forEach(t => { if (!out[t]) out[t] = { kind: 'candy', icon: '🍬', title: 'Cukierek! Stań tu, żeby go zebrać.' }; });
+    const title = `Cukierek! Stań tu, żeby go zebrać${ev.candy.points ? `: +${ev.candy.points} pkt` : ''}.`;
+    ev.candy.tiles.forEach(t => { if (!out[t]) out[t] = { kind: 'candy', icon: '🍬', title }; });
   }
   return out;
 }
@@ -611,7 +612,7 @@ function renderLegend(board, ev = null) {
       ${board.tiles.some(t => t.kind === 'fork') ? '<span class="sl-legend-ladder">🎲 rozwidlona drabina — rzut decyduje, którą odnogą</span>' : ''}
       ${ev && ev.cauldron ? `<span>🧪 kocioł −${ev.cauldron.amount} coins · 🥄 chochla zgarnia pulę</span>` : ''}
       ${ev && ev.trick_or_treat ? `<span>🚪 cukierek albo psikus${ev.trick_or_treat.active && ev.trick_or_treat.weekdays ? ' — dziś otwarte!' : ''}</span>` : ''}
-      ${ev && ev.candy ? '<span>🍬 cukierek do zebrania</span>' : ''}
+      ${ev && ev.candy ? `<span>🍬 cukierek${ev.candy.points ? ` +${ev.candy.points} pkt` : ''}${ev.candy.prize ? ` · najwięcej na koniec sezonu = ${esc(ev.candy.prize.icon)} kostium` : ''}</span>` : ''}
       <span>🛡️ gracz z tarczą</span>
       <span class="sl-legend-me">■ Twój pionek</span>
     </div>`;

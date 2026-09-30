@@ -371,6 +371,19 @@
           <div class="adm-stat" id="cfg-info">–</div>
         </div>
 
+        <div class="adm-card" id="backups-card">
+          <h3>💾 KOPIE ZAPASOWE BAZY</h3>
+          <div class="adm-note">
+            Serwer robi kopię całej bazy <strong>codziennie o <span id="backups-at">7:30</span></strong>,
+            czyli przed otwarciem gry, i trzyma <span id="backups-keep">3</span> ostatnie.
+            <strong>Przywrócenie cofa CAŁY serwis</strong> do chwili kopii: ruchy, punkty, coins,
+            zakupy, bossa, dziennik, nowych graczy i ustawienia z panelu. Tak cofa się dzień.<br><br>
+            Serwer zrestartuje się sam (pm2), a obecny stan najpierw trafi do kopii
+            „przed-przywroceniem" — pomyłkę odkręcisz, przywracając ją.
+          </div>
+          <div id="backups-list" style="margin-top:12px"><span class="text-muted">–</span></div>
+        </div>
+
         <div class="adm-card" style="opacity:0.6">
           <h3>↩️ COFNIJ CAŁY DZIEŃ <span style="font-size:11px;font-weight:400">— WYŁĄCZONE</span></h3>
           <div class="adm-note">
@@ -381,7 +394,8 @@
             ręcznie. Od przebudowy bossa dotyka dodatkowo wypłat, kar i HP, więc pomyłka
             kosztuje więcej niż kiedyś.<br><br>
             Do pojedynczych poprawek użyj <strong>„Cofnij ostatni ruch"</strong> przy graczu
-            albo ręcznej edycji jego punktów i coins.
+            albo ręcznej edycji jego punktów i coins. Cały dzień cofniesz, przywracając
+            <strong>kopię zapasową z rana</strong> (karta wyżej).
           </div>
           <div class="adm-actions">
             <input type="date" id="rollback-date" disabled />
@@ -466,7 +480,40 @@
       await loadPlayers();
       await loadSupporter();
       await loadHistory();
+      await loadBackups();
     }
+
+    // ── KOPIE ZAPASOWE ── (lib/backups.js)
+    async function loadBackups() {
+      const b = await api('GET', `/api/snakes/admin/backups?password=${encodeURIComponent(pass)}`);
+      document.getElementById('backups-at').textContent = b.at;
+      document.getElementById('backups-keep').textContent = b.keep;
+      const box = document.getElementById('backups-list');
+      const pending = b.pending ? `<div class="adm-note">⏳ Czeka na przywrócenie przy restarcie: <strong>${esc(b.pending)}</strong></div>` : '';
+      box.innerHTML = pending + (b.backups.length
+        ? b.backups.map(k => `
+            <div class="adm-actions" style="justify-content:space-between">
+              <span>${k.pre_restore ? '🛟 ' : '💾 '}<strong>${esc(k.name)}</strong>
+                <span class="text-muted">· ${esc(fmtDate(k.created_at))} · ${Math.round(k.size / 1024)} KB${k.pre_restore ? ' · stan sprzed ostatniego przywrócenia' : ''}</span></span>
+              <button class="btn-ghost backup-restore" data-name="${esc(k.name)}">↩️ Przywróć</button>
+            </div>`).join('')
+        : '<span class="text-muted">Jeszcze nie ma żadnej kopii — pierwsza powstanie o najbliższej 7:30.</span>');
+    }
+
+    document.getElementById('backups-list').addEventListener('click', async e => {
+      const btn = e.target.closest('.backup-restore');
+      if (!btn) return;
+      const name = btn.dataset.name;
+      if (!confirm(`Przywrócić kopię „${name}"? CAŁY serwis wróci do stanu z chwili kopii — wszystko, co stało się później, zniknie. Obecny stan trafi do kopii „przed-przywroceniem". Serwer się zrestartuje.`)) return;
+      const typed = prompt('Wpisz PRZYWRÓĆ, żeby potwierdzić:');
+      if (typed !== 'PRZYWRÓĆ') { showToast('Anulowano — nic nie przywrócono.'); return; }
+      try {
+        await api('POST', '/api/snakes/admin/backups/restore', { password: pass, name });
+        showToast(`↩️ Przywracam „${name}" — serwer się restartuje, odśwież panel za kilka sekund.`);
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
 
     // ── GODZINY GRY ──
     function renderHours(h) {

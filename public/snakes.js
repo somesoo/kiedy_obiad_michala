@@ -428,7 +428,42 @@ function renderAll() {
   renderRollButton(g);
   renderCoop(g);
   renderBossChip(g);
+  slRenderSeasonRules(g);
   slMaybeCrown(g);
+}
+
+// ── ZASADY MECHANIK SEZONOWYCH ── (kocioł, drzwi, cukierki; lib/seasonal.js)
+// Jak regulamin bossa: składany ze stawek z payloadu, bo każdy sezon ma inne (albo żadne).
+// Dawniej zasady w ogóle o nich nie mówiły i gracze nie wiedzieli, co dają.
+function slRenderSeasonRules(g) {
+  const li = document.getElementById('rules-season');
+  if (!li) return;
+  const ev = g.season_events;
+  const parts = [];
+  if (ev && ev.cauldron) {
+    const c = ev.cauldron;
+    parts.push(`<strong>🧪 Kocioł.</strong> Staniesz na polu z kotłem (${c.drop.join(', ')}) — wrzucasz do niego `
+      + `<strong>${c.amount} coins</strong> (także gdy przez to zejdziesz na minus). Staniesz na chochli 🥄 (pole ${c.ladle}) — `
+      + `<strong>zgarniasz wszystko, co jest w kotle</strong> (teraz ${c.pot} coins). Kocioł tylko przelewa coins między graczami, punktów nie daje.`);
+  }
+  if (ev && ev.trick_or_treat) {
+    const t = ev.trick_or_treat, st = t.stakes;
+    parts.push(`<strong>🚪 Cukierek albo psikus.</strong> Drzwi na polach ${t.tiles.join(', ')}: pół na pół `
+      + `cukierek (<strong>+${st.treat} pkt</strong> albo 🍬 i <strong>+${st.candy} pkt</strong>) lub psikus `
+      + `(zgniłe jajo <strong>−${st.trick} coins</strong> albo duch cofa Cię o 3 pola).`);
+  }
+  if (ev && ev.candy) {
+    const c = ev.candy;
+    parts.push(`<strong>🍬 Polowanie na cukierki.</strong> Codziennie na planszy pojawiają się nowe cukierki. `
+      + `Staniesz na polu z cukierkiem — zbierasz go i dostajesz <strong>+${c.points} pkt</strong>. `
+      + (c.prize
+        ? `Kto na koniec sezonu ma <strong>najwięcej cukierków</strong>, dostaje nagrodę: <strong>${esc(c.prize.icon)} ${esc(c.prize.name)}</strong> (przy remisie — każdy z czołówki).`
+        : 'Liczbę zebranych cukierków widać w rankingu.'));
+  }
+  // Zdarzenie odpala tylko rzucający — wypchnięty przez kogoś nic nie płaci i nic nie zbiera.
+  if (parts.length) parts.push('Wszystko to działa tylko na polu, na którym <strong>sam wylądujesz</strong> po rzucie — wypchnięcie przez kogoś niczego nie odpala.');
+  li.hidden = !parts.length;
+  li.querySelector('.rules-season-text').innerHTML = parts.join(' ');
 }
 
 // ── SEZON PLANSZY ──
@@ -855,7 +890,7 @@ function showRollResult(m) {
       treat_candy: `🍭 Cukierek! +🍬 i +${se.points} pkt`,
       trick_egg: `🥚 Psikus! Zgniłe jajo: ${se.coins} coins`,
       trick_scare: `👻 Psikus! Duch przestraszył Cię na pole ${se.to_tile}`,
-      candy: '🍬 Znalazłeś cukierka!',
+      candy: se.points ? `🍬 Znalazłeś cukierka! +${se.points} pkt` : '🍬 Znalazłeś cukierka!',
     }[se.kind];
     if (txt) noteTxt.push(txt);
   }

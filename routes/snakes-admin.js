@@ -133,11 +133,12 @@ module.exports = function registerSnakesAdminRoutes(deps) {
     // Domyślnie przełączenie ZAMYKA sezon (archiwum, medale, wszyscy od zera). Bez zamykania
     // — tylko w razie pomyłki albo testów: sama zmiana planszy, wszystko inne zostaje.
     const close = req.body.close !== false;
-    let moved, closure = null;
+    let moved, closure = null, candyPrize = null;
     if (close) {
       const out = slCloseSeasonAndInstall(season);
       moved = out.moved;
       closure = out.closure;
+      candyPrize = out.candyPrize;
       console.log(`Snakes/Admin: sezon ${previous} ZAMKNIĘTY (#${closure.id}, ${closure.players} graczy w archiwum) → ${season.id} (${season.size} pól), wszyscy od zera`);
     } else {
       moved = slInstallBoard(season, true, true);
@@ -151,7 +152,13 @@ module.exports = function registerSnakesAdminRoutes(deps) {
     if (closure) {
       const medal = ['🥇', '🥈', '🥉'];
       const podium = closure.podium.map(p => `${medal[p.place - 1]} **${p.nickname}** (${p.total_points} pkt)`).join('\n');
-      content = `🏆 **Koniec sezonu ${closure.name}!**` + (podium ? `\n${podium}` : '')
+      // Łowca cukierków (sezon z events.candy.prize) — nagroda to kostium, więc nick jawnie.
+      const hunters = candyPrize && candyPrize.winners.length
+        ? candyPrize.winners.map(id => (db.prepare('SELECT nickname FROM players WHERE id = ?').get(id) || {}).nickname).filter(Boolean)
+        : [];
+      const hunt = hunters.length
+        ? `\n🍬 Najwięcej cukierków (${candyPrize.candies}): ${hunters.map(n => `**${n}**`).join(', ')} — nagroda czeka w garderobie!` : '';
+      content = `🏆 **Koniec sezonu ${closure.name}!**` + (podium ? `\n${podium}` : '') + hunt
         + `\n\n🗺️ **Startuje nowy sezon: ${season.name}.** Wszyscy od zera: punkty, coins, okrążenia i ekwipunek. Kostiumy zostają.\n${SNAKES_URL}`;
     } else {
       content = `🗺️ **Nowa plansza: ${season.name}!** Wszyscy startują od pola 0 — punkty i coins zostają.`;

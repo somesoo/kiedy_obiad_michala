@@ -154,7 +154,7 @@ function slLbRowHtml(p, { hunt, topCandy, archived }) {
   const isTop = hunt && topCandy > 0 && p.candies === topCandy;
   const candyTitle = archived
     ? (isTop ? 'Najwięcej cukierków w tym sezonie' : 'Zebrane cukierki')
-    : (isTop ? 'Prowadzi w polowaniu na cukierki — kto będzie miał najwięcej na koniec października, zgarnia koronę' : 'Zebrane cukierki');
+    : (isTop ? 'Prowadzi w polowaniu na cukierki — kto będzie miał najwięcej na koniec sezonu, dostaje kostium-nagrodę' : 'Zebrane cukierki');
   const candy = hunt && p.candies != null
     ? `<span class="lb-candy mono${isTop ? ' is-top' : ''}" title="${candyTitle}">${isTop ? '👑' : ''}🍬 ${p.candies}</span>` : '';
   // Dymek z rozbiciem punktów jest tylko dla sezonu na żywo — archiwum rozbicia nie ma,

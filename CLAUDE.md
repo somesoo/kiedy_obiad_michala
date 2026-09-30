@@ -22,6 +22,7 @@ modułów. Reszta siedzi w fabrykach:
 | `lib/costumes.js` | kostiumy i skiny wsparcia | `const costumes = require` |
 | `lib/seasonal.js` | kocioł, drzwi, cukierki (`events` z pliku planszy) | `const seasonal = require` |
 | `lib/crowning.js` | zamknięcie sezonu: archiwum, medale, ukoronowanie | `const crowning = require` |
+| `lib/backups.js` | kopie bazy o 7:30 (3 wstecz), przywracanie przez restart | `backupsLib` (przed `new DatabaseSync`) |
 | `lib/shop.js` | power-upy, klątwy, cennik z rankingu, tarcza + trasy sklepu | `require('./lib/shop')` |
 | `routes/snakes-admin.js` | reszta panelu admina Snakes | `require('./routes/snakes-admin')` |
 | `lib/seasons.js`, `boards/*.js` | format i walidacja planszy, pliki sezonów | `require('./lib/seasons')` |
@@ -84,6 +85,16 @@ starej wersji.
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
 jest w `.gitignore` — baza produkcyjna żyje tylko na serwerze.
 
+**Kopie zapasowe** (`lib/backups.js`): codziennie o 7:30 czasu Warszawy (przed otwarciem gry)
+`VACUUM … INTO` obu plików do `db/backups/<data>_<godzina>/`, trzy ostatnie. Serwer, który
+o 7:30 nie działał, robi dzisiejszą kopię zaraz po starcie (godzina w nazwie jest prawdziwa).
+Przywrócenie (karta w panelu albo `node lib/backups.js restore <nazwa>`) zapisuje znacznik
+`db/backups/RESTORE` i kończy proces; pm2 go podnosi, a `applyPendingRestore()` — **przed**
+otwarciem bazy — odkłada obecny stan do jednej kopii `przed-przywroceniem_*`, kasuje
+dzienniki `-journal`/`-wal` i kopiuje pliki kopii. Uchwytu `db` nie da się podmienić w locie,
+stąd restart. To jest dzisiejszy sposób na **cofnięcie dnia**: cofa wszystko, także skutki
+dla innych graczy, ale też wszystko inne po 7:30. Kopie leżą na tym samym dysku co baza.
+
 ## Sezony planszy — plansza to plik, nie kod
 
 Kształt planszy, drabiny, węże, bonusy i motyw żyją w `boards/<id>.js` (format i walidacja:
@@ -91,13 +102,11 @@ Kształt planszy, drabiny, węże, bonusy i motyw żyją w `boards/<id>.js` (for
 go odpalić ponownie. Admin przełącza sezon w panelu (`POST /api/snakes/admin/season`),
 a aktywny siedzi w `sl_meta.active_board`.
 
-**Stan wdrożenia (wrzesień 2026):** produkcja gra na `default` (klasyczna 7×7, w UI jako
-pierwszy sezon „Snakes Game"). **Noc Duchów jest jeszcze w testach** — `testing: true`
-w `boards/halloween.js`. Dopóki ta flaga stoi, liczbę pól, numerację i ekonomię tej
-planszy wolno zmieniać do woli, bez migracji: nikt na niej naprawdę nie grał. Premiera
-ok. 2.10.2026 razem z nazwą „Snakes Game" i migracją; **po niej flaga idzie na `false`**
-i od tej chwili każda zmiana liczby pól albo numerów to ruszanie żywej gry (pozycje,
-cukierki na polach, historia ruchów) — potrzebna migracja. Serwer przy starcie krzyczy
+**Stan wdrożenia (30.09.2026):** produkcja gra na **Nocy Duchów** (`halloween`); pierwszy
+sezon „Snakes Game" (`default`, klasyczna 7×7) jest zamknięty. Flaga `testing` w
+`boards/halloween.js` stoi na `false`, więc każda zmiana liczby pól albo numerów to
+ruszanie żywej gry (pozycje, cukierki na polach, historia ruchów) — potrzebna migracja.
+Nowy sezon w przygotowaniu dostaje `testing: true`, dopóki nikt na nim naprawdę nie gra. Serwer przy starcie krzyczy
 w logu, gdy liczba pól sezonu bez `testing` się zmieniła.
 
 - **Liczba pól jest zmienna** — rozmiar zawsze przez `slBoardSize()`, nigdy ze stałej.
@@ -260,6 +269,16 @@ dwóch rzeczy naraz.
   w wierszu bez `ref` i `day`.
 - Polowanie na cukierki **nie ma osobnego rankingu**: `candies` idzie w wierszu rankingu
   (`seasonal.candyMap()`), `null` = sezon bez cukierków i kolumny w ogóle nie ma.
+- **Każdy 🍬 daje punkty** (`events.candy.points`, domyślnie 5; z drzwi dochodzą do
+  `candy_points`). Dawniej cukierek był samym licznikiem i gracze słusznie mówili, że „nic
+  nie daje". Za cukierki są tylko punkty, nigdy coins, bo biorą się z niczego.
+- **Nagroda za polowanie**: `events.candy.prize` = id kostiumu z `award` w katalogu.
+  `slCloseSeasonAndInstall` rozdaje go (przed `seasonal.resetAll`) wszystkim z najwyższą
+  liczbą 🍬, nie zakłada go od razu i pisze wpis do dziennika. Noc Duchów:
+  `candy_hunter_prize`, na razie „❓", bo kostium **czeka na zaprojektowanie** (podmień
+  rysunek w `SL_COSTUME_ART.hat`, nazwę, ikonę i ewentualnie slot; id zostaw).
+- Zasady mechanik składa `slRenderSeasonRules` (`snakes.js`) ze stawek w payloadzie,
+  do punktu `#rules-season` w regulaminie. Sezon bez `events` go chowa.
 - Drzwi bez `weekdays` są otwarte codziennie (tak jest na Nocy Duchów). Z `weekdays`
   działają tylko w te dni, a `hide_bonuses` wyłącza wtedy pola bonusowe
   (`seasonal.bonusesOff()` w `slResolveTileEffect`) — drzwi ZASTĘPUJĄ dynie. Noc Duchów
@@ -276,6 +295,10 @@ id — przez bazę nie da się niczego wstrzyknąć, nieznane id front pomija. C
 czapka, skrzydła, gadżet, nakładka (overlay = filtr na zdjęciu + rysunek na wierzchu).
 Pionek na planszy i podgląd w sklepie składa **jedna** funkcja `slPawnHtml`, więc podgląd
 nie może się rozjechać z tym, co widzą inni.
+
+**Nagrody sezonowe** (`award` w katalogu) nie są do kupienia i w sklepie widzi je tylko
+właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
+gracza — tak.
 
 Kostium to odpływ coins, który **nie rusza równowagi gry**. Zakup nie jest ruchem, więc
 cofanie ruchu i dnia go nie dotyczy (jak zakupów power-upów); reset gry i wyczyszczenie
@@ -547,7 +570,8 @@ rm -rf db   # na koniec
 
 ## Znane, niezałatane
 
-- **Cofanie dnia (`/admin/day/rollback`) jest WYŁĄCZONE** — stała `SL_DAY_ROLLBACK_ENABLED
+- **Cofanie dnia (`/admin/day/rollback`) jest WYŁĄCZONE** (cały dzień cofa się teraz
+  przywróceniem porannej kopii zapasowej, patrz „Kopie zapasowe”) — stała `SL_DAY_ROLLBACK_ENABLED
   = false` tuż nad trasą, blokada zwraca 503. To świadoma decyzja właściciela, nie awaria:
   funkcja czeka na przebudowę. Blokada siedzi po stronie SERWERA, bo trasa jest wystawiona
   na świat i schowanie przycisku niczego by nie zamknęło; w panelu admina karta jest

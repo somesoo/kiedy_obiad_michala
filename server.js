@@ -20,6 +20,10 @@ if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 const avatarsDir = path.join(__dirname, 'public', 'avatars');
 if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
 
+// Przywrócenie kopii zapasowej (lib/backups.js) musi się stać, ZANIM baza zostanie otwarta.
+const backupsLib = require('./lib/backups');
+backupsLib.applyPendingRestore(dbDir);
+
 const db = new DatabaseSync(path.join(dbDir, 'michal.db'));
 // Snakes & Ladders trzyma swoje dane (sl_*) we własnym pliku, dołączonym pod schemat
 // „snakes" — fizycznie osobno od Wordle, ale w jednej transakcji/połączeniu, więc
@@ -911,13 +915,17 @@ function slCloseSeasonAndInstall(season) {
         DELETE FROM sl_points_log;
         DELETE FROM sl_meta WHERE key = 'season_points_floor';
       `);
+      // Nagroda za polowanie na cukierki — PRZED resetAll, bo liczba 🍬 żyje w rejestrze
+      // sezonowym. Kostiumy przeżywają zamknięcie, więc nagroda zostaje zwycięzcy.
+      const hunt = seasonal.candyPrizeWinners();
+      const candyPrize = hunt.prize ? { item: hunt.prize, candies: hunt.top, winners: costumes.slGrantAward(hunt.winners, hunt.prize) } : null;
       // Gdyby admin przełączył potem planszę BEZ zamykania, dymek pokaże to jako „wcześniej".
       slMetaSet('season_prior_label', 'Poprzednia plansza');
       seasonal.resetAll(); // kocioł, cukierki na polach i rejestr — liczba cukierków jest w archiwum
       const moved = slInstallBoardRows(season, true, false);
       slSetBoard(season);
       const fight = boss.slCloseFightForSeason();
-      return { closure, moved, fight };
+      return { closure, moved, fight, candyPrize };
     });
   } catch (e) {
     slSetBoard(prev);
@@ -1215,6 +1223,12 @@ function startSnakesDiscordScheduler() {
 }
 startSnakesDiscordScheduler();
 
+// ── KOPIE ZAPASOWE ── codziennie o 7:30, trzy wstecz; przywrócenie z panelu (lib/backups.js).
+// Zastępują wyłączone „Cofnij dzień": kopia sprzed otwarcia gry cofa dzień w całości.
+const backups = backupsLib({ db, dbDir });
+backups.registerRoutes(app, { checkAdmin });
+backups.startScheduler();
+
 // ══ WALKA Z BOSSEM (lib/boss.js) ══
 // Podpinamy TUTAJ, a nie wyżej, bo moduł potrzebuje szyny Discorda (slEmit) i SNAKES_URL,
 // a te powstają dopiero w tej sekcji. Helpery wstrzykujemy zamiast robić require w drugą
@@ -1281,7 +1295,8 @@ function slBonusesOff() { return seasonal.bonusesOff(); }
 // Aktywną planszę podajemy funkcją, nie wartością — admin może zmienić sezon w locie.
 const seasonal = require('./lib/seasonal')({
   db, transaction, slLogActivity, slLogPoints, slEmit, todayWaw, isWeekendStr,
-  getSeason: slCurrentBoard, tileOf: slTileOf, boardSize: slBoardSize
+  getSeason: slCurrentBoard, tileOf: slTileOf, boardSize: slBoardSize,
+  costumeInfo: costumes.slCostumeInfo
 });
 seasonal.initSchema();
 
