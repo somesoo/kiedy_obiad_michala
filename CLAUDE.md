@@ -304,7 +304,8 @@ Nazewnictwo w UI: waluta to **zawsze „coins"**, ranking to **„pkt"**. Nie �
 nie „saldo" — te nazwy zostały zunifikowane i nie wracamy do nich.
 
 **Saldo może być UJEMNE** — przegrana z bossem zabiera płaskie 50 coins bez przycinania
-do stanu konta. Dług blokuje sklep i wpłaty (wszędzie jest warunek „stać cię?"), a wychodzi
+do stanu konta. Klątwa Kieszonkowiec zabiera zawsze co najmniej 25 coins
+(`SL_CURSE_COIN_STEAL_MIN`), też w dług, bo inaczej na pustym portfelu nic nie robi. Dług blokuje sklep i wpłaty (wszędzie jest warunek „stać cię?"), a wychodzi
 się z niego normalną grą. Nie dorzucaj nigdzie `MAX(0, balance …)` przy odejmowaniu —
 to by tę karę po cichu rozbroiło.
 

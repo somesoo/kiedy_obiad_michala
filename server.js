@@ -1388,7 +1388,7 @@ function slBuildState(playerId) {
 // Podpięte tu, a nie przy stałych, bo trasy potrzebują bossa, sezonu i stanu gracza.
 const {
   SL_POWERUP_TYPES, slShopPayload, slHasShield, SL_CURSE_PRICE_VARIANT, slCurseAdjustRoll,
-  SL_CURSE_COIN_STEAL, SL_CURSE_LABELS, SL_CURSE_DESCRIPTIONS, SL_POWERUP_COSTS,
+  SL_CURSE_COIN_STEAL, SL_CURSE_COIN_STEAL_MIN, SL_CURSE_LABELS, SL_CURSE_DESCRIPTIONS, SL_POWERUP_COSTS,
   SL_POWERUP_LABELS
 } = require('./lib/shop')({
   db, app, authPlayer, transaction, slEnsureState, slInventory, slAddPowerup, slLogActivity,
@@ -1613,8 +1613,11 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
 
     if (curseVariant === 3) {
       // KIESZONKOWIEC: zabiera monety z BIEŻĄCEGO salda (sprzed doliczenia `earned`)
-      // na rzecz tego, kto rzucił klątwę — symetrycznie do kradzieży przy knockbacku.
-      curseCoinSteal = Math.min(SL_CURSE_COIN_STEAL, Math.max(0, Number(st.balance)));
+      // na rzecz tego, kto rzucił klątwę. W odróżnieniu od knockbacku NIE jest przycięty
+      // do zera: zabiera tyle, ile jest (do SL_CURSE_COIN_STEAL), ale nigdy mniej niż
+      // SL_CURSE_COIN_STEAL_MIN — brakująca reszta idzie w dług. Nie dorzucaj tu MAX(0, …).
+      curseCoinSteal = Math.max(SL_CURSE_COIN_STEAL_MIN,
+        Math.min(SL_CURSE_COIN_STEAL, Number(st.balance)));
       if (curseCoinSteal > 0 && curse.source_player_id) {
         db.prepare('UPDATE sl_state SET balance = balance + ? WHERE player_id = ?')
           .run(curseCoinSteal, curse.source_player_id);
