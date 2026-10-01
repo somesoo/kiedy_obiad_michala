@@ -2146,10 +2146,22 @@
    Po zalogowaniu (Zasady + wyloguj + nick + coins) nagłówek był szerszy niż 375 px, więc
    cała strona dostawała przewijanie w bok, a okna na position: fixed (podium, garderoba)
    rozjeżdżały się poza ekran. Ściskamy odstępy i pozwalamy nickowi się skrócić. */
+/* Po dojściu przycisku „Wordle" i to przestało wystarczać: prawa strona potrzebowała ~250 px
+   przy ~230 dostępnych, nick i coins ściskały się do kilku pikseli, a podtytuł logo zawijał
+   się w 4 linie i wychodził poza nagłówek o stałej wysokości. Dlatego na telefonie nie ma
+   podtytułu ani nicku (zdjęcie i staty są w panelu niżej), przyciski są ciaśniejsze, a gdy
+   i tak się nie zmieści (bardzo wąski ekran), rząd przycisków ZAWIJA SIĘ pod logo —
+   nagłówek rośnie w dół zamiast rozpychać stronę w bok. */
 @media (max-width: 480px) {
-  .header-inner { padding: 0 12px; gap: 8px; }
-  .header-logo { min-width: 0; }
-  .header-user { gap: 6px; min-width: 0; }
-  .user-nick { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .user-balance { min-width: 0; padding: 4px 8px; font-size: 12px; }
+  .header-inner {
+    padding: 6px 12px; gap: 6px 8px;
+    flex-wrap: wrap; height: auto; min-height: var(--header-h);
+  }
+  .header-logo { min-width: 0; flex-shrink: 0; }
+  .logo-text { font-size: 17px; letter-spacing: 1px; line-height: 1.1; display: block; width: min-content; }
+  .logo-sub { display: none; }
+  .header-user { gap: 6px; min-width: 0; margin-left: auto; flex-wrap: nowrap; }
+  .header-user .btn-ghost { padding: 4px 7px; font-size: 11px; white-space: nowrap; }
+  .user-nick { display: none; }
+  .user-balance { min-width: 0; padding: 4px 8px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 }
