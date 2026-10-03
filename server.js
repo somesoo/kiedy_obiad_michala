@@ -1379,6 +1379,10 @@ function slBuildState(playerId) {
       office_end_hour: playHours.end,
       office_closes_at: officeOpen ? new Date(slOfficeCloseMs()).toISOString() : null,
       next_move_at: new Date(slNextOpenMs()).toISOString(),
+      // Pierwsze otwarcie PO dzisiejszym dniu (od 23:00 dziś — okno nigdy nie zaczyna się
+      // później). W piątek to poniedziałek: front pisze wtedy „wróć w poniedziałek", a nie
+      // „wróć jutro", gdy ruchy są wykorzystane albo biuro już zamknięte.
+      next_day_open_at: new Date(slNextOpenMs(warsawWallTimeToMs(...today.split('-').map(Number), 23))).toISOString(),
       can_roll: rollsRemainingToday > 0 && !!st.has_avatar && !isWeekend && officeOpen,
       has_shield: slHasShield(playerId),
       has_avatar: !!st.has_avatar,

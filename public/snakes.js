@@ -708,6 +708,28 @@ function renderStats(g) {
   }
 }
 
+// ── KIEDY NASTĘPNY DZIEŃ GRY ──
+// „jutro" albo „w poniedziałek" (po piątku, a z blokadą weekendów także w sobotę), z godziną
+// otwarcia. Termin liczy serwer (next_day_open_at, pomija dni bez gry), tu tylko słowa.
+const SL_WEEKDAY_WHEN = ['w niedzielę', 'w poniedziałek', 'we wtorek', 'w środę', 'w czwartek', 'w piątek', 'w sobotę'];
+function slWarsawDate(ms) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw' }).format(new Date(ms)); // YYYY-MM-DD
+}
+function slNextPlayDay(g) {
+  const at = Date.parse(g.me.next_day_open_at || '');
+  if (!at) return { day: 'jutro', full: 'jutro' };
+  const [y, m, d] = slWarsawDate(at).split('-').map(Number);
+  const [ty, tm, td] = slWarsawDate(Date.now()).split('-').map(Number);
+  const days = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
+  const day = days === 1 ? 'jutro' : SL_WEEKDAY_WHEN[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return { day, full: `${day} o ${g.me.office_start_hour}:00` };
+}
+// Biuro zamknięte NA DZIŚ (po godzinach), a nie jeszcze przed otwarciem: najbliższe
+// otwarcie wypada innego dnia. Wtedy niewykorzystane ruchy już przepadły.
+function slClosedForToday(g) {
+  return !g.me.office_open && slWarsawDate(Date.parse(g.me.next_move_at)) !== slWarsawDate(Date.now());
+}
+
 // ── PRZYCISK RZUTU ──
 function renderRollButton(g) {
   const btn = document.getElementById('btn-roll');
@@ -723,7 +745,9 @@ function renderRollButton(g) {
     if (g.me.is_weekend) {
       btn.textContent = '🌴 Weekend — wróć w poniedziałek';
     } else if (left === 0) {
-      btn.textContent = '✅ Ruchy wykorzystane — wróć jutro';
+      btn.textContent = `✅ Ruchy wykorzystane — wróć ${slNextPlayDay(g).day}`;
+    } else if (slClosedForToday(g)) {
+      btn.textContent = `🏢 Na dziś koniec — wróć ${slNextPlayDay(g).full}`;
     } else if (!g.me.office_open) {
       btn.textContent = `🏢 Gramy ${g.me.office_start_hour}:00–${g.me.office_end_hour}:00 — wróć o ${g.me.office_start_hour}:00`;
     } else {
@@ -1158,6 +1182,10 @@ function updateCountdown() {
       : `🎲 Masz ruch na dziś${countTxt}! Nowa doba za ${fmtHMS(toNext)}`;
   } else if (g && g.me.is_weekend) {
     textEl.textContent = `🌴 Weekend — w Snakes nie gramy. Wracamy w poniedziałek.`;
+  } else if (g && g.me.rolls_remaining_today > 0 && slClosedForToday(g)) {
+    // Po godzinach dzisiejsze ruchy nie czekają (przepadają o północy, a do zamknięcia
+    // biura i tak nie da się ich użyć). Odliczanie na trzy dni wyglądałoby jak awaria.
+    textEl.textContent = `🏢 Biuro zamknięte — na dziś koniec gry. Wracamy ${slNextPlayDay(g).full}.`;
   } else if (g && g.me.rolls_remaining_today > 0 && !g.me.office_open) {
     const waitSecs = Math.round((Date.parse(g.me.next_move_at) - Date.now()) / 1000);
     if (waitSecs <= 0) {
@@ -1172,7 +1200,10 @@ function updateCountdown() {
       textEl.textContent = `🏢 Biuro zamknięte — gramy ${g.me.office_start_hour}:00–${g.me.office_end_hour}:00. Otwarcie za ${fmtHMS(waitSecs)} (${g.me.rolls_remaining_today}/${g.me.daily_rolls} ruchów czeka)`;
     }
   } else {
-    textEl.textContent = `🔒 Ruchy wykorzystane — nowe za ${fmtHMS(toNext)}`;
+    const next = g ? slNextPlayDay(g) : null;
+    textEl.textContent = next && next.day !== 'jutro'
+      ? `🔒 Ruchy wykorzystane — nowe ${next.full}`
+      : `🔒 Ruchy wykorzystane — nowe za ${fmtHMS(toNext)}`;
   }
   if (barEl) barEl.style.width = ((1 - toNext / 86400) * 100) + '%';
   if (g) renderRollButton(g);
