@@ -1605,17 +1605,26 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
       }
     }
 
-    // ── ZDARZENIE SEZONOWE NA POLU LĄDOWANIA ── (kocioł, drzwi, cukierek)
-    // Rozstrzygamy TERAZ, bo psikus potrafi cofnąć pionek, a wypychanie ma się liczyć
-    // z pola, na którym gracz faktycznie stanął. Zapis efektów — dopiero po wstawieniu
-    // ruchu, kiedy znamy jego `ref` (patrz seasonalLanding.apply niżej).
-    const seasonalLanding = seasonal.resolveLanding({ playerId, landedAbs: abs, day: today, turnRef });
-    abs = seasonalLanding.abs;
-
     // ── KNOCKBACK: jeśli roller wylądował na zajętym polu, wypycha okupanta(ów) ──
-    // Sprawdzane na OSTATECZNYM polu lądowania tej tury (po drabinach/wężach/klątwie,
-    // po obu rzutach przy Extra Move) — nie na każdym pośrednim kroku.
+    // Sprawdzane na polu lądowania tej tury (po drabinach/wężach/klątwie, po obu rzutach
+    // przy Extra Move) — nie na każdym pośrednim kroku. Zbicie idzie PRZED zdarzeniem
+    // sezonowym: żeby stanąć na polu i zapukać do drzwi, trzeba je najpierw zwolnić.
+    // Dawniej psikus cofał pionek, zanim ten zdążył zbić kogoś z pola lądowania
+    // („duch przestraszył go z pola 8", choć na 8 stał inny gracz — październik 2026).
     const knockback = slApplyKnockback(playerId, abs, board, nickname, turnRef);
+
+    // ── ZDARZENIE SEZONOWE NA POLU LĄDOWANIA ── (kocioł, drzwi, cukierek)
+    // Zapis efektów — dopiero po wstawieniu ruchu, kiedy znamy jego `ref`
+    // (patrz seasonalLanding.apply niżej).
+    const seasonalLanding = seasonal.resolveLanding({ playerId, landedAbs: abs, day: today, turnRef });
+    if (seasonalLanding.announce) seasonalLanding.announce();
+    if (seasonalLanding.abs !== abs) {
+      // Psikus przestraszył pionek na inne pole — tam też trzeba stanąć, więc zajęte
+      // pole znów zbija. Już zbitych w tej turze pomijamy (patrz `exclude` w slApplyKnockback).
+      knockback.push(...slApplyKnockback(playerId, seasonalLanding.abs, board, nickname, turnRef,
+        knockback.map(k => k.player_id)));
+    }
+    abs = seasonalLanding.abs;
     if (knockback.length) notes.push('knockback');
 
     // ── PUNKTACJA ── (pipPoints liczone od SUROWYCH rzutów, nie od skorygowanych
@@ -1765,7 +1774,9 @@ app.post('/api/snakes/roll', authPlayer, (req, res) => {
         : k.tile_effect === 'snake' ? `, a stamtąd 🐍 wężem na **${k.to_tile}**`
         : k.tile_effect === 'bonus' ? ` ⭐ +${k.bonus_points} pkt bonusu`
         : '') + ` 💰 ${k.stolen_by}: +${k.points_won} pkt${k.coins_stolen ? ` i ${k.coins_stolen} coins zabranych` : ''}`;
-      slEmit('knockback', () => result.knockback.map((k, i) => i === 0
+      // Zbicie przez samego rzucającego poznajemy po `stolen_by`, nie po pozycji na liście:
+      // po psikusie rzucający zbija drugi raz, na polu, na które przestraszył go duch.
+      slEmit('knockback', () => result.knockback.map((k, i) => (i === 0 || k.stolen_by === nickname)
         ? `💥 **${nickname}** wylądował na polu **${k.from_tile}** i wypchnął **${k.nickname}** → pole **${k.knocked_tile}**${extraFor(k)}.`
         : `↳ efekt domina: **${k.nickname}** też wypchnięty → pole **${k.knocked_tile}**${extraFor(k)}.`
       ).join('\n'));

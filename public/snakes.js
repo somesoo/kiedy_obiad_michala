@@ -928,11 +928,12 @@ function showRollResult(m) {
   }
   if (m.knockback && m.knockback.length) {
     const names = m.knockback.map(k => esc(k.nickname)).join(', ');
-    // Łup liczymy tylko z PIERWSZEGO zbicia — dalsze w kaskadzie robią wypchnięci, nie ja,
-    // i to oni dostają swoje punkty i coins.
-    const mine = m.knockback[0];
-    const coins = mine.coins_stolen || 0;
-    const pts = mine.points_won || 0;
+    // Łup liczymy tylko z MOICH zbić — dalsze w kaskadzie robią wypchnięci, nie ja,
+    // i to oni dostają swoje punkty i coins. Moje to pierwsze i każde inne o tym samym
+    // `stolen_by` (po psikusie zbijam drugi raz, na polu, na które przestraszył mnie duch).
+    const mine = m.knockback.filter(k => k.stolen_by === m.knockback[0].stolen_by);
+    const coins = mine.reduce((a, k) => a + (k.coins_stolen || 0), 0);
+    const pts = mine.reduce((a, k) => a + (k.points_won || 0), 0);
     noteTxt.push(`💥 wypchnąłeś: ${names}!${pts > 0 ? ` (+${pts} pkt${coins > 0 ? `, +${coins} 💰 zabranych` : ''})` : ''}`);
   }
   if (m.boss_hit) {
