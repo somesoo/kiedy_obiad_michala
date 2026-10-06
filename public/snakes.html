@@ -76,6 +76,16 @@
     </div>
   </div>
 
+  <!-- BONUS ZA PRZYJŚCIE DO BIURA (lib/office.js) -->
+  <div class="overlay" id="office-overlay" style="display:none">
+    <div class="login-card office-card">
+      <h2>🏢 Witaj w biurze!</h2>
+      <p class="login-sub">Grasz z sieci biura, więc za przyjście należy Ci się Extra Move — dodatkowy ruch na dziś, za darmo.</p>
+      <button class="btn-primary" id="btn-office-claim">Odbierz Extra Move</button>
+      <button class="btn-ghost" id="btn-office-later">Później</button>
+    </div>
+  </div>
+
   <!-- JAK TO DZIAŁA -->
   <div class="how-it-works" id="how-it-works" style="display:none">
     <div class="how-inner">
@@ -167,6 +177,8 @@
           <span class="game-bar-sub" id="board-season-name">wszystkie pionki na jednej pętli</span>
         </div>
         <button class="btn-primary btn-roll" id="btn-roll">🎲 Rzuć kostką</button>
+        <!-- Bonus za biuro — zostaje, gdy ktoś zamknął okienko „Później" (patrz slRenderOfficeBonus). -->
+        <button class="btn-ghost office-chip" id="btn-office-chip" hidden>🏢 Odbierz ruch za biuro</button>
         <div class="roll-result" id="roll-result"></div>
         <!-- Garderoba z paska — tylko na planszach bez chatki na planszy (view.shop_at). -->
         <button class="btn-ghost game-bar-wardrobe" id="btn-wardrobe" hidden>🪞 Garderoba</button>

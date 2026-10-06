@@ -2165,3 +2165,9 @@
   .user-nick { display: none; }
   .user-balance { min-width: 0; padding: 4px 8px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 }
+
+/* ── BONUS ZA BIURO ── (lib/office.js) okienko i przycisk przy „Rzuć kostką" */
+.office-card { text-align: center; }
+.office-card .btn-primary { width: 100%; }
+.office-card .btn-ghost { margin-top: 10px; }
+.office-chip { border-color: var(--accent); color: var(--accent); white-space: nowrap; }

@@ -1415,11 +1415,20 @@ const {
   SL_MAX_EXTRA_ROLLS, SL_DAILY_ROLLS
 });
 
+// ── BONUS ZA BIURO ── +1 ruch dziennie z adresu biura ustawionego w panelu (lib/office.js).
+const office = require('./lib/office')({
+  db, app, authPlayer, checkAdmin, transaction, ensureColumn, slEnsureState, slLogActivity,
+  slMetaGet, slMetaSet, slBuildState, slAddPowerup, todayWaw, isWeekendStr, slPlayHours,
+  SL_MAX_EXTRA_ROLLS
+});
+
 // ── ENDPOINTY — SNAKES & LADDERS ──
 
 // GET /api/snakes/state — pełny stan gry gracza (plansza, pozycje, sklep, ekwipunek…)
+// `office_bonus` jedzie TYLKO tutaj, bo potrzebuje adresu z żądania — stan z odpowiedzi
+// rzutu i sklepu go nie ma, a front trzyma ostatnią wartość (patrz state.officeBonus).
 app.get('/api/snakes/state', authPlayer, (req, res) => {
-  res.json(slBuildState(req.player.id));
+  res.json({ ...slBuildState(req.player.id), office_bonus: office.statusFor(req, req.player.id) });
 });
 
 // POST /api/snakes/avatar — wgraj/zmień zdjęcie profilowe (wymagane, żeby zagrać).

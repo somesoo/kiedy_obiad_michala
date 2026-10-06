@@ -5,7 +5,7 @@
 // Kolejność skryptów i zasady ładowania: patrz nagłówek sl/art-effects.js.
 
 // ── HISTORIA AKTYWNOŚCI (prawa kolumna) ──
-const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', curse_fired: '💀', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆', season_event: '🎃' };
+const ACTIVITY_ICONS = { roll: '🎲', shop_buy: '🛒', shop_use: '⚡', curse_fired: '💀', knockback: '💥', avatar: '🖼️', boss_hit: '⚔️', bonus_grant: '🏦', boss_reward: '🏆', season_event: '🎃', office_bonus: '🏢' };
 
 // Które bloki dziennika są rozwinięte — po `ref`, który jest stały między odświeżeniami.
 const activityOpen = new Set();

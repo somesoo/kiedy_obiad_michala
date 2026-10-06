@@ -232,6 +232,32 @@
           </div>
         </div>
 
+        <div class="adm-card" id="office-card">
+          <h3>🏢 BONUS ZA BIURO</h3>
+          <div class="adm-note">
+            Kto otworzy grę z adresu biura, dostaje okienko „odbierz Extra Move" — raz dziennie,
+            działa jak kupienie i od razu użycie Extra Move (sufit dalej 5 ruchów; przy pełnych
+            slotach sztuka ląduje w ekwipunku). Adresy po jednym w linii; przy IPv6 wpisz cały
+            zakres sieci, np. <code>2001:db8:1:2::/64</code>, bo każdy komputer ma inny adres.
+            Puste pole = bonus wyłączony.
+          </div>
+          <div class="adm-stat" id="office-you">–</div>
+          <div class="adm-note" id="office-headers" style="margin-top:6px;word-break:break-all"></div>
+          <textarea id="office-ips" rows="3" style="width:100%;font-family:'JetBrains Mono',monospace;font-size:12px" placeholder="np. 203.0.113.5&#10;2001:db8:1:2::/64"></textarea>
+          <div class="adm-actions">
+            <label style="font-size:12px">proxy przed serwerem
+              <input type="number" id="office-hops" min="0" max="5" step="1" style="width:56px" /></label>
+            <button class="btn-ghost" id="btn-office-add-me">➕ Dodaj mój adres</button>
+            <button class="btn-primary" id="btn-office-save">Zapisz</button>
+          </div>
+          <div class="adm-note" style="margin-top:6px">
+            <strong>Proxy przed serwerem</strong>: ile pośredników (tunel wykr.es, nginx…) dokleja adres
+            do <code>X-Forwarded-For</code>. Sprawdź z biura: „Twój adres" ma pokazywać adres biura,
+            a nie tunelu. Za mało = każdy ma adres tunelu (nikt nie dostanie bonusu), za dużo =
+            da się podszyć nagłówkiem.
+          </div>
+        </div>
+
         <div class="adm-card">
           <h3>🗺️ SEZON PLANSZY</h3>
           <div class="adm-stat" id="season-info">–</div>
@@ -479,6 +505,7 @@
       await loadSeasons();
       await loadPlayers();
       await loadSupporter();
+      await loadOffice();
       await loadHistory();
       await loadBackups();
     }
@@ -549,6 +576,52 @@
       saveHours({ start: 0, end: 24, weekends: true }, () => '🔓 Blokada zdjęta — gra otwarta całą dobę, codziennie.'));
     document.getElementById('btn-hours-reset').addEventListener('click', () =>
       saveHours({ reset: true }, h => `↩️ Domyślne okno: ${h.start}:00–${h.end}:00, pon–pt.`));
+
+    // ── BONUS ZA BIURO ──
+    let officeData = null;
+    async function loadOffice() {
+      renderOffice(await api('GET', `/api/snakes/admin/office?password=${encodeURIComponent(pass)}`));
+    }
+
+    function renderOffice(d) {
+      officeData = d;
+      const y = d.you;
+      document.getElementById('office-you').textContent =
+        `Twój adres (wg serwera): ${y.ip || '?'} — ${y.in_office ? '✅ sieć biura' : 'poza listą biura'}` +
+        ` · dziś odebrało: ${d.claimed_today}`;
+      const hdr = [`gniazdo: ${y.socket || '–'}`, `X-Forwarded-For: ${y.x_forwarded_for || '–'}`];
+      if (y.x_real_ip) hdr.push(`X-Real-IP: ${y.x_real_ip}`);
+      if (y.forwarded) hdr.push(`Forwarded: ${y.forwarded}`);
+      if (y.cf_connecting_ip) hdr.push(`CF-Connecting-IP: ${y.cf_connecting_ip}`);
+      document.getElementById('office-headers').textContent = hdr.join(' · ');
+      setIfIdle('office-ips', d.ips.join('\n'));
+      setIfIdle('office-hops', d.trust_hops);
+    }
+
+    async function saveOffice(ipsText) {
+      try {
+        const res = await api('POST', '/api/snakes/admin/office', {
+          password: pass,
+          ips: ipsText,
+          trust_hops: Number(document.getElementById('office-hops').value)
+        });
+        document.getElementById('office-ips').value = res.ips.join('\n');
+        renderOffice(res);
+        showToast(res.ips.length ? `🏢 Zapisano ${res.ips.length} adres(y) biura.` : '🏢 Bonus za biuro wyłączony.');
+      } catch (e) {
+        showToast('❌ ' + e.message);
+      }
+    }
+
+    document.getElementById('btn-office-save').addEventListener('click', () =>
+      saveOffice(document.getElementById('office-ips').value));
+    document.getElementById('btn-office-add-me').addEventListener('click', () => {
+      const me = officeData && officeData.you.ip;
+      if (!me) return showToast('❌ Serwer nie widzi Twojego adresu.');
+      const el = document.getElementById('office-ips');
+      if (!el.value.split(/\s+/).includes(me)) el.value = (el.value.trim() ? el.value.trim() + '\n' : '') + me;
+      saveOffice(el.value);
+    });
 
     // ── SKINY WSPARCIA ──
     async function loadSupporter() {

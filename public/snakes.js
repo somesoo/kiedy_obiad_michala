@@ -207,6 +207,10 @@ async function pollState() {
   pollInFlight = true;
   try {
     const g = await api('GET', '/api/snakes/state');
+    // Bonus za biuro poza podpisem stanu: zmienia się, gdy ktoś wchodzi do sieci biura
+    // albo odbiera go na innym urządzeniu, a reszta stanu może stać w miejscu.
+    state.officeBonus = g.office_bonus || null;
+    slRenderOfficeBonus();
     const prev = state.game;
     if (!prev || stateSignature(g) === stateSignature(prev)) return;
     // Pozycja zmieniła się bez naszego rzutu (rzut idzie przez roll(), a wtedy
@@ -407,7 +411,11 @@ document.getElementById('btn-avatar-upload').addEventListener('click', async () 
 async function loadState() {
   try {
     state.game = await api('GET', '/api/snakes/state');
+    // Status bonusu za biuro przychodzi tylko w tym stanie (serwer potrzebuje adresu
+    // z żądania) — odpowiedzi rzutu i sklepu go nie niosą, więc trzymamy go osobno.
+    state.officeBonus = state.game.office_bonus || null;
     renderAll();
+    slRenderOfficeBonus();
     updateCountdown();
   } catch (e) {
     console.error('Błąd ładowania gry:', e);
@@ -431,6 +439,56 @@ function renderAll() {
   slRenderSeasonRules(g);
   slMaybeCrown(g);
 }
+
+// ── BONUS ZA PRZYJŚCIE DO BIURA ── (lib/office.js)
+// Okienko wyskakuje raz; „Później" chowa je do końca dnia (na tym urządzeniu), ale przycisk
+// przy „Rzuć kostką" zostaje, dopóki bonus czeka. localStorage tylko na wygodę — bez niego
+// okienko po prostu wróci przy kolejnym odświeżeniu stanu.
+const OFFICE_LATER_KEY = 'sl_office_later';
+
+function slOfficeLaterToday() {
+  try { return localStorage.getItem(OFFICE_LATER_KEY) === (state.game && state.game.server_date); }
+  catch (e) { return false; }
+}
+
+function slRenderOfficeBonus() {
+  const ob = state.officeBonus;
+  const available = !!(ob && ob.available);
+  document.getElementById('btn-office-chip').hidden = !available;
+  const overlay = document.getElementById('office-overlay');
+  const show = available && !slOfficeLaterToday();
+  if (show && overlay.style.display !== 'flex') overlay.style.display = 'flex';
+  if (!show && overlay.style.display === 'flex') overlay.style.display = 'none';
+}
+
+async function slClaimOfficeBonus() {
+  if (state.busy) return;
+  state.busy = true;
+  try {
+    const res = await api('POST', '/api/snakes/office-bonus/claim');
+    state.game = res.state;
+    state.officeBonus = res.office_bonus || null;
+    renderAll();
+    slRenderOfficeBonus();
+    showToast(res.granted === 'roll'
+      ? `🏢 Dodatkowy ruch gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`
+      : '🏢 Dzisiejsze dodatkowe ruchy już masz — Extra Move czeka w ekwipunku na jutro.');
+  } catch (e) {
+    // Np. wyszedł z biura z otwartą kartą albo odebrał już na innym urządzeniu.
+    showToast('❌ ' + e.message);
+    state.officeBonus = null;
+    slRenderOfficeBonus();
+  } finally {
+    state.busy = false;
+  }
+}
+
+document.getElementById('btn-office-claim').addEventListener('click', () => slClaimOfficeBonus());
+document.getElementById('btn-office-chip').addEventListener('click', () => slClaimOfficeBonus());
+document.getElementById('btn-office-later').addEventListener('click', () => {
+  try { localStorage.setItem(OFFICE_LATER_KEY, state.game && state.game.server_date); } catch (e) { /* tylko wygoda */ }
+  document.getElementById('office-overlay').style.display = 'none';
+});
 
 // ── ZASADY MECHANIK SEZONOWYCH ── (kocioł, drzwi, cukierki; lib/seasonal.js)
 // Jak regulamin bossa: składany ze stawek z payloadu, bo każdy sezon ma inne (albo żadne).

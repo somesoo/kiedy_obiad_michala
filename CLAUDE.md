@@ -24,6 +24,7 @@ modułów. Reszta siedzi w fabrykach:
 | `lib/crowning.js` | zamknięcie sezonu: archiwum, medale, ukoronowanie | `const crowning = require` |
 | `lib/backups.js` | kopie bazy o 7:30 (3 wstecz), przywracanie przez restart | `backupsLib` (przed `new DatabaseSync`) |
 | `lib/shop.js` | power-upy, klątwy, cennik z rankingu, tarcza + trasy sklepu | `require('./lib/shop')` |
+| `lib/office.js` | bonus za biuro: adres klienta, adresy biura, odbiór, karta w panelu | `const office = require` |
 | `routes/snakes-admin.js` | reszta panelu admina Snakes | `require('./routes/snakes-admin')` |
 | `lib/seasons.js`, `boards/*.js` | format i walidacja planszy, pliki sezonów | `require('./lib/seasons')` |
 
@@ -312,6 +313,20 @@ się ich nie kupi. Sklep pokazuje tylko skin aktywnego sezonu, ale skin z innego
 który ktoś już ma, dalej da się nosić. Numer **nie jedzie** w stanie gry, front dociąga
 go dopiero po kliknięciu (`/costumes/supporter-phone`). **Reset gry i wyczyszczenie
 gracza NIE kasują skinów wsparcia** — są zapłacone złotówkami, a nie coins.
+
+## Bonus za biuro (`lib/office.js`)
+
+Kto otworzy grę z adresu biura (lista w panelu: adresy i zakresy CIDR, przy IPv6 cała sieć
+`/64`), dostaje okienko „Odbierz Extra Move" — raz dziennie (`sl_state.office_bonus_date`).
+Odbiór działa **jak kupienie i od razu użycie Extra Move**: slot w `extra_rolls`, sufit dnia
+dalej 5. Przy zajętych slotach sztuka ląduje w ekwipunku, także jako trzecia. Bez punktów
+i coins, więc ścieżek cofania nie dotyczy. Status (`office_bonus`) jedzie **tylko** w
+`GET /state`, bo potrzebuje adresu z żądania; front trzyma go w `state.officeBonus`.
+
+**Adres klienta to wpis z `X-Forwarded-For` liczony OD PRAWEJ** — tyle miejsc, ile proxy
+stoi przed serwerem (`office_trust_hops` w panelu, domyślnie 1 na tunel wykr.es). Lewą
+stronę listy może dopisać sam gracz, więc nigdy nie bierz pierwszego wpisu. Karta w panelu
+pokazuje, co widzi serwer — liczbę proxy ustawia się, patrząc na nią z biura.
 
 ## Dwie waluty — to jest fundament, nie szczegół
 
