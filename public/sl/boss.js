@@ -282,6 +282,10 @@ function slBossHitDelta(c) {
 // w trybie prywatnym albo przy zablokowanych danych stron samo sięgnięcie rzuca
 // wyjątkiem i wywróciłoby cały render panelu.
 const BOSS_NOTICE_VERSION = 'v2-2026-09';
+// Wyłącznik całego banera. Faza testów mechaniki bossa się skończyła (październik 2026),
+// więc ogłoszenie znika u WSZYSTKICH, także u tych, którzy go nie zamknęli. Kolejne
+// ogłoszenie: nowa treść w slRenderBossNotice, podbita wersja i z powrotem true.
+const BOSS_NOTICE_ACTIVE = false;
 const BOSS_NOTICE_KEY = 'snakes-boss-notice-' + BOSS_NOTICE_VERSION;
 
 function bossNoticeDismissed() {
@@ -297,7 +301,7 @@ function slRenderBossNotice(c) {
   const el = document.getElementById('boss-notice');
   if (!el) return;
   // Boss wyłączony albo baner zamknięty — nie ma o czym ogłaszać.
-  if (!c || !c.boss || bossNoticeDismissed()) {
+  if (!BOSS_NOTICE_ACTIVE || !c || !c.boss || bossNoticeDismissed()) {
     el.style.display = 'none';
     return;
   }

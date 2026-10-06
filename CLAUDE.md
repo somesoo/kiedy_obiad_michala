@@ -543,6 +543,8 @@ Nazwa flagi niesie **wersję mechaniki**. Kolejna przebudowa, która ma wystarto
 nowa = podbicie numeru (`boss_relaunch_v3_done`); stara flaga zostaje i niczego nie blokuje.
 Ten sam wzorzec ma baner w UI (`BOSS_NOTICE_VERSION` w `public/sl/boss.js`) — podbicie
 wersji sprawia, że ogłoszenie wraca wszystkim, także tym, którzy zamknęli poprzednie.
+Baner „faza testów" jest od października 2026 wyłączony (`BOSS_NOTICE_ACTIVE = false`);
+nowe ogłoszenie = nowa treść, podbita wersja i wyłącznik z powrotem na `true`.
 
 ## Jak testować
 
