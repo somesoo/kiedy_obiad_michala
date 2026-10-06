@@ -1428,7 +1428,7 @@ const office = require('./lib/office')({
 // `office_bonus` jedzie TYLKO tutaj, bo potrzebuje adresu z żądania — stan z odpowiedzi
 // rzutu i sklepu go nie ma, a front trzyma ostatnią wartość (patrz state.officeBonus).
 app.get('/api/snakes/state', authPlayer, (req, res) => {
-  res.json({ ...slBuildState(req.player.id), office_bonus: office.statusFor(req, req.player.id) });
+  res.json({ ...slBuildState(req.player.id), office_bonus: office.statusFor(req, req.player.id, req.player.nickname) });
 });
 
 // POST /api/snakes/avatar — wgraj/zmień zdjęcie profilowe (wymagane, żeby zagrać).

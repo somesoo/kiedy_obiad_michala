@@ -454,7 +454,19 @@ function slOfficeLaterToday() {
 function slRenderOfficeBonus() {
   const ob = state.officeBonus;
   const available = !!(ob && ob.available);
-  document.getElementById('btn-office-chip').hidden = !available;
+  // Przycisk stoi zawsze, gdy funkcja jest włączona (ob != null): aktywny w biurze, szary
+  // poza nim i po odebraniu — żeby było widać, że jest o co przyjść.
+  const chip = document.getElementById('btn-office-chip');
+  chip.hidden = !ob;
+  if (ob) {
+    chip.disabled = !available;
+    chip.classList.toggle('is-off', !available);
+    chip.textContent = ob.claimed_today ? '✅ Rzut od Prezesa odebrany' : '🏢 Rzut od Prezesa';
+    chip.title = available ? 'Odbierz Rzut od Prezesa za przyjście do biura — dodatkowy ruch na dziś'
+      : ob.claimed_today ? 'Dzisiejszy Rzut od Prezesa już odebrany — kolejny jutro'
+      : !ob.play_day ? 'Dziś nie gramy — Rzut od Prezesa wróci w dzień gry'
+      : 'Rzut od Prezesa dostaniesz za przyjście do biura — otwórz grę z sieci biura';
+  }
   const overlay = document.getElementById('office-overlay');
   const show = available && !slOfficeLaterToday();
   if (show && overlay.style.display !== 'flex') overlay.style.display = 'flex';
@@ -471,12 +483,13 @@ async function slClaimOfficeBonus() {
     renderAll();
     slRenderOfficeBonus();
     showToast(res.granted === 'roll'
-      ? `🏢 Dodatkowy ruch gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`
-      : '🏢 Dzisiejsze dodatkowe ruchy już masz — Extra Move czeka w ekwipunku na jutro.');
+      ? `🏢 Rzut od Prezesa gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`
+      : '🏢 Dzisiejsze dodatkowe ruchy już masz — Rzut od Prezesa czeka w ekwipunku jako Extra Move.');
   } catch (e) {
-    // Np. wyszedł z biura z otwartą kartą albo odebrał już na innym urządzeniu.
+    // Np. wyszedł z biura z otwartą kartą albo odebrał już na innym urządzeniu — przycisk
+    // szarzeje do następnego odświeżenia stanu, które przyniesie prawdziwy status.
     showToast('❌ ' + e.message);
-    state.officeBonus = null;
+    if (state.officeBonus) state.officeBonus = { ...state.officeBonus, available: false };
     slRenderOfficeBonus();
   } finally {
     state.busy = false;

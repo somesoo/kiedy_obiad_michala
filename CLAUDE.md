@@ -326,7 +326,13 @@ i coins, więc ścieżek cofania nie dotyczy. Status (`office_bonus`) jedzie **t
 **Adres klienta to wpis z `X-Forwarded-For` liczony OD PRAWEJ** — tyle miejsc, ile proxy
 stoi przed serwerem (`office_trust_hops` w panelu, domyślnie 1 na tunel wykr.es). Lewą
 stronę listy może dopisać sam gracz, więc nigdy nie bierz pierwszego wpisu. Karta w panelu
-pokazuje, co widzi serwer — liczbę proxy ustawia się, patrząc na nią z biura.
+pokazuje, co widzi serwer — liczbę proxy ustawia się, patrząc na nią z biura. Każda zmiana
+adresu gracza leci do konsoli (`Snakes/biuro:` w `pm2 logs`) i na listę „ostatnie połączenia"
+w karcie (w pamięci, od restartu).
+
+W UI bonus nazywa się **„Rzut od Prezesa za przyjście do biura"** (decyzja właściciela).
+Przycisk przy kostce stoi zawsze, gdy lista adresów nie jest pusta: szary poza biurem
+i po odebraniu, aktywny w biurze.
 
 ## Dwie waluty — to jest fundament, nie szczegół
 

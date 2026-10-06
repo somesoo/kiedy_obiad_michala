@@ -80,8 +80,8 @@
   <div class="overlay" id="office-overlay" style="display:none">
     <div class="login-card office-card">
       <h2>🏢 Witaj w biurze!</h2>
-      <p class="login-sub">Grasz z sieci biura, więc za przyjście należy Ci się Extra Move — dodatkowy ruch na dziś, za darmo.</p>
-      <button class="btn-primary" id="btn-office-claim">Odbierz Extra Move</button>
+      <p class="login-sub">Grasz z sieci biura, więc należy Ci się <strong>Rzut od Prezesa za przyjście do biura</strong> — dodatkowy ruch na dziś, za darmo.</p>
+      <button class="btn-primary" id="btn-office-claim">Odbierz Rzut od Prezesa</button>
       <button class="btn-ghost" id="btn-office-later">Później</button>
     </div>
   </div>
@@ -177,8 +177,9 @@
           <span class="game-bar-sub" id="board-season-name">wszystkie pionki na jednej pętli</span>
         </div>
         <button class="btn-primary btn-roll" id="btn-roll">🎲 Rzuć kostką</button>
-        <!-- Bonus za biuro — zostaje, gdy ktoś zamknął okienko „Później" (patrz slRenderOfficeBonus). -->
-        <button class="btn-ghost office-chip" id="btn-office-chip" hidden>🏢 Odbierz ruch za biuro</button>
+        <!-- Rzut od Prezesa (bonus za biuro) — widoczny zawsze, gdy funkcja jest włączona:
+             szary poza biurem, aktywny w biurze (patrz slRenderOfficeBonus). -->
+        <button class="btn-ghost office-chip" id="btn-office-chip" hidden>🏢 Rzut od Prezesa</button>
         <div class="roll-result" id="roll-result"></div>
         <!-- Garderoba z paska — tylko na planszach bez chatki na planszy (view.shop_at). -->
         <button class="btn-ghost game-bar-wardrobe" id="btn-wardrobe" hidden>🪞 Garderoba</button>

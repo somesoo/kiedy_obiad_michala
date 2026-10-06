@@ -2171,3 +2171,4 @@
 .office-card .btn-primary { width: 100%; }
 .office-card .btn-ghost { margin-top: 10px; }
 .office-chip { border-color: var(--accent); color: var(--accent); white-space: nowrap; }
+.office-chip.is-off { border-color: var(--muted); color: var(--text-muted); opacity: 0.55; cursor: default; filter: grayscale(1); }

@@ -233,7 +233,7 @@
         </div>
 
         <div class="adm-card" id="office-card">
-          <h3>🏢 BONUS ZA BIURO</h3>
+          <h3>🏢 RZUT OD PREZESA (BONUS ZA BIURO)</h3>
           <div class="adm-note">
             Kto otworzy grę z adresu biura, dostaje okienko „odbierz Extra Move" — raz dziennie,
             działa jak kupienie i od razu użycie Extra Move (sufit dalej 5 ruchów; przy pełnych
@@ -256,6 +256,10 @@
             a nie tunelu. Za mało = każdy ma adres tunelu (nikt nie dostanie bonusu), za dużo =
             da się podszyć nagłówkiem.
           </div>
+          <div class="adm-note" style="margin:10px 0 4px"><strong>Ostatnie połączenia</strong>
+            (zmiany adresu per gracz, od restartu serwera; to samo leci do <code>pm2 logs</code>)
+            <button class="btn-ghost" id="btn-office-refresh" style="margin-left:6px">↻ Odśwież</button></div>
+          <div id="office-recent" class="adm-note" style="font-family:'JetBrains Mono',monospace;font-size:11px;max-height:220px;overflow:auto"></div>
         </div>
 
         <div class="adm-card">
@@ -595,6 +599,11 @@
       if (y.cf_connecting_ip) hdr.push(`CF-Connecting-IP: ${y.cf_connecting_ip}`);
       document.getElementById('office-headers').textContent = hdr.join(' · ');
       setIfIdle('office-ips', d.ips.join('\n'));
+      const time = iso => new Date(iso).toLocaleTimeString('pl-PL', { timeZone: 'Europe/Warsaw' });
+      document.getElementById('office-recent').innerHTML = (d.recent || []).length
+        ? d.recent.map(r => `<div>${esc(time(r.at))} ${r.in_office ? '✅' : '✗'} <strong>${esc(r.nickname)}</strong> → ${esc(r.ip || '?')}` +
+            ` <span style="opacity:.7">(gniazdo ${esc(r.socket || '–')}, XFF: ${esc(r.x_forwarded_for || '–')}${r.x_real_ip ? `, X-Real-IP: ${esc(r.x_real_ip)}` : ''})</span></div>`).join('')
+        : 'Jeszcze nikt się nie połączył (od restartu serwera, przy włączonym bonusie).';
       setIfIdle('office-hops', d.trust_hops);
     }
 
@@ -613,6 +622,8 @@
       }
     }
 
+    document.getElementById('btn-office-refresh').addEventListener('click', () =>
+      loadOffice().catch(e => showToast('❌ ' + e.message)));
     document.getElementById('btn-office-save').addEventListener('click', () =>
       saveOffice(document.getElementById('office-ips').value));
     document.getElementById('btn-office-add-me').addEventListener('click', () => {
