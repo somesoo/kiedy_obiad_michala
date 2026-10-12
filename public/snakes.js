@@ -211,6 +211,7 @@ async function pollState() {
     // albo odbiera go na innym urządzeniu, a reszta stanu może stać w miejscu.
     state.officeBonus = g.office_bonus || null;
     slRenderOfficeBonus();
+    slRenderShopPromo();
     const prev = state.game;
     if (!prev || stateSignature(g) === stateSignature(prev)) return;
     // Pozycja zmieniła się bez naszego rzutu (rzut idzie przez roll(), a wtedy
@@ -416,6 +417,7 @@ async function loadState() {
     state.officeBonus = state.game.office_bonus || null;
     renderAll();
     slRenderOfficeBonus();
+    slRenderShopPromo();
     updateCountdown();
   } catch (e) {
     console.error('Błąd ładowania gry:', e);
@@ -482,6 +484,7 @@ async function slClaimOfficeBonus() {
     state.officeBonus = res.office_bonus || null;
     renderAll();
     slRenderOfficeBonus();
+    slRenderShopPromo();
     showToast(res.granted === 'roll'
       ? `🏢 Rzut od Prezesa gotowy — rzucaj! (${state.game.me.rolls_remaining_today}/${state.game.me.daily_rolls} na dziś)`
       : '🏢 Dzisiejsze dodatkowe ruchy już masz — Rzut od Prezesa czeka w ekwipunku jako Extra Move.');
@@ -501,7 +504,45 @@ document.getElementById('btn-office-chip').addEventListener('click', () => slCla
 document.getElementById('btn-office-later').addEventListener('click', () => {
   try { localStorage.setItem(OFFICE_LATER_KEY, state.game && state.game.server_date); } catch (e) { /* tylko wygoda */ }
   document.getElementById('office-overlay').style.display = 'none';
+  slRenderShopPromo();
 });
+
+// ── PROMOCJA W GARDEROBIE ──
+// Po obniżce kostiumów do 50–100 coins (październik 2026) nikt o niej nie wiedział, więc
+// okienko przypomina o niej raz dziennie, przy pierwszym wejściu. „Raz dziennie" liczy się
+// na urządzenie (localStorage z datą serwera) — to przypominajka, nie stan gry. Pokazuje się
+// tylko, gdy w sezonie jest coś do kupienia, czego gracz jeszcze nie ma, i nigdy NA okienku
+// Rzutu od Prezesa — czeka, aż tamto zniknie (następne odświeżenie stanu).
+const PROMO_SEEN_KEY = 'sl_costume_promo_seen';
+
+function slPromoItems(g) {
+  const items = (g && g.costumes && g.costumes.items) || [];
+  return items.filter(i => !i.owned && !i.supporter && !i.award && i.price && i.season_active !== false);
+}
+
+function slRenderShopPromo() {
+  const g = state.game;
+  const overlay = document.getElementById('promo-overlay');
+  if (!g || overlay.style.display === 'flex') return;
+  if (document.getElementById('office-overlay').style.display === 'flex') return;
+  let seen = null;
+  try { seen = localStorage.getItem(PROMO_SEEN_KEY); } catch (e) { /* bez pamięci: pokaże się przy każdym wejściu */ }
+  if (seen === g.server_date) return;
+  const items = slPromoItems(g);
+  if (!items.length) return;
+  const prices = items.map(i => i.price);
+  const lo = Math.min(...prices), hi = Math.max(...prices);
+  document.getElementById('promo-range').textContent = lo === hi ? `${lo} coins` : `${lo}–${hi} coins`;
+  overlay.style.display = 'flex';
+}
+
+function slClosePromo() {
+  try { localStorage.setItem(PROMO_SEEN_KEY, state.game && state.game.server_date); } catch (e) { /* tylko wygoda */ }
+  document.getElementById('promo-overlay').style.display = 'none';
+}
+
+document.getElementById('btn-promo-later').addEventListener('click', () => slClosePromo());
+document.getElementById('btn-promo-open').addEventListener('click', () => { slClosePromo(); openWardrobe(); });
 
 // ── ZASADY MECHANIK SEZONOWYCH ── (kocioł, drzwi, cukierki; lib/seasonal.js)
 // Jak regulamin bossa: składany ze stawek z payloadu, bo każdy sezon ma inne (albo żadne).

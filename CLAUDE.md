@@ -302,6 +302,10 @@ nie może się rozjechać z tym, co widzą inni.
 właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
 gracza — tak.
 
+**Okienko „Promocja w sklepie z ubraniami"** (`slRenderShopPromo` w `snakes.js`) wyskakuje
+raz dziennie na urządzenie (localStorage z datą serwera), gdy w sezonie jest coś do kupienia,
+czego gracz nie ma — i nigdy na okienku Rzutu od Prezesa, tylko po nim.
+
 Kostium to odpływ coins, który **nie rusza równowagi gry**. Zakup nie jest ruchem, więc
 cofanie ruchu i dnia go nie dotyczy (jak zakupów power-upów); reset gry i wyczyszczenie
 gracza kasują szafę (`slResetCostumes`, `slClearPlayerCostumes`).
