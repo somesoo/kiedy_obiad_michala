@@ -236,8 +236,9 @@ ponad raz dziennie i połowa jego zarobku przechodziła na innych graczy. Dlateg
 - **Zbicie ma dwie osobne stawki**: coins (`SL_KNOCKBACK_COIN_STEAL`, przelew od ofiary,
   przycięty do jej portfela) i punkty (`SL_KNOCKBACK_POINTS`, stałe, dawane zawsze). Dawniej
   punkty = zabrane coins, więc zbicie gracza bez coins albo z długiem nic nie dawało do rankingu.
-- Kostiumy kosztują 150–450 coins (4–11 dni zbierania). To ma być rzecz premium, a nie zakup
-  „przy okazji”.
+- Kostiumy kosztują 50–100 coins (1–3 dni gry). Przy dawnych 150–450 („premium”, 4–11 dni
+  zbierania) w Nocy Duchów nikt nic nie kupił: zbicia i Extra Move zjadały portfel, zanim
+  dało się odłożyć. Obniżka z października 2026, decyzja właściciela.
 - **Extra Move: 2 dziennie zostają, ale cena zależy od BIEŻĄCEGO miejsca w rankingu**,
   liczonego przy każdym zakupie (1. → 60, 2. → 55, 3. → 50, 4.–7. → 40, 8.+ → 30;
   `slPowerupBaseCost`). Ludzie kupują go zawsze, więc przy równej cenie lidera nie dało się
