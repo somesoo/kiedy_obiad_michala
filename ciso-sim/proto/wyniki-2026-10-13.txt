@@ -1,0 +1,162 @@
+
+Metalpol S.A. (części dla motoryzacji, Tier-2) — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                       23 tys.    3671 tys.    3695 tys.    9219 tys.      1.63           80%      0.8          0.0        0       0.0
+                       straty głównie: szyfrowanie 2952 tys., wyciek_insider 234 tys., wyciek 189 tys.
+papier                    79 tys.    3197 tys.    3277 tys.    8524 tys.      1.54           78%      0.8          0.0        2       0.0
+                       straty głównie: szyfrowanie 2528 tys., wyciek_insider 224 tys., bec 173 tys.
+narzedzia_bez_ludzi     1425 tys.     435 tys.    1861 tys.    2306 tys.      0.82           57%      2.0          0.0        7       2.0
+                       straty głównie: bec 172 tys., szyfrowanie 142 tys., wyciek_insider 84 tys.
+mala_firma               707 tys.     288 tys.     995 tys.    1509 tys.      0.33           28%      0.7          0.0        3       0.0
+                       straty głównie: wyciek_insider 135 tys., szyfrowanie 95 tys., wyciek 25 tys.
+higiena                  903 tys.     561 tys.    1464 tys.    2642 tys.      0.55           42%      0.5          0.0        0       0.0
+                       straty głównie: wyciek_insider 222 tys., szyfrowanie 213 tys., wyciek 66 tys.
+higiena_mdr             2143 tys.     155 tys.    2298 tys.    2875 tys.      0.21           19%      0.5          0.0        6       0.0
+                       straty głównie: wyciek_insider 73 tys., szyfrowanie 41 tys., bec 20 tys.
+wszystko_w_srodku       3572 tys.     162 tys.    3735 tys.    4301 tys.      0.22           20%      0.5          0.0        3       0.0
+                       straty głównie: wyciek_insider 73 tys., szyfrowanie 46 tys., bec 21 tys.
+
+Samodzielny Publiczny Zespół Opieki Zdrowotnej w Zalesiu — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                      108 tys.    4522 tys.    4631 tys.   10495 tys.      2.06           87%      1.2          0.0        0       0.0
+                       straty głównie: szyfrowanie 3163 tys., wyciek 542 tys., wyciek_insider 478 tys.
+papier                   162 tys.    4022 tys.    4183 tys.    9499 tys.      1.94           85%      1.2          0.0        5       0.0
+                       straty głównie: szyfrowanie 2749 tys., wyciek 485 tys., wyciek_insider 478 tys.
+narzedzia_bez_ludzi     1687 tys.     883 tys.    2571 tys.    4366 tys.      0.95           61%      3.1          3.0       13       3.0
+                       straty głównie: szyfrowanie 372 tys., wyciek_insider 238 tys., bec 151 tys.
+mala_firma               879 tys.     695 tys.    1574 tys.    3085 tys.      0.46           38%      1.2          0.0        6       0.0
+                       straty głównie: wyciek_insider 303 tys., szyfrowanie 272 tys., wyciek 93 tys.
+higiena                  991 tys.    1341 tys.    2332 tys.    5257 tys.      0.78           55%      0.8          0.0        1       0.0
+                       straty głównie: szyfrowanie 618 tys., wyciek_insider 463 tys., wyciek 197 tys.
+higiena_mdr             2430 tys.     444 tys.    2874 tys.    3623 tys.      0.30           26%      0.9          0.0       13       0.0
+                       straty głównie: szyfrowanie 183 tys., wyciek_insider 170 tys., wyciek 64 tys.
+wszystko_w_srodku       3739 tys.     407 tys.    4145 tys.    4935 tys.      0.28           25%      0.9          0.0        8       0.0
+                       straty głównie: szyfrowanie 164 tys., wyciek_insider 157 tys., wyciek 61 tys.
+
+Przedsiębiorstwo Wodociągów i Kanalizacji „Wodnik" sp. z o.o. — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                       10 tys.     373 tys.     383 tys.    1460 tys.      0.57           45%      0.3          0.0        0       0.0
+                       straty głównie: szyfrowanie 222 tys., wyciek 31 tys., bec 28 tys.
+papier                    68 tys.     338 tys.     406 tys.    1419 tys.      0.54           42%      0.2          0.0       18       0.0
+                       straty głównie: szyfrowanie 194 tys., bec 28 tys., wyciek 28 tys.
+narzedzia_bez_ludzi     1079 tys.     150 tys.    1230 tys.    1483 tys.      0.31           26%      0.6         10.0       13       4.0
+                       straty głównie: szyfrowanie 57 tys., bec 28 tys., wyciek_insider 19 tys.
+mala_firma               363 tys.      67 tys.     430 tys.     640 tys.      0.14           13%      0.4          0.0        9       0.0
+                       straty głównie: szyfrowanie 16 tys., ddos 16 tys., wyciek_insider 16 tys.
+higiena                  729 tys.     113 tys.     843 tys.    1137 tys.      0.24           21%      0.2          0.0        0       0.0
+                       straty głównie: szyfrowanie 37 tys., wyciek_insider 26 tys., ddos 17 tys.
+higiena_mdr             1686 tys.      40 tys.    1726 tys.    1769 tys.      0.07            6%      0.3          0.0        2       0.0
+                       straty głównie: ddos 17 tys., wyciek_insider 8 tys., szyfrowanie 6 tys.
+wszystko_w_srodku       3236 tys.      41 tys.    3278 tys.    3326 tys.      0.07            6%      0.3          0.0        0       0.0
+                       straty głównie: ddos 17 tys., wyciek_insider 7 tys., szyfrowanie 7 tys.
+
+Urząd Gminy Brzozów Wielki — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                       21 tys.     235 tys.     257 tys.    1041 tys.      0.52           41%      0.4          0.0        0       0.0
+                       straty głównie: szyfrowanie 135 tys., bec 40 tys., ddos 23 tys.
+papier                    80 tys.     219 tys.     299 tys.    1061 tys.      0.49           39%      0.4          0.0       21       0.0
+                       straty głównie: szyfrowanie 122 tys., bec 38 tys., ddos 23 tys.
+narzedzia_bez_ludzi     1120 tys.     169 tys.    1288 tys.    1571 tys.      0.40           33%      0.6         19.0        2       5.0
+                       straty głównie: szyfrowanie 81 tys., bec 39 tys., ddos 23 tys.
+mala_firma               402 tys.      53 tys.     455 tys.     558 tys.      0.14           13%      0.4          0.0       13       0.0
+                       straty głównie: ddos 23 tys., szyfrowanie 10 tys., wyciek_insider 9 tys.
+higiena                  743 tys.      75 tys.     818 tys.     945 tys.      0.24           21%      0.3          0.0        0       0.0
+                       straty głównie: ddos 23 tys., szyfrowanie 21 tys., wyciek_insider 16 tys.
+higiena_mdr             1726 tys.      38 tys.    1764 tys.    1812 tys.      0.07            6%      0.3          0.0        2       0.0
+                       straty głównie: ddos 23 tys., bec 6 tys., wyciek_insider 4 tys.
+wszystko_w_srodku       3276 tys.      38 tys.    3314 tys.    3370 tys.      0.07            7%      0.3          0.0        0       0.0
+                       straty głównie: ddos 23 tys., bec 6 tys., wyciek_insider 4 tys.
+
+SklepMax.pl S.A. (e-commerce + marketplace) — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                      110 tys.    4291 tys.    4401 tys.   15170 tys.      0.76           54%      0.5          0.0        0       0.0
+                       straty głównie: szyfrowanie 3041 tys., wyciek 719 tys., ddos 194 tys.
+papier                   167 tys.    3718 tys.    3886 tys.   14310 tys.      0.70           51%      0.4          0.0        1       0.0
+                       straty głównie: szyfrowanie 2598 tys., wyciek 604 tys., ddos 194 tys.
+narzedzia_bez_ludzi     1304 tys.     481 tys.    1785 tys.    1881 tys.      0.23           21%      1.3          0.0       17       0.0
+                       straty głównie: ddos 193 tys., szyfrowanie 142 tys., wyciek 51 tys.
+mala_firma               594 tys.     523 tys.    1117 tys.    1901 tys.      0.15           14%      0.5          0.0        1       0.0
+                       straty głównie: ddos 194 tys., wyciek 119 tys., szyfrowanie 104 tys.
+higiena                  872 tys.     982 tys.    1854 tys.    3955 tys.      0.29           25%      0.3          0.0        0       0.0
+                       straty głównie: wyciek 300 tys., szyfrowanie 292 tys., ddos 195 tys.
+higiena_mdr             1927 tys.     378 tys.    2305 tys.    2412 tys.      0.09            9%      0.4          0.0        2       0.0
+                       straty głównie: ddos 194 tys., szyfrowanie 63 tys., wyciek 60 tys.
+wszystko_w_srodku       3467 tys.     396 tys.    3864 tys.    3952 tys.      0.09            9%      0.4          0.0        0       0.0
+                       straty głównie: ddos 193 tys., szyfrowanie 74 tys., wyciek 66 tys.
+
+Kodex Systems sp. z o.o. (SaaS dla przychodni) — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                      253 tys.     978 tys.    1231 tys.    2050 tys.      0.53           41%      1.1          0.0        0       0.0
+                       straty głównie: szyfrowanie 534 tys., wyciek 278 tys., bec 74 tys.
+papier                   303 tys.     598 tys.     900 tys.    1007 tys.      0.46           36%      1.0          0.0        1       0.0
+                       straty głównie: szyfrowanie 282 tys., wyciek 163 tys., bec 71 tys.
+narzedzia_bez_ludzi     1323 tys.     224 tys.    1547 tys.    1741 tys.      0.33           28%      1.3          0.0        3       0.0
+                       straty głównie: wyciek 74 tys., bec 70 tys., szyfrowanie 48 tys.
+mala_firma               644 tys.     277 tys.     920 tys.    1195 tys.      0.17           16%      0.8          0.0        0       0.0
+                       straty głównie: wyciek 134 tys., szyfrowanie 71 tys., wyciek_insider 63 tys.
+higiena                 1044 tys.     208 tys.    1253 tys.    1597 tys.      0.15           14%      0.7          0.0        0       0.0
+                       straty głównie: wyciek 94 tys., wyciek_insider 57 tys., szyfrowanie 48 tys.
+higiena_mdr             2104 tys.      85 tys.    2190 tys.    2197 tys.      0.08            8%      0.6          0.0        2       0.0
+                       straty głównie: wyciek 33 tys., wyciek_insider 28 tys., szyfrowanie 18 tys.
+wszystko_w_srodku       3514 tys.     104 tys.    3618 tys.    3629 tys.      0.09            8%      0.6          0.0        0       0.0
+                       straty głównie: wyciek 45 tys., wyciek_insider 29 tys., szyfrowanie 23 tys.
+
+Bank Spółdzielczy Nadwarciański — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                      114 tys.     941 tys.    1055 tys.    3274 tys.      0.86           58%      0.6          0.0        0       0.0
+                       straty głównie: szyfrowanie 573 tys., wyciek 161 tys., wyciek_insider 89 tys.
+papier                   170 tys.     744 tys.     914 tys.    3084 tys.      0.74           53%      0.6          0.0        0       0.0
+                       straty głównie: szyfrowanie 438 tys., wyciek 120 tys., wyciek_insider 86 tys.
+narzedzia_bez_ludzi     1324 tys.      87 tys.    1411 tys.    1653 tys.      0.23           21%      1.3          0.0        1       0.0
+                       straty głównie: bec 47 tys., wyciek_insider 18 tys., szyfrowanie 10 tys.
+mala_firma               530 tys.     139 tys.     669 tys.    1025 tys.      0.19           17%      0.9          0.0        0       0.0
+                       straty głównie: szyfrowanie 49 tys., wyciek_insider 47 tys., wyciek 29 tys.
+higiena                  798 tys.     408 tys.    1206 tys.    2135 tys.      0.45           37%      0.6          0.0        0       0.0
+                       straty głównie: szyfrowanie 182 tys., wyciek 103 tys., wyciek_insider 88 tys.
+higiena_mdr             1861 tys.      64 tys.    1925 tys.    1968 tys.      0.10           10%      0.7          0.0        0       0.0
+                       straty głównie: wyciek_insider 25 tys., szyfrowanie 18 tys., wyciek 10 tys.
+wszystko_w_srodku       3398 tys.      72 tys.    3470 tys.    3557 tys.      0.11           10%      0.6          0.0        0       0.0
+                       straty głównie: wyciek_insider 24 tys., szyfrowanie 23 tys., wyciek 14 tys.
+
+Miejska Elektrociepłownia „Ciepło-Mróz" S.A. — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                      153 tys.    3584 tys.    3737 tys.   10790 tys.      1.20           69%      0.6          0.0        0       0.0
+                       straty głównie: szyfrowanie 1795 tys., szpiegostwo 632 tys., wyciek_insider 608 tys.
+papier                   211 tys.    3411 tys.    3622 tys.   10771 tys.      1.17           68%      0.5          0.0        0       0.0
+                       straty głównie: szyfrowanie 1712 tys., wyciek_insider 602 tys., szpiegostwo 589 tys.
+narzedzia_bez_ludzi     1516 tys.     372 tys.    1888 tys.    2250 tys.      0.49           38%      1.5          0.0        1       0.0
+                       straty głównie: wyciek_insider 167 tys., bec 100 tys., szyfrowanie 59 tys.
+mala_firma               743 tys.     634 tys.    1376 tys.    2942 tys.      0.27           24%      0.8          0.0        0       0.0
+                       straty głównie: wyciek_insider 369 tys., szyfrowanie 139 tys., wyciek 76 tys.
+higiena                  940 tys.    1544 tys.    2484 tys.    5280 tys.      0.52           41%      0.6          0.0        0       0.0
+                       straty głównie: wyciek_insider 614 tys., szyfrowanie 463 tys., wyciek 236 tys.
+higiena_mdr             2178 tys.     336 tys.    2514 tys.    4310 tys.      0.16           15%      0.6          0.0        0       0.0
+                       straty głównie: wyciek_insider 195 tys., szyfrowanie 70 tys., wyciek 36 tys.
+wszystko_w_srodku       3608 tys.     374 tys.    3982 tys.    5736 tys.      0.17           16%      0.6          0.0        0       0.0
+                       straty głównie: wyciek_insider 204 tys., szyfrowanie 82 tys., wyciek 46 tys.
+
+Biuro Rachunkowe „Saldo" sp. z o.o. — 24 mies., 2000 przebiegów
+
+strategia              wydatki   straty     RAZEM  RAZEM P90   poważne/2l  P(≥1 poważny)  wczesne  niedob.alert  poślizg  niewdroż.
+nic                        7 tys.     142 tys.     149 tys.     664 tys.      0.39           33%      0.2          0.0        0       0.0
+                       straty głównie: szyfrowanie 76 tys., bec 35 tys., wyciek 11 tys.
+papier                    66 tys.     138 tys.     204 tys.     605 tys.      0.39           32%      0.2          0.0       40       0.0
+                       straty głównie: szyfrowanie 72 tys., bec 35 tys., wyciek 11 tys.
+narzedzia_bez_ludzi     1043 tys.     104 tys.    1147 tys.    1389 tys.      0.31           27%      0.3         18.0        3       5.0
+                       straty głównie: szyfrowanie 48 tys., bec 35 tys., wyciek_insider 9 tys.
+mala_firma               333 tys.      22 tys.     355 tys.     416 tys.      0.09            8%      0.3          0.0       14       0.0
+                       straty głównie: szyfrowanie 6 tys., bec 6 tys., wyciek_insider 5 tys.
+higiena                  715 tys.      40 tys.     755 tys.     891 tys.      0.16           15%      0.2          0.0        0       0.0
+                       straty głównie: szyfrowanie 17 tys., wyciek_insider 9 tys., wyciek 6 tys.
+higiena_mdr             1660 tys.      11 tys.    1670 tys.    1674 tys.      0.04            4%      0.2          0.0        2       0.0
+                       straty głównie: bec 4 tys., szyfrowanie 2 tys., wyciek_insider 2 tys.
+wszystko_w_srodku       3210 tys.      11 tys.    3221 tys.    3227 tys.      0.04            4%      0.2          0.0        0       0.0
+                       straty głównie: bec 4 tys., szyfrowanie 3 tys., wyciek_insider 2 tys.
