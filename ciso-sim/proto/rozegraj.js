@@ -88,7 +88,10 @@ async function graj(s, stan, wybierz, wypisz = console.log, tasuj = null) {
   for (const d of decyzje) log(`${OCENY[d.o.ocena]} ${d.o.tekst}\n   ${d.o.dlaczego}`);
   log('\nDebrief:');
   for (const z of s.debrief) log(`  – ${z}`);
-  return { pkt, zakonczenie: kon.tytul, decyzje: decyzje.map(d => ({ faza: d.faza, tekst: d.o.tekst, ocena: d.o.ocena, dlaczego: d.o.dlaczego, h: d.o.h || 0 })) };
+  return { pkt, zakonczenie: kon.tytul, // Waga decyzji = ile punktów rubryki można było w tej fazie zdobyć (komunikat do mieszkańców
+  // waży więcej niż wybór, kogo zawiadomić najpierw); 10 pkt rubryki = waga 1.
+  decyzje: decyzje.map(d => ({ faza: d.faza, tekst: d.o.tekst, ocena: d.o.ocena, dlaczego: d.o.dlaczego, h: d.o.h || 0,
+    waga: Math.max(1, Math.max(...s.fazy[d.faza].opcje.map(x => x.pkt || 0)) / 10) })) };
 }
 
 async function main() {

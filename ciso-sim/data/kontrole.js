@@ -55,6 +55,7 @@ module.exports = [
   },
   {
     id: 'hardening', nazwa: 'Utwardzenie stacji i serwerów (CIS, LAPS, makra, admin lokalny)', csf: 'PR', typ: 'projekt',
+    martwe_pola: { insider: 0.3, uslugi: 0.5 },   // insider ma już uprawnienia; appliance'ów nie utwardzisz CIS-em
     wdrozenie: { pln: 0, h: 160, mies: 2 },
     utrzymanie: { h: 8 },
     inwentaryzacja: true,
@@ -183,6 +184,9 @@ module.exports = [
   // ─── WYKRYWANIE I REAGOWANIE ───
   {
     id: 'edr', nazwa: 'EDR na stacjach i serwerach', csf: 'DE', typ: 'narzedzie',
+    // Martwe pola (silnik: widzi()): insider ma legalny dostęp i nie uruchamia złośliwego kodu; wystawione
+    // usługi i panele OT rzadko mają agenta; dostawca używa podpisanych narzędzi zdalnych.
+    martwe_pola: { insider: 0.2, uslugi: 0.4, dostawca: 0.6 },
     wdrozenie: { pln: 5000, h: 80, mies: 2 },
     utrzymanie: { pln_na_stanowisko: 25, h: 20 },
     inwentaryzacja: true,
@@ -197,6 +201,7 @@ module.exports = [
   },
   {
     id: 'siem', nazwa: 'SIEM (centralne logi i korelacja)', csf: 'DE', typ: 'narzedzie',
+    martwe_pola: { insider: 0.5 },                // widzi tylko to, co ktoś zalogował
     wdrozenie: { pln: 40000, h: 300, mies: 3 },
     utrzymanie: { pln: 18000, h: 60 },
     wykrywa: { dostep: 0.08, eskalacja: 0.2, ruch: 0.25, cel: 0.15 },
@@ -207,6 +212,7 @@ module.exports = [
   },
   {
     id: 'siem_os', nazwa: 'SIEM open source (np. Wazuh) — tani w licencji, drogi w godzinach', csf: 'DE', typ: 'narzedzie',
+    martwe_pola: { insider: 0.5 },
     wdrozenie: { pln: 8000, h: 450, mies: 4 },
     utrzymanie: { pln: 2500, h: 90 },
     wykrywa: { dostep: 0.07, eskalacja: 0.18, ruch: 0.22, cel: 0.12 },
@@ -226,6 +232,7 @@ module.exports = [
   },
   {
     id: 'mdr', nazwa: 'MDR / SOC 24/7 jako usługa', csf: 'DE', typ: 'usluga',
+    martwe_pola: { insider: 0.3, uslugi: 0.5 },   // SOC patrzy na agenty i logi — nie na zachowanie pracownika
     wdrozenie: { pln: 10000, h: 60, mies: 1 },
     utrzymanie: { pln_na_stanowisko: 45, pln_min: 9000, h: 10 },
     wymaga: ['edr'],
@@ -246,6 +253,7 @@ module.exports = [
   },
   {
     id: 'deception', nazwa: 'Honeypoty i konta-pułapki', csf: 'DE', typ: 'narzedzie',
+    martwe_pola: { insider: 0.3 },                // insider wie, dokąd iść, i nie skanuje sieci
     wdrozenie: { pln: 20000, h: 60, mies: 1 },
     utrzymanie: { pln: 1000, h: 4 },
     wykrywa: { ruch: 0.25, eskalacja: 0.1 },
@@ -310,6 +318,7 @@ module.exports = [
   // ─── SIEĆ, CHMURA, DANE ───
   {
     id: 'segmentacja', nazwa: 'Segmentacja sieci (strefy, oddzielenie OT, serwerów, gości)', csf: 'PR', typ: 'projekt',
+    martwe_pola: { insider: 0.5 },                // insider jest już w swojej strefie
     wdrozenie: { pln: 90000, h: 300, mies: 4 },
     utrzymanie: { pln: 1000, h: 12 },
     utrudnia: { ruch: 0.5, cel: 0.2 },

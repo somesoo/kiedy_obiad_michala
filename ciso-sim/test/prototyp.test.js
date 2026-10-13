@@ -15,9 +15,9 @@ const FIRMY = require('../data/firmy');
 const cicho = () => {};
 
 test('silnik: migawka Monte Carlo (zmiana danych/silnika = świadoma aktualizacja tych liczb)', () => {
-  // Liczby z 13.10.2026 po wydzieleniu silnik.js (identyczne z pierwszą wersją symulacja.js).
+  // Liczby z 13.10.2026 po martwych polach narzędzi (EDR nie widzi insidera itd., docs/17-…, 17.6).
   // Jeśli zmieniasz dane albo model: przelicz, zaktualizuj tu i opisz zmianę w docs/14-….
-  const oczekiwane = { nic: [763917676, 4265000], mala_firma: [61486553, 140369375] };
+  const oczekiwane = { nic: [763917676, 4265000], mala_firma: [79765180, 138960625] };
   for (const [s, [straty, wydatki]] of Object.entries(oczekiwane)) {
     let a = 0, b = 0;
     for (let i = 0; i < 200; i++) { const w = symuluj(FIRMY.produkcja, STRATEGIE[s], 1000 + i); a += w.straty; b += w.wydatki; }
@@ -95,18 +95,68 @@ test('„zawsze pierwsza odpowiedź" nie wygrywa (kolejność opcji jest tasowan
   let jd = 0;
   for (const seed of [1, 2, 3]) {
     const k = await K.grajAuto({ karta: () => 0, scen: () => 0 }, seed, false, cicho, false);
-    jd += k.decyzje.reduce((a, d) => a + ({ dobra: 1, dopuszczalna: 0.5, blad: 0 })[d.ocena], 0) / k.decyzje.length;
+    jd += K.jakoscDecyzji(k);
   }
   assert.ok(jd / 3 < 0.7, `jakość decyzji „zawsze a)" = ${(jd / 3).toFixed(2)}`);
 });
 
-test('Indeks Odporności porządkuje style sensownie: mądry > potakiwacz > odkładacz', async () => {
-  const io = {};
-  for (const n of ['madry', 'potakiwacz', 'odkladacz']) {
-    io[n] = 0;
-    for (const seed of [1, 2, 3]) io[n] += (await K.indeksOdpornosci(await K.grajAuto(B.STRATEGIE[n], seed, false, cicho, false))).wynik;
+test('Wynik kampanii porządkuje style sensownie: mądry > potakiwacz > kłamca > odkładacz', async () => {
+  const w = {};
+  for (const n of ['madry', 'potakiwacz', 'klamca', 'odkladacz']) {
+    w[n] = 0;
+    for (const seed of [1, 2, 3]) w[n] += (await K.indeksOdpornosci(await K.grajAuto(B.STRATEGIE[n], seed, false, cicho, false))).kampania;
   }
-  assert.ok(io.madry > io.potakiwacz && io.potakiwacz > io.odkladacz, JSON.stringify(io));
+  assert.ok(w.madry > w.potakiwacz && w.potakiwacz > w.klamca && w.klamca > w.odkladacz, JSON.stringify(w));
+});
+
+test('kłamstwo nie popłaca: sufit wyniku, wykryte czy nie (dawniej kłamca ≈ rozsądny)', async () => {
+  for (const seed of [1, 2, 3]) {
+    const k = await K.grajAuto(B.STRATEGIE.klamca, seed, false, cicho, false);
+    const io = await K.indeksOdpornosci(k);
+    assert.ok(k.flagi.klamstwo_ankieta, 'kłamca nie skłamał — test nic nie sprawdza');
+    assert.ok(io.kampania <= 650 && io.wynik <= 650, `ziarno ${seed}: ${io.kampania}/${io.wynik}`);
+    assert.ok(io.bramki.length > 0);
+  }
+});
+
+test('uczciwa ankieta bez EDR = brak polisy (prawda ma cenę, więc kłamstwo jest prawdziwym wyborem)', () => {
+  const k = K.nowaKampania('wodociagi', 1);
+  const c = { id: 'u', zrodlo: 'katalog', tytul: 'Ubezpieczenie', cele: [], opcje: [
+    { tekst: 'prawda', zlec: ['ubezpieczenie'], warunkowo: true, ocena: 'dobra', dlaczego: '-' }] };
+  k.karty.push(c);
+  K.rozstrzygnij(k, 'u', 0);
+  assert.ok(!k.st.zamowione.has('ubezpieczenie'));
+});
+
+test('odmowa nie kasuje potrzeby: działy czasem robią swoje po cichu', async () => {
+  let po = 0;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const k = await K.grajAuto('odmawiajacy', seed, false, cicho, false);
+    po += k.rejestr.filter(r => /po odmowie/.test(r.tekst)).length;
+  }
+  assert.ok(po > 0, 'po odmowach nigdy nie było obejścia');
+});
+
+test('ekspozycja widzi to, co zostawiasz: ukryte obejścia podnoszą oczekiwane straty', async () => {
+  const k = await K.grajAuto('madry', 1, false, cicho, false);
+  const przed = K.ekspozycja(k, 60).pln;
+  for (const [w, v] of Object.entries({ insider: 3, uslugi: 3, dostawca: 3 })) k.modStale[w] = v;
+  assert.ok(K.ekspozycja(k, 60).pln > przed * 1.3, 'mnożniki ryzyka nie zmieniają ekspozycji');
+});
+
+test('martwe pola: EDR nie wykrywa insidera tak jak intruza z phishingu', () => {
+  const S = require('../proto/silnik');
+  const st0 = () => { const st = S.nowyStan(FIRMY.wodociagi, 5); st.aktywne.edr = -12; st.zamowione.add('edr'); return st; };
+  const wykryte = wektor => {
+    let n = 0;
+    for (let i = 0; i < 300; i++) {
+      const st = st0(); st.rnd = S.mulberry32(100 + i);
+      st.intruzi.push({ kto: 'kradziez', etap: 'ruch', wektor, od: 1 });
+      n += S.zakonczMiesiac(st).filter(z => z.typ === 'wykrycie').length ? 1 : 0;
+    }
+    return n;
+  };
+  assert.ok(wykryte('insider') < wykryte('phishing') * 0.7, `insider ${wykryte('insider')} vs phishing ${wykryte('phishing')}`);
 });
 
 test('limity: opcja ponad godziny albo budżet jest niedostępna i nic nie zmienia', () => {

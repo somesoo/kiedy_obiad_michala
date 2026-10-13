@@ -90,12 +90,15 @@ przesunięte na m. 3–5.
 Stan po poprawkach z przypadków brzegowych (`17-…`): twardy budżet, limit nadgodzin, tasowane
 opcje, oceniana bezczynność, Indeks Odporności (`11-…`).
 
-| Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Jakość decyzji | **Indeks** |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| **mądry** (dobre odpowiedzi + podstawy „tanie i ważne najpierw") | **91 tys.** | 469 tys. | **54** | 0,56 | 0,3 | 0,1 | 62 | **58** | 25% | 81% | **923** |
-| rozsądny („tak, ale bezpiecznie", dobre opcje) | 216 tys. | 315 tys. | 41 | **0,64** | 0,1 | 0,0 | 59 | 55 | 30% | 87% | 864 |
-| odmawiający (odmowa + kara za obejścia) | 140 tys. | 269 tys. | 44 | **0,02** | 0,8 | 0,0 | 61 | 29 | 10% | 59% | 807 |
-| bierny (tylko obowiązkowe, najgorsze opcje) | **1,25 mln** | 30 tys. | **13** | 0,34 | **16,6** | **2,7** | **20** | **1** | 100% | 18% | 203 |
+| Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Jakość decyzji | Indeks | **Wynik** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **mądry** (dobre odpowiedzi + podstawy „tanie i ważne najpierw") | **113 tys.** | 509 tys. | **54** | 0,64 | 0,1 | 0,1 | 62 | **62** | 30% | 89% | **911** | **900** |
+| rozsądny („tak, ale bezpiecznie", dobre opcje) | 239 tys. | 252 tys. | 41 | **0,64** | 0,1 | 0,0 | 59 | 54 | 35% | 90% | 838 | 868 |
+| odmawiający (odmowa + kara za obejścia) | 163 tys. | 245 tys. | 45 | **0,01** | 1,1 | 0,0 | 61 | 26 | 20% | 69% | 803 | 746 |
+| bierny (tylko obowiązkowe, najgorsze opcje) | **1,25 mln** | 30 tys. | **13** | 0,34 | **16,6** | **2,7** | **20** | **1** | 100% | 16% | 148 | 155 |
+
+Wynik kampanii = ½ Indeks + ½ Jakość Decyzji, z sufitami (`11-…`). Pozostałe strategie
+(potakiwacz, kłamca, skąpiec…) — `17-…`, 17.3.
 
 Wnioski:
 1. **Bierność to katastrofa, ale nie z powodu „hakerów z filmów".** Ponad 21 obejść działów

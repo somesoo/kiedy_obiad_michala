@@ -56,6 +56,21 @@ function uzytecznosc(d, ini, rnd) {
 // Koniec okresu: dział wybiera, co zrobi w następnym (i czy o tym powie).
 function zaplanuj(k, d) {
   const rnd = k.rnd.dzialy;
+  // Po odmowie potrzeba nie znika — raport mówi „szukamy innej drogi" i czasem to prawda.
+  // Dawniej odmowa kasowała inicjatywę razem z ryzykiem: „Nie" było jedyną decyzją o zerowym
+  // ryzyku, a gracz odmawiający wszystkiego miał najmniejszą ekspozycję w grze (docs/17-…, 17.6).
+  if (d.poOdmowie) {
+    const id = d.poOdmowie;
+    d.poOdmowie = null;
+    const ini = INICJATYWY[id];
+    const p = przytnij(0.15 + 0.6 * ini.pilnosc - 0.4 * d.swiadomosc - (k.flagi.polityka_zakupow ? 0.3 : 0), 0.05, 0.75);
+    if (rnd() < p) {
+      zastosujRyzyko(k, ini.ryzyko, 1, `${d.id}:${id}`, 'obejscie', true);
+      d.ukryte.push({ ini: id, m: k.st.m, poOdmowie: true });
+      d.zdarzeniaOkresu.push({ rodzaj: 'obejscie', ini: id });
+      k.log('dzial', `${d.nazwa}: po odmowie „${ini.nazwa}" i tak wchodzi — po cichu (P=${p.toFixed(2)})`);
+    }
+  }
   if (rnd() > d.aktywnosc * (1 + d.obciazenieBiezace)) { d.plan = null; return; }
   let best = null, bestU = PROG_AKTYWNOSCI;
   for (const id of d.inicjatywy) {
@@ -196,7 +211,7 @@ function odpowiedz(k, karta, odpowiedzId) {
     k.zrobione.delete(`${d.id}:${karta.ini}`);
     d.plan = karta.ini;
   }
-  if (odpowiedzId === 'odmowa') d.zmeczenie = przytnij(d.zmeczenie + 0.15);
+  if (odpowiedzId === 'odmowa') { d.zmeczenie = przytnij(d.zmeczenie + 0.15); d.poOdmowie = karta.ini; }
   // Statystyka dla Indeksu Odporności (składowa „biznes"): ile próśb zablokowano.
   const sd = k.statDzialow || (k.statDzialow = { pytania: 0, zablokowane: 0 });
   if (odpowiedzId !== 'odloz' || !odlozenia) sd.pytania++;

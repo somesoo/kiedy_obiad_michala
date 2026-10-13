@@ -37,8 +37,11 @@ raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; m
 - **Test obciążeniowy nie wypada przed swoim sygnałem** (S03 po ostrzeżeniu CERT) — „żadnych gotcha".
 - **Reguły z przypadków brzegowych** (`docs/17-…`, 17.5): obowiązkowa karta ma tanie uczciwe
   wyjście (walidator); kolejność opcji zawsze tasowana; brak decyzji jest oceniany; żaden mnożnik
-  nie rośnie przyrostowo bez sufitu (rejestr `k.ryzyka`); wynik to Indeks Odporności, nie mandat;
-  koszty reagowania nie idą z budżetu; sygnały bywają fałszywe, szacunki mają błąd.
+  nie rośnie przyrostowo bez sufitu (rejestr `k.ryzyka`); wynik to **Wynik kampanii** (½ Indeks
+  Odporności + ½ ważona Jakość Decyzji), nie mandat; koszty reagowania nie idą z budżetu; sygnały
+  bywają fałszywe, szacunki mają błąd. Po 17.6: **kara musi trafić w wynik** (nie tylko w mandat);
+  wynik liczy się z prawdy, nie z wykrycia (ekspozycja, sufity `BRAMKI`); każde narzędzie
+  wykrywające ma `martwe_pola`; uczciwa opcja ma cenę, inaczej nieuczciwa nie jest pokusą.
 - **Zapis gry = lista decyzji**, wczytanie = odtworzenie z ziarna. Nowa akcja gracza musi
   przechodzić przez `rozstrzygnij`/`zlecRecznie`/`zagrajZdarzenie`/`zamknijMiesiac`
   (`proto/kampania.js`) i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan.

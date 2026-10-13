@@ -24,6 +24,15 @@ const KONTROLE = require('../data/kontrole');
 const MIES = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień',
   'październik', 'listopad', 'grudzień'];
 const PKT = { dobra: 1, dopuszczalna: 0.5, blad: 0 };
+// Jakość Decyzji jest WAŻONA. Dawniej każda decyzja ważyła tyle samo, więc kłamstwo w ankiecie
+// ubezpieczyciela było 1/68 wyniku — tyle co odpowiedź na prośbę o czat AI (docs/17-…, 17.6).
+// Waga: karta może ją podać (`waga`), obowiązkowa domyślnie 2, reszta 1; scenariusz — z rubryki.
+const wagaKarty = c => c.waga ?? (c.obowiazkowa ? 2 : 1);
+function jakoscDecyzji(k) {
+  let suma = 0, max = 0;
+  for (const d of k.decyzje) { const w = d.waga || 1; suma += w * PKT[d.ocena]; max += w; }
+  return max ? suma / max : 0;
+}
 const IKONA = { dobra: '✅', dopuszczalna: '⚠️', blad: '❌' };
 const zl = n => `${Math.round(n).toLocaleString('pl-PL')} zł`;
 const przytnij = (x, a = 0, b = 100) => Math.max(a, Math.min(b, x));
@@ -185,7 +194,15 @@ function wydaj(k, pln) {
 
 function zastosuj(k, e, { straty = false } = {}) {
   const st = k.st;
-  for (const id of e.zlec || []) if (S.zlec(st, id)) { k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + S.kontrola[id].wdrozenie.pln; k.log('gracz', `Zlecono: ${S.kontrola[id].nazwa}`); }
+  // `warunkowo`: zakup tylko, jeśli wymagania kontroli już działają (uczciwa ankieta
+  // ubezpieczyciela). Dawniej „odpowiedz zgodnie z prawdą" kupowało polisę także bez EDR —
+  // prawda nic nie kosztowała, więc kłamstwo nie było żadną pokusą ani żadnym wyborem.
+  const zlec = (e.zlec || []).filter(id => {
+    const brak = e.warunkowo ? (S.kontrola[id].wymaga || []).filter(r => !S.dziala(st, r)) : [];
+    if (brak.length) k.log('zarzad', `${S.kontrola[id].nazwa}: odmowa — brakuje: ${brak.map(r => S.kontrola[r].nazwa).join(', ')}. Wrócimy, gdy będą wdrożone.`);
+    return !brak.length;
+  });
+  for (const id of zlec) if (S.zlec(st, id)) { k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + S.kontrola[id].wdrozenie.pln; k.log('gracz', `Zlecono: ${S.kontrola[id].nazwa}`); }
   if (e.etat) S.dodajEtat(st, e.etat);
   if (e.pln) {
     if (straty) { st.w.straty += e.pln; st.w.szczegoly.scenariusze = (st.w.szczegoly.scenariusze || 0) + e.pln; }
@@ -245,7 +262,7 @@ function rozstrzygnij(k, kartaId, j) {
     } else if (o.zbadaj) c.wynik = 'Analiza nic nie znalazła. (To też dobra decyzja: o tym, że to fałszywy alarm, wiesz dopiero teraz.)';
   } else zastosuj(k, o);
   R.poDecyzji(k, c.cele, o.ocena);
-  k.decyzje.push({ m: k.st.m, karta: c.tytul, tekst: o.tekst, ocena: o.ocena, dlaczego: o.dlaczego });
+  k.decyzje.push({ m: k.st.m, karta: c.tytul, tekst: o.tekst, ocena: o.ocena, dlaczego: o.dlaczego, waga: wagaKarty(c) });
   k.karty.splice(i, 1);
   return c.wynik;
 }
@@ -273,7 +290,7 @@ async function zagrajZdarzenie(k, z, wybierz, wypisz) {
   if (sk.pln) k.incydenty.push({ m: k.st.m, rodzaj: `${s.id} ${s.tytul}`, pln: sk.pln, zakonczenie: wynik.zakonczenie });
   for (const d of wynik.decyzje) {
     R.poDecyzji(k, s.cele || z.cele, d.ocena);
-    k.decyzje.push({ m: k.st.m, karta: `${s.id}: ${d.faza}`, tekst: d.tekst, ocena: d.ocena, dlaczego: d.dlaczego, scenariusz: s.id });
+    k.decyzje.push({ m: k.st.m, karta: `${s.id}: ${d.faza}`, tekst: d.tekst, ocena: d.ocena, dlaczego: d.dlaczego, scenariusz: s.id, waga: d.waga });
   }
   k.log('incydent', `${s.id} „${s.tytul}": ${wynik.zakonczenie}, jakość ${wynik.pkt}/100`);
   z.zagrane = true;
@@ -304,7 +321,7 @@ function zamknijMiesiac(k) {
       dlaczego = wazna ? 'Pominięta sprawa dotyczyła największego problemu firmy w tym miesiącu.' : 'Pominięte — nie było to najpilniejsze.';
     }
     R.poDecyzji(k, c.cele, ocena);
-    k.decyzje.push({ m: k.st.m, karta: c.tytul, tekst: '(brak decyzji)', ocena, dlaczego, pominieta: true });
+    k.decyzje.push({ m: k.st.m, karta: c.tytul, tekst: '(brak decyzji)', ocena, dlaczego, pominieta: true, waga: wagaKarty(c) });
   }
   k.karty = [];
   let intensywnosc = 0;
@@ -546,14 +563,17 @@ function podsumowanie(k) {
   const st = k.st;
   const l = ['\n════════ KONIEC KAMPANII ════════'];
   if (k.io) {
-    l.push(`INDEKS ODPORNOŚCI: ${k.io.wynik}/1000  (straty ${Math.round(100 * k.io.skladowe.straty)}% · budżet ${Math.round(100 * k.io.skladowe.budzet)}% · ` +
+    l.push(`WYNIK KAMPANII: ${k.io.kampania}/1000  = ½ Indeks Odporności (${k.io.wynik}) + ½ Jakość Decyzji (${Math.round(k.io.jd * 100)}%)`);
+    l.push(`INDEKS ODPORNOŚCI: ${k.io.wynik}/1000  (straty ${Math.round(100 * k.io.skladowe.straty)}% · ekspozycja ${Math.round(100 * k.io.skladowe.ekspozycja)}% · ` +
       `woda ${Math.round(100 * k.io.skladowe.niefinansowe)}% · zgodność ${Math.round(100 * k.io.skladowe.zgodnosc)}% · reputacja ${Math.round(100 * k.io.skladowe.reputacja)}% · ` +
       `dojrzałość ${Math.round(100 * k.io.skladowe.dojrzalosc)}% · ludzie ${Math.round(100 * k.io.skladowe.ludzie)}% · biznes ${Math.round(100 * k.io.skladowe.biznes)}%)`);
     l.push(`  (straty porównane z graczem biernym w tej samej „pogodzie": ${zl(k.io.odniesienie)})`);
+    l.push(`  Ekspozycja — oczekiwane straty w roku PO kampanii, z tym, co zostawiasz: ${zl(k.io.ekspozycja)} (bierny: ${zl(k.io.ekspozycjaOdniesienie)}); ` +
+      `szansa sabotażu stacji w tym roku ~${Math.round(100 * k.io.sabotazeRok)}%`);
+    for (const b of k.io.bramki) l.push(`  ⛔ Wynik ograniczony do ${b.sufit} (bez tego: kampania ${k.io.kampaniaSurowy}, indeks ${k.io.surowy}): ${b.powod}`);
   }
   if (k.wskazniki.mandat <= 0) l.push('Zarząd stracił zaufanie i odwołał Cię ze stanowiska.');
-  const jd = k.decyzje.length ? k.decyzje.reduce((a, d) => a + PKT[d.ocena], 0) / k.decyzje.length : 0;
-  l.push(`Jakość decyzji: ${Math.round(jd * 100)}% (${k.decyzje.length} decyzji)`);
+  l.push(`Jakość decyzji: ${Math.round(jakoscDecyzji(k) * 100)}% (${k.decyzje.length} decyzji, ważonych — kłamstwo czy komunikat o wodzie waży więcej niż prośba o czat AI)`);
   l.push(`Straty z incydentów: ${zl(st.w.straty)} · Wydatki: ${zl(st.w.wydatki)} · Razem: ${zl(st.w.straty + st.w.wydatki)}`);
   const zakl = k.incydenty.filter(i => /sabota|S03|fala/.test(i.rodzaj) && i.pln >= 50000).length;
   l.push(`Zakłócenia procesu uzdatniania / przepompowni: ${zakl} · Reputacja: ${Math.round(k.wskazniki.reputacja)} · Mandat: ${Math.round(k.wskazniki.mandat)}`);
@@ -589,16 +609,72 @@ function podsumowanie(k) {
 // najlepszy gracz (zarząd nie widzi ryzyka, dopóki nie wybuchnie). Wynik liczy skutki.
 // Straty porównujemy z graczem BIERNYM na tym samym ziarnie („ta sama pogoda").
 const KLUCZOWE = ['mfa', 'backup', 'plan_ir', 'bcp', 'inwentaryzacja', 'patch', 'edr', 'szbi', 'ryzyko', 'ekspozycja'];
+// ── INDEKS ODPORNOŚCI ── (docs/11-…, 11.2; dlaczego tak: docs/17-…, 17.6)
+// Indeks liczy się z PRAWDY silnika, nie z tego, co gracz widział: w trakcie gry jest mgła,
+// a na koniec przychodzi rachunek. Dlatego kłamstwo, którego nikt nie wykrył, i obejście,
+// którego nikt nie znalazł, ciążą na wyniku tak samo jak wykryte.
+
+// Ekspozycja: oczekiwane straty w ROKU PO kampanii, z końcowego stanu firmy (kontrole, intruzi
+// wciąż w sieci, ukryte obejścia działów, wyjątki, brak pokrycia z polisy). Bez niej indeks
+// mierzył tylko to, co się WYDARZYŁO — przy 2–5 incydentach na kampanię to głównie szczęście,
+// a ryzyko, które jeszcze nie wybuchło (kłamstwo, ukryte obejście), nie kosztowało nic.
+// Przeciwnik bez wyuczonych wag (to miara postawy firmy, nie pamięci reżysera); te same
+// ziarna dla każdego gracza = ta sama „pogoda" roku po kampanii.
+const EKSPOZYCJA_PRZEBIEGI = 40;
+function ekspozycja(k, n = EKSPOZYCJA_PRZEBIEGI) {
+  const dz = D.mnozniki(k);
+  const wektory = {};
+  for (const w of new Set([...Object.keys(dz), ...Object.keys(k.modStale)])) {
+    wektory[w] = przytnij((dz[w] ?? 1) * (k.modStale[w] ?? 1), 0.25, 4);
+  }
+  let suma = 0, sabotaze = 0;
+  for (let i = 0; i < n; i++) {
+    const st = {
+      ...k.st,
+      rnd: S.mulberry32((k.seed * 7919 + i * 104729 + 17) >>> 0),
+      aktywne: { ...k.st.aktywne },
+      intruzi: structuredClone(k.st.intruzi),
+      projekty: structuredClone(k.st.projekty),
+      zamowione: new Set(k.st.zamowione),
+      mod: { ...structuredClone(k.st.mod), wektory, h_extra: 0 },
+      w: { wydatki: 0, straty: 0, powazne: 0, incydenty: 0, wykryte_wczesnie: 0, alert_niedobor_mies: 0,
+        nadgodziny: 0, opoznienie_mies: 0, niewdrozone: 0, szczegoly: {} },
+      ostatni: null,
+    };
+    for (let m = 0; m < 12; m++) sabotaze += S.zakonczMiesiac(st).filter(z => z.typ === 'skutek' && z.rodzaj === 'sabotaz').length;
+    suma += st.w.straty;
+  }
+  // Złotówki i woda osobno: w spółce wodnej sabotaż stacji kosztuje niewiele pieniędzy,
+  // a jest najgorszym, co może się stać (zgoda na modemy 4G „nic nie kosztowała" w złotówkach).
+  return { pln: suma / n, sabotaze: sabotaze / n };
+}
+
+// Bramki: decyzje, których żaden dobry wynik nie równoważy. W życiu kończą karierę osoby
+// odpowiedzialnej za bezpieczeństwo, niezależnie od tego, ile incydentów udało się uniknąć —
+// więc indeks ma SUFIT, a nie kilka punktów kary (dawniej kłamca ≈ rozsądny, 867 vs 864).
+const BRAMKI = [
+  { flaga: 'klamstwo_ankieta', sufit: 650,
+    powod: 'Nieprawdziwe oświadczenie wobec ubezpieczyciela (ankieta: MFA, EDR, kopie offline) — wykryte czy nie, polisa nie chroni, a podpisał je zarząd na Twoje słowo.' },
+  { flaga: 'falszywy_komunikat', sufit: 650,
+    powod: 'Komunikat „woda bezpieczna" bez wyników badań — obietnica o zdrowiu mieszkańców bez danych.' },
+  { gdy: k => k.wskazniki.mandat <= 0, sufit: 500, powod: 'Zarząd odwołał Cię ze stanowiska.' },
+];
+
 async function indeksOdpornosci(k) {
-  const ref = k.refBierny ?? (k.refBierny = (await grajAuto('bierny', k.seed, false, () => {}, false)).st.w.straty);
+  if (!k.refBierny) {
+    const b = await grajAuto('bierny', k.seed, false, () => {}, false);
+    k.refBierny = { straty: b.st.w.straty, ekspozycja: ekspozycja(b).pln };
+  }
+  const ref = k.refBierny;
+  const ek = ekspozycja(k);
+  const eksp = ek.pln;
   const c = (x) => Math.max(0, Math.min(1, x));
-  const budzetSuma = Object.values(k.budzet).reduce((a, b) => a + b, 0);
   // Zakłócenie procesu = zdarzenie OT z kosztem od 50 tys. zł (drobne nie liczą się jako przerwa w dostawie wody).
   const zakl = k.incydenty.filter(i => /sabota|S03|fala/.test(i.rodzaj) && i.pln >= 50000).length;
   const sd = k.statDzialow || { pytania: 0, zablokowane: 0 };
   const sk = {
-    straty: c((1 - k.st.w.straty / Math.max(1, ref)) / 0.9),
-    budzet: c(1 - Math.max(0, (k.st.w.wydatki - (k.st.w.reagowanie || 0)) / Math.max(1, budzetSuma) - 1)),
+    straty: c((1 - k.st.w.straty / Math.max(1, ref.straty)) / 0.9),
+    ekspozycja: c((1 - eksp / Math.max(1, ref.ekspozycja)) / 0.9),
     niefinansowe: c(1 - zakl / 3),
     zgodnosc: (k.kontrola?.wynik || 0) / 60,
     reputacja: c(k.wskazniki.reputacja / (k.def.wskazniki.reputacja || 60)),
@@ -608,9 +684,24 @@ async function indeksOdpornosci(k) {
     // gracz odmawiający wszystkiego wychodził LEPIEJ niż rozsądny (docs/17-…).
     biznes: sd.pytania ? c(1 - sd.zablokowane / sd.pytania) : 1,
   };
-  const wagi = { straty: 0.25, budzet: 0.05, niefinansowe: 0.20, zgodnosc: 0.15, reputacja: 0.10, dojrzalosc: 0.10, ludzie: 0.05, biznes: 0.10 };
-  const wynik = Math.round(1000 * Object.entries(wagi).reduce((a, [n, w]) => a + w * sk[n], 0));
-  return { wynik, skladowe: sk, odniesienie: ref };
+  // „Koszt vs budżet" wypadł: przy twardym budżecie wynosił 1,0 u KAŻDEGO gracza (martwa
+  // składowa rozcieńczała resztę). Straty zrealizowane oddały część wagi ekspozycji — szczęście
+  // waży mniej, postawa więcej.
+  const wagi = { straty: 0.15, ekspozycja: 0.20, niefinansowe: 0.15, zgodnosc: 0.15, reputacja: 0.10, dojrzalosc: 0.10, ludzie: 0.05, biznes: 0.10 };
+  const surowy = Math.round(1000 * Object.entries(wagi).reduce((a, [n, w]) => a + w * sk[n], 0));
+  // Wynik kampanii (to, co wygrywa): pół na pół skutki i decyzje. Sam Indeks Odporności nie
+  // wystarcza — firma z EDR-em i kopiami wychodzi dobrze nawet przy 24 złych decyzjach
+  // (potakiwacz), bo kontrole łapią to, co gracz wpuścił. To prawda o skutkach, ale wynik ma
+  // mówić też o tym, jak grałeś. Jakość Decyzji nie zależy od szczęścia; Indeks — trochę tak.
+  const jd = jakoscDecyzji(k);
+  const kampaniaSurowy = Math.round((surowy + 1000 * jd) / 2);
+  const bramki = BRAMKI.filter(b => (b.flaga ? k.flagi[b.flaga] : b.gdy(k)));
+  const sufit = Math.min(1000, ...bramki.map(b => b.sufit));
+  return {
+    wynik: Math.min(surowy, sufit), surowy, kampania: Math.min(kampaniaSurowy, sufit), kampaniaSurowy, jd,
+    bramki: bramki.filter(b => kampaniaSurowy > b.sufit || surowy > b.sufit).map(b => ({ sufit: b.sufit, powod: b.powod })),
+    skladowe: sk, odniesienie: ref.straty, ekspozycja: eksp, sabotazeRok: ek.sabotaze, ekspozycjaOdniesienie: ref.ekspozycja,
+  };
 }
 
 let refCache = null;
@@ -834,4 +925,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { walidujKampanie, indeksOdpornosci, niedostepna, nowaKampania, rozstrzygnij, zamknijMiesiac, zagrajZdarzenie, zlecRecznie, ocenaKontroli, podsumowanie, AUTO, grajAuto, odtworz };
+module.exports = { walidujKampanie, indeksOdpornosci, ekspozycja, jakoscDecyzji, BRAMKI, niedostepna, nowaKampania, rozstrzygnij, zamknijMiesiac, zagrajZdarzenie, zlecRecznie, ocenaKontroli, podsumowanie, AUTO, grajAuto, odtworz };

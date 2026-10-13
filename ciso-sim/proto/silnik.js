@@ -170,9 +170,14 @@ function zakonczMiesiac(st) {
   }
 
   const zapobieg = wekt => czynne.reduce((a, k) => a * (1 - (k.zapobiega?.[wekt] || 0) * skut[k.id]), 1);
-  const utrudn = etap => czynne.reduce((a, k) => a * (1 - (k.utrudnia?.[etap] || 0) * skut[k.id]), 1);
-  const wykryj = (etap, skryt) => {
-    const nie = czynne.reduce((a, k) => a * (1 - (k.wykrywa?.[etap] || 0) * skut[k.id] * jakosc(k.id)),
+  // Martwe pola: narzędzie widzi tylko część dróg wejścia. EDR nie zobaczy pracownika, który
+  // wkleja dane do prywatnego czatu, ani logowania haktywisty do wystawionego panelu HMI —
+  // nie ma tam złośliwego kodu. Bez tego jeden EDR unieważniał skutki dziesiątek złych zgód
+  // (docs/17-…, 17.6). `martwe_pola` w katalogu kontroli: wektor → mnożnik skuteczności.
+  const widzi = (k, x) => k.martwe_pola?.[x?.wektor] ?? 1;
+  const utrudn = (etap, x) => czynne.reduce((a, k) => a * (1 - (k.utrudnia?.[etap] || 0) * skut[k.id] * widzi(k, x)), 1);
+  const wykryj = (etap, skryt, x) => {
+    const nie = czynne.reduce((a, k) => a * (1 - (k.wykrywa?.[etap] || 0) * skut[k.id] * jakosc(k.id) * widzi(k, x)),
       1 - Z.WYKRYWANIE_BAZOWE[etap]);
     return Math.min(0.95, (1 - nie) * skryt);
   };
@@ -244,7 +249,7 @@ function zakonczMiesiac(st) {
     for (let i = st.intruzi.length - 1; i >= 0; i--) {
       const x = st.intruzi[i];
       const sp = Z.SPRAWCY[x.kto];
-      if (rnd() < wykryj(x.etap, 1 / sp.skrytosc > 1 ? 1 : sp.skrytosc)) {
+      if (rnd() < wykryj(x.etap, 1 / sp.skrytosc > 1 ? 1 : sp.skrytosc, x)) {
         const op = Z.OPANOWANIE[x.etap];
         w.wydatki += op.pln * (1 - 0.5 * reakcja);
         // Osobno: koszty reagowania idą z rezerwy firmy, nie z budżetu bezpieczeństwa
@@ -260,7 +265,7 @@ function zakonczMiesiac(st) {
       if (sp.wygasa && rnd() < sp.wygasa) { st.intruzi.splice(i, 1); continue; }
       if (x.kto === 'broker' && rnd() < sp.sprzedaz) { x.kto = 'ransomware'; continue; }
       const nast = { dostep: 'eskalacja', eskalacja: 'ruch', ruch: 'cel' }[x.etap];
-      const p = (sp.postep[nast] || 0) * utrudn(nast);
+      const p = (sp.postep[nast] || 0) * utrudn(nast, x);
       if (rnd() < p) {
         if (nast === 'cel') {
           let pln = skutek(sp.cel);

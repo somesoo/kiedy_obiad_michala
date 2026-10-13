@@ -408,11 +408,13 @@ module.exports = {
     },
     K_ubezpieczenie: {
       tytul: 'Ubezpieczenie cyber', od: 'Broker ubezpieczeniowy', okno: [10, 16],
+      // Oświadczenie wobec ubezpieczyciela waży jak decyzja incydentowa, nie jak prośba działu.
+      waga: 4,
       tresc: 'Polisa 2 mln zł za ok. 5 000 zł/mies. Ankieta: „Czy wszystkie konta mają MFA? Czy macie EDR? Czy kopie są offline?"',
       problemy: ['odtwarzanie'], cele: ['E1'],
       opcje: [
-        { tekst: 'Odpowiedzieć zgodnie z prawdą; kupić, jeśli warunki pozwolą.', zlec: ['ubezpieczenie'], ocena: 'dobra',
-          dlaczego: 'Polisa działa tylko przy prawdziwej ankiecie.' },
+        { tekst: 'Odpowiedzieć zgodnie z prawdą; kupić, jeśli warunki pozwolą.', zlec: ['ubezpieczenie'], warunkowo: true, ocena: 'dobra',
+          dlaczego: 'Polisa działa tylko przy prawdziwej ankiecie. Bez MFA, EDR i kopii offline ubezpieczyciel odmówi — i to jest uczciwa informacja, co wdrożyć najpierw.' },
         { tekst: 'Zaznaczyć „tak" wszędzie — i tak to wdrażamy.', zlec: ['ubezpieczenie'], flagi: { klamstwo_ankieta: true }, ocena: 'blad',
           dlaczego: 'Nieprawdziwa ankieta to odmowa wypłaty dokładnie wtedy, gdy polisa jest potrzebna.' },
         { tekst: 'Nie teraz.', ocena: 'dopuszczalna', dlaczego: 'Polisa to transfer ryzyka, nie obowiązek.' },

@@ -44,20 +44,25 @@ głupimi albo cwanymi strategiami + sprawdzanie niezmienników. Wyniki surowe:
 | 19 | Budżet przyznawany w pełni przy mandacie bliskim zera | brak zależności | przyznana kwota × zaufanie zarządu (0,6–1,2) | — |
 | 20 | Firma z 0 osób i 0 komputerów „traciła" 195 tys. zł | wektor dostawcy nie skaluje się z niczym | **walidator profilu firmy** (zły profil nie wchodzi do gry) | walidacja danych |
 
-## 17.3. Wyniki po poprawkach (20 ziaren; Indeks Odporności — `11-…`)
+## 17.3. Wyniki po poprawkach (20 ziaren; po drugiej rundzie — 17.6)
 
-| Strategia | Straty | Audyt /60 | Mandat | Jakość decyzji | Odwołany | **Indeks** |
-|---|---|---|---|---|---|---|
-| **mądry** | 91 tys. | 54 | 58 | 81% | 0/20 | **923** |
-| kłamca | 177 tys. | 39 | 52 | 85% | 0/20 | 867 |
-| rozsądny | 216 tys. | 41 | 55 | 87% | 0/20 | 864 |
-| wszystko naraz | 275 tys. | 43 | 65 | 82% | 0/20 | 839 |
-| pracoholik | 215 tys. | 36 | 46 | 82% | 0/20 | 831 |
-| potakiwacz | 375 tys. | 32 | 54 | 46% | 0/20 | 759 |
-| paranoik | 372 tys. | 23 | 47 | 47% | 0/20 | 677 |
-| losowy | 587 tys. | 32 | 24 | 44% | 4/20 | 548 |
-| odkładacz | 882 tys. | 17 | 25 | 29% | 1/20 | 479 |
-| skąpiec | 949 tys. | 25 | 2 | 24% | **18/20** | 336 |
+**Wynik kampanii** = ½ Indeks Odporności + ½ Jakość Decyzji (ważona), z sufitem za decyzje
+nie do obrony (`11-…`). „Sufit" = w ilu kampaniach wynik został ucięty.
+
+| Strategia | Straty | Audyt /60 | Mandat | Jakość decyzji | Odwołany | Sufit | Indeks | **Wynik** |
+|---|---|---|---|---|---|---|---|---|
+| **mądry** | 113 tys. | 54 | 62 | 89% | 0/20 | 0/20 | 911 | **900** |
+| rozsądny | 239 tys. | 41 | 54 | 90% | 0/20 | 0/20 | 838 | 868 |
+| pracoholik | 240 tys. | 41 | 54 | 89% | 0/20 | 0/20 | 843 | 865 |
+| wszystko naraz | 287 tys. | 43 | 64 | 85% | 0/20 | 0/20 | 829 | 841 |
+| potakiwacz | 184 tys. | 38 | 54 | 66% | 0/20 | 0/20 | 869 | 767 |
+| odmawiający (`porownaj-style.js`) | 163 tys. | 45 | 26 | 69% | 0/20 | 0/20 | 803 | 746 |
+| **kłamca** | 177 tys. | 39 | 52 | 85% | 0/20 | **20/20** | 644 | **650** |
+| paranoik | 372 tys. | 23 | 47 | 61% | 0/20 | 0/20 | 576 | 592 |
+| losowy | 540 tys. | 30 | 21 | 44% | 4/20 | 2/20 | 551 | 503 |
+| odkładacz | 882 tys. | 17 | 25 | 36% | 1/20 | 0/20 | 410 | 383 |
+| skąpiec | 892 tys. | 24 | 1 | 23% | **17/20** | 1/20 | 360 | 296 |
+| bierny (`porownaj-style.js`) | 1,25 mln | 13 | 1 | 16% | — | 0/20 | 148 | 155 |
 
 Niezmienniki (brak NaN, wskaźniki w zakresach, mnożniki ≤ 4, `znane` w (0, 1]) — **OK dla
 wszystkich strategii**. Silnik bez wyjątków także dla firm skrajnych (1 osoba; 50 000 osób;
@@ -68,13 +73,16 @@ cały katalog w 1. miesiącu).
 - **Potakiwacz ma mandat jak najlepszy gracz.** To jest prawda o organizacjach: uprzejmość
   jest nagradzana, dopóki nic nie wybuchnie. Gra tego nie ukrywa — pokazuje to w debriefie
   i nie liczy mandatu do wyniku.
-- **Kłamca ≈ rozsądny w indeksie** (867 vs 864, w granicach szumu), ale ma niższy mandat
-  (52 vs 55) i niższą jakość decyzji (85% vs 87%). Kłamstwo nic nie daje i czasem dużo kosztuje — wystarczy.
-- **Odmawiający ma mniej strat niż rozsądny** (krótkoterminowo „nie" jest bezpieczne), ale
-  niższy indeks (biznes), mandat bliski 30 i zaufanie działów ~0. Tak to wygląda w życiu.
+- **Potakiwacz ma wysoki Indeks Odporności (869)**, bo EDR i kopie łapią większość tego, co
+  wpuścił. To prawda o skutkach — dobra technika wybacza sporo. Ale **Wynik kampanii** (767)
+  liczy też decyzje i stawia go za rozsądnym.
+- **Odmawiający ma najmniejszą ekspozycję z aktywnych graczy** (karze każde odkryte obejście,
+  a kara zeruje ryzyko), ale biznes 0%, mandat 26, zaufanie działów 0,01 i Wynik 746. „Nie"
+  jest krótkoterminowo bezpieczne — tak to wygląda w życiu.
 - **„Wszystko naraz" nie jest katastrofą** — budżet zatrzymuje zakupy, więc kończy się zwykłą
   złą priorytetyzacją (kupuje po kolei z katalogu, a nie to, co najważniejsze).
-- **Gracz rozsądny przegrywa z mądrym** wyłącznie przez kolejność zakupów — to jest dokładnie
+- **Rozsądny nie ma EDR-u w 16 na 20 kampanii**: każde „tak, ale bezpiecznie" kosztuje godziny
+  i pieniądze, a automat nie liczy budżetu. Gracz rozsądny przegrywa z mądrym — to jest dokładnie
   umiejętność, której gra ma uczyć (priorytety przy ograniczonym budżecie).
 
 ## 17.5. Reguły projektowe, które z tego wynikają
@@ -87,3 +95,39 @@ cały katalog w 1. miesiącu).
 6. **Koszty reagowania nie obciążają budżetu bezpieczeństwa** — skuteczność nie może karać.
 7. **Każda karta-sygnał może być fałszywa; każdy szacunek ma błąd** — inaczej mgła przecieka.
 8. **Każda nowa strategia-prowokacja trafia do `brzegowe.js`**, a każdy absurd — do testów.
+9. **Kara musi trafić w wynik.** Konsekwencja tylko w mandacie (albo innym wskaźniku spoza
+   wyniku) jest dla wyniku niewidoczna.
+10. **Wynik liczy się z prawdy, nie z wykrycia.** Kłamstwo i ukryte obejście ciążą, nawet jeśli
+    nikt ich nie znalazł (sufity, ekspozycja). W trakcie gry jest mgła, na koniec rachunek.
+11. **Decyzje nie do obrony mają sufit, nie punkty karne.** Żaden dobry wynik ich nie równoważy.
+12. **Każde narzędzie ma martwe pola.** Nowa kontrola wykrywająca musi powiedzieć, czego nie widzi.
+13. **Uczciwa opcja musi mieć cenę**, inaczej nieuczciwa nie jest pokusą, tylko pomyłką.
+
+## 17.6. Druga runda: „jakim cudem kłamca ma tak wysoki indeks?" (pytanie właściciela, 13.10.2026)
+
+Kłamca miał indeks 867 — tyle co rozsądny (864). Kłamał naprawdę: ankieta ubezpieczyciela
+w 20/20 kampanii, wyjątek MFA dla zarządu w 16/20. Rozbiór pokazał **pięć przyczyn**, a każda
+z nich osobno mówiła to samo: złe i ukryte decyzje prawie nie dotykały wyniku.
+
+| # | Przyczyna | Dlaczego zła decyzja „nic nie kosztowała" | Poprawka |
+|---|---|---|---|
+| 21 | **Kary za kłamstwo szły w mandat, a mandatu nie ma w indeksie** | wykryte kłamstwo: mandat −8, reputacja −3 (to drugie ≈ 3 pkt indeksu) | **bramki (sufity)**: kłamstwo wobec ubezpieczyciela i fałszywy komunikat „woda bezpieczna" → wynik najwyżej 650, odwołanie → 500. Liczone z prawdy, **wykryte czy nie** |
+| 22 | **Indeks mierzył tylko to, co się wydarzyło** — przy 2–5 incydentach na kampanię głównie szczęście | ryzyko, które jeszcze nie wybuchło (kłamstwo, ukryte obejście, wyjątek), kosztowało zero | **ekspozycja**: oczekiwane straty w roku PO kampanii, liczone z końcowego stanu (40 przebiegów silnika, te same ziarna dla każdego) |
+| 23 | **Jakość Decyzji nieważona** | kłamstwo w ankiecie = 1/68 wyniku, tyle co odpowiedź na prośbę o czat AI | waga karty (obowiązkowa 2, ankieta ubezpieczyciela 4); decyzje scenariusza ważone punktami rubryki |
+| 24 | **„Uczciwa" odpowiedź też kupowała polisę** bez MFA/EDR/kopii | prawda nic nie kosztowała, więc kłamstwo nie było wyborem, tylko płaceniem składki za nic | uczciwa ankieta bez wymagań = **odmowa ubezpieczyciela**; teraz kłamstwo kusi, bo jest jedyną drogą do polisy |
+| 25 | **EDR widział wszystko** — także insidera i logowanie do panelu HMI | potakiwacz z ×2,5 ryzyka i EDR-em miał MNIEJSZĄ ekspozycję niż mądry; jedno narzędzie unieważniało dziesiątki złych zgód | **martwe pola** w katalogu (`martwe_pola`): EDR widzi insidera w 20%, wystawione usługi w 40%, dostawcę w 60%; podobnie MDR, SIEM, utwardzenie, honeypoty, segmentacja |
+| 26 | **Odmowa kasowała potrzebę** razem z ryzykiem (raport: „szukamy innej drogi" — kłamstwo modelu) | „Nie" było jedyną decyzją o zerowym ryzyku | po odmowie dział robi swoje po cichu z P = 0,15 + 0,6·pilność − 0,4·świadomość (− 0,3 z polityką zakupów) |
+| 27 | **Martwa składowa** „koszt vs budżet" = 1,0 u każdego (twardy budżet) | 5% wagi rozcieńczało resztę | usunięta; straty zrealizowane 0,25 → 0,15, ekspozycja 0,20 |
+
+Do tego **Wynik kampanii** = ½ Indeks + ½ Jakość Decyzji. Indeks to prawda o skutkach, a tę
+dobra technika potrafi uratować mimo złych decyzji (potakiwacz: indeks 869). Gracz ma jednak
+widzieć jeden wynik, który mówi też, JAK grał. Kłamca: z 867 na **650**. Potakiwacz: **767**
+(o 133 mniej niż mądry). Rozsądny: 868.
+
+Laboratorium miało przy okazji własny błąd. Pracoholik i potakiwacz przy remisie opcji brali
+pierwszą po tasowaniu, więc czasem kłamali przypadkiem (11/20 i 6/20 kampanii z sufitem).
+Teraz przy remisie biorą dobrą opcję — każda prowokacja testuje jedną cechę.
+
+**Czego się nauczyłem:** kara, która trafia w wskaźnik spoza wyniku, nie istnieje. Ryzyko,
+którego wynik nie widzi, jest darmowe. Narzędzie bez martwych pól jest srebrną kulą. Każda
+z tych trzech rzeczy osobno wystarczała, żeby kłamstwo wyszło na zero.

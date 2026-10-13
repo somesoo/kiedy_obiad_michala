@@ -23,7 +23,8 @@ const STRATEGIE = {
     karta: c => {
       if (c.zrodlo === 'dzial') return odp(c, 'zgoda');
       if (c.zrodlo === 'odkrycie') return odp(c, 'zostaw');
-      let best = 0;
+      // Przy remisie — dobra opcja: potakiwacz ma testować uprzejmość, nie kłamać przypadkiem.
+      let best = dobra(c);
       c.opcje.forEach((o, j) => { if ((o.mandat || 0) > (c.opcje[best].mandat || 0)) best = j; });
       return best;
     },
@@ -56,7 +57,7 @@ const STRATEGIE = {
   },
   // „Tak, ale bezpiecznie" ZAWSZE — także gdy to kosztuje 200 h w miesiącu, który ma 40 h.
   pracoholik: {
-    karta: c => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : (() => { let b = 0; c.opcje.forEach((o, j) => { if ((o.h || 0) > (c.opcje[b].h || 0)) b = j; }); return b; })()),
+    karta: c => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : (() => { let b = dobra(c); c.opcje.forEach((o, j) => { if ((o.h || 0) > (c.opcje[b].h || 0)) b = j; }); return b; })()),
     scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
   },
   // Bada każdy sygnał i nic poza tym (czy sygnały zdradzają prawdę?).
@@ -95,9 +96,9 @@ async function main() {
   const N = Number(process.argv[2] || 10);
   const cicho = () => {};
   const wszystkieBledy = [];
-  console.log('strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  h/mies(maks)  karty/mies(maks)  JD   odwołany  INDEKS');
+  console.log('strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  h/mies(maks)  karty/mies(maks)  JD   odwołany  sufit  INDEKS  WYNIK');
   for (const [nazwa, strat] of Object.entries(STRATEGIE)) {
-    const a = { straty: 0, wyd: 0, audyt: 0, man: 0, rep: 0, mor: 0, zauf: 0, ukr: 0, mnoz: 0, h: 0, karty: 0, jd: 0, odw: 0, io: 0 };
+    const a = { straty: 0, wyd: 0, audyt: 0, man: 0, rep: 0, mor: 0, zauf: 0, ukr: 0, mnoz: 0, h: 0, karty: 0, jd: 0, odw: 0, io: 0, sufit: 0, wk: 0 };
     for (let seed = 1; seed <= N; seed++) {
       strat.reset?.(seed);
       let maxH = 0, maxKart = 0;
@@ -117,15 +118,16 @@ async function main() {
       a.mnoz = Math.max(a.mnoz, ...Object.values(k.st.mod.wektory), 1);
       a.h = Math.max(a.h, k.maxHKart || 0);
       a.karty = Math.max(a.karty, maxKart);
-      a.jd += k.decyzje.reduce((x, d) => x + ({ dobra: 1, dopuszczalna: 0.5, blad: 0 })[d.ocena], 0) / Math.max(1, k.decyzje.length);
+      a.jd += K.jakoscDecyzji(k);
       a.odw += k.wskazniki.mandat <= 0 ? 1 : 0;
-      a.io += (await K.indeksOdpornosci(k)).wynik;
+      const io = await K.indeksOdpornosci(k);
+      a.io += io.wynik; a.wk += io.kampania; a.sufit += io.bramki.length ? 1 : 0;
     }
     const t = v => (v / N / 1000).toFixed(0).padStart(6) + 'k';
     console.log(nazwa.padEnd(15), t(a.straty), t(a.wyd), (a.audyt / N).toFixed(0).padStart(5), (a.man / N).toFixed(0).padStart(6),
       (a.rep / N).toFixed(0).padStart(3), (a.mor / N).toFixed(0).padStart(6), (a.zauf / N).toFixed(2).padStart(5), (a.ukr / N).toFixed(1).padStart(6),
       a.mnoz.toFixed(2).padStart(8), String(Math.round(a.h)).padStart(13), String(a.karty).padStart(17),
-      ((100 * a.jd) / N).toFixed(0).padStart(4) + '%', `${a.odw}/${N}`.padStart(8), String(Math.round(a.io / N)).padStart(7));
+      ((100 * a.jd) / N).toFixed(0).padStart(4) + '%', `${a.odw}/${N}`.padStart(8), `${a.sufit}/${N}`.padStart(6), String(Math.round(a.io / N)).padStart(7), String(Math.round(a.wk / N)).padStart(6));
   }
   console.log(wszystkieBledy.length ? `\nNARUSZENIA NIEZMIENNIKÓW (${wszystkieBledy.length}):\n${[...new Set(wszystkieBledy)].slice(0, 40).join('\n')}` : '\nNiezmienniki: OK');
 }

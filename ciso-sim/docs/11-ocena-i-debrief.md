@@ -14,7 +14,11 @@ stało) i karała pecha (ktoś zrobił wszystko dobrze i padł przez dostawcę).
 błąd, który w realu kończy się zwolnieniem dobrego CISO i awansem szczęściarza — gra ma go
 **pokazać**, a nie powtórzyć.
 
-Ranking biurowy: domyślnie po **Jakości Decyzji**, z Indeksem Odporności jako drugim kluczem.
+**Wynik kampanii** (to, co wygrywa i trafia do rankingu biurowego) = **½ Indeks Odporności +
+½ Jakość Decyzji × 1000**, z sufitem za decyzje nie do obrony (11.2a). Dawniej ranking szedł
+po samej Jakości Decyzji, a gracz widział Indeks jako „wynik" — i kłamca miał w nim tyle co
+gracz rozsądny (`17-…`, 17.6). Sam Indeks nie wystarcza: dobra technika (EDR, kopie) ratuje
+skutki mimo złych decyzji. Sama Jakość Decyzji też nie: nie widzi, czy firma przetrwała.
 
 ## 11.2. Indeks Odporności
 
@@ -24,19 +28,36 @@ IO = 1000 × Σ wagi × składowe (każda 0–1)
 
 | Składowa | Waga | 1,0 gdy | 0 gdy |
 |---|---|---|---|
-| Straty finansowe vs wartość referencyjna (strategia „nic" dla tej firmy w tej samej „pogodzie") | 0,25 | straty ≤ 10% referencji | ≥ referencja |
-| Koszt bezpieczeństwa vs budżet (efektywność) | 0,05 | wydane ≤ budżet i dobrze ulokowane | przekroczenie albo „shelfware" |
-| Skutki niefinansowe (zdrowie, woda, ciepło, usługi publiczne) | 0,20 | zero | poważne |
-| Zgodność (wynik audytu S12) | 0,15 | audyt bez niezgodności głównych | brak SZBI / brak wpisu |
-| Reputacja (koniec kampanii) | 0,10 | ≥ startowa | „wskazanie palcem", wyciek w mediach bez rzetelnej komunikacji |
-| Dojrzałość (etap firmy na koniec) | 0,10 | etap ≥ cel kampanii | etap 0 |
-| Ludzie (morale, rotacja) | 0,05 | zespół cały i zdrowy | wypalenie, odejścia |
+| Straty zrealizowane vs gracz bierny w tej samej „pogodzie" | 0,15 | straty ≤ 10% referencji | ≥ referencja |
+| **Ekspozycja**: oczekiwane straty w roku PO kampanii, z końcowego stanu firmy, vs bierny | 0,20 | ≤ 10% referencji | ≥ referencja |
+| Skutki niefinansowe (zakłócenia uzdatniania/przepompowni od 50 tys. zł) | 0,15 | zero | 3 i więcej |
+| Zgodność (wynik kontroli) | 0,15 | audyt bez niezgodności głównych | brak SZBI / brak wpisu |
+| Reputacja (koniec kampanii) | 0,10 | ≥ startowa | „wskazanie palcem", wyciek bez rzetelnej komunikacji |
+| Dojrzałość (10 kluczowych kontroli działa) | 0,10 | wszystkie | żadna |
+| Ludzie (morale) | 0,05 | zespół cały i zdrowy | wypalenie |
 | Biznes (część próśb działów, która doszła do skutku) | 0,10 | działy dostają „tak, ale bezpiecznie" | wszystko blokowane albo odkładane |
 
-Wagi po przypadkach brzegowych (`17-…`): koszt vs budżet 0,05 (był 0,10), ludzie 0,05
-(było 0,10), nowa składowa „biznes" 0,10 — bez niej gracz odmawiający wszystkiego wychodził
-lepiej niż rozsądny. Implementacja: `indeksOdpornosci` w `proto/kampania.js`; straty porównuje
-z graczem biernym na tym samym ziarnie.
+Zmiany po przypadkach brzegowych (`17-…`): „koszt vs budżet" usunięty (przy twardym budżecie
+wynosił 1,0 u każdego), nowa składowa „biznes", a straty zrealizowane oddały część wagi
+ekspozycji. **Ekspozycja to odpowiedź na „szczęście"**: przy 2–5 incydentach na kampanię
+straty zrealizowane to w dużej mierze los, a ryzyko, które jeszcze nie wybuchło — kłamstwo,
+ukryte obejście działu, wyjątek dla zarządu, intruz, którego nie wykryto — nic nie kosztowało.
+Ekspozycja liczy je z PRAWDY silnika (40 przebiegów roku po kampanii, te same ziarna dla
+każdego gracza; przeciwnik bez wyuczonych wag, bo to miara postawy firmy). Implementacja:
+`indeksOdpornosci` i `ekspozycja` w `proto/kampania.js`.
+
+### 11.2a. Sufity — decyzje, których żaden dobry wynik nie równoważy
+
+| Decyzja | Sufit (Indeks i Wynik kampanii) |
+|---|---|
+| Nieprawdziwe oświadczenie wobec ubezpieczyciela (ankieta) | 650 |
+| Komunikat „woda bezpieczna" bez wyników badań (S03) | 650 |
+| Odwołanie przez zarząd (mandat 0) | 500 |
+
+Liczone **z prawdy, wykryte czy nie**. W życiu takie decyzje kończą karierę osoby
+odpowiedzialnej za bezpieczeństwo niezależnie od reszty dorobku, więc kilka punktów kary
+byłoby kłamstwem gry. Podsumowanie mówi wprost: „bez tego: 869, wynik ograniczony do 650,
+bo…". Lista: `BRAMKI` w `proto/kampania.js`.
 
 „Ta sama pogoda": silnik przechowuje ziarno losowości kampanii i liczy na nim strategię
 referencyjną. Gracz porównuje się z „jak by było, gdybyś nic nie robił" w tym samym świecie
@@ -59,8 +80,10 @@ ostrzeżenia, stan). Ocena decyzji:
    nawet jeśli nic się nie stało.
 4. **Premie za naukę**: lekcje z incydentu zamienione na zadania i wykonane.
 
-Wynik: odsetek „punktów jakości" zdobytych z możliwych, z wagą decyzji (decyzja o okupie
-waży więcej niż wybór szablonu maila).
+Wynik: odsetek „punktów jakości" zdobytych z możliwych, **z wagą decyzji** (`jakoscDecyzji`
+w `proto/kampania.js`): karta może podać `waga`, obowiązkowa domyślnie 2, reszta 1 (ankieta
+ubezpieczyciela: 4); decyzje scenariusza ważone punktami rubryki (10 pkt = waga 1). Bez wag
+kłamstwo w ankiecie było 1/68 wyniku — tyle co odpowiedź na prośbę o czat AI.
 
 ## 11.4. Debrief incydentu (po każdym trybie operacyjnym)
 

@@ -122,6 +122,11 @@ także wtedy, gdy nikt nie patrzy (blokuje, izoluje). Realny przykład: w ataku 
 energetykę 29.12.2025 EDR zatrzymał destrukcję na ponad 100 maszynach elektrociepłowni.
 Pułapki: tryb „tylko wykrywaj" po wdrożeniu, wyłączony agent na „wolnym" serwerze, brak
 pokrycia na zasobach spoza ewidencji.
+**Martwe pola** (`martwe_pola` w katalogu): EDR nie widzi pracownika, który wkleja dane do
+prywatnego czatu (insider: 20% skuteczności), logowania do wystawionego panelu HMI (usługi:
+40%) ani podpisanych narzędzi zdalnych dostawcy (60%). Bez tego jeden EDR unieważniał skutki
+dziesiątek złych zgód (`17-…`, 17.6). Podobne pola mają MDR, SIEM, utwardzenie, honeypoty
+i segmentacja; na insidera jest DLP i PAM.
 
 **SIEM.** Centralne logi i korelacja. Gra pokazuje dwie prawdy naraz: (1) bez SIEM-a nie
 zrekonstruujesz incydentu i nie napiszesz rzetelnego zgłoszenia, (2) SIEM bez ludzi to

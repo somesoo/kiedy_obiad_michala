@@ -164,7 +164,7 @@ module.exports = {
       pln: (s.proces_bezpieczny ? 30000 : 140000) + (s.sterownik_zawieszony ? 40000 : 0),
       reputacja: s.komunikacja === 'dobra' ? -3 : s.komunikacja === 'falszywa' ? -18 : -12,
       mandat: s.komunikacja === 'dobra' ? 5 : -6,
-      flagi: { incydent_powazny: true, zgloszone_w_terminie: !!s.zgloszone },
+      flagi: { incydent_powazny: true, zgloszone_w_terminie: !!s.zgloszone, falszywy_komunikat: s.komunikacja === 'falszywa' },
       powrot: !s.furtka_zamknieta,                 // druga furtka otwarta → napastnik wraca
       zamknij_ekspozycje: !!s.odcieta,
       dzial: { produkcja: { swiadomosc: 0.3 } },

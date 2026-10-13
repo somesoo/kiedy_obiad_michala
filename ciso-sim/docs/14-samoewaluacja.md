@@ -209,6 +209,27 @@ strategiami znalazło 20 absurdów; najważniejsze:
    pierwsza wersja twardego budżetu odwoływała „rozsądnego" w połowie przebiegów — dopiero
    wyłączenie kosztów reagowania z budżetu i liczenie abonamentów przy zakupie to naprawiło.
 
+## 14.8b. Czwarta iteracja: dlaczego kłamstwo nic nie kosztowało
+
+Pytanie właściciela: „jakim cudem kłamca ma tak wysoki indeks?". Szczegóły i tabela przyczyn:
+`17-…`, 17.6. W skrócie: kary za kłamstwo trafiały w mandat, którego nie ma w wyniku; indeks
+mierzył tylko zrealizowane straty (szczęście), więc ryzyko, które jeszcze nie wybuchło, było
+darmowe; Jakość Decyzji nie miała wag; „uczciwa" ankieta też kupowała polisę; a EDR widział
+wszystko, więc jedno narzędzie unieważniało dziesiątki złych zgód. Poprawki: sufity, ekspozycja,
+wagi decyzji, martwe pola narzędzi, obejścia po odmowie, Wynik kampanii = ½ Indeks + ½ Jakość.
+
+**Migawka Monte Carlo zmieniona świadomie** (martwe pola): firma produkcyjna, strategia
+„mała firma", 200 przebiegów — straty 61,5 → 79,8 mln zł (+30%, głównie insider: EDR/MDR
+przestały go „łapać"), wydatki 140,4 → 139,0 mln. Strategia „nic" bez zmian. Ranking
+strategii Monte Carlo bez zmian; przewaga „małej firmy" nad „higieną" (znany problem z 14.2)
+zmalała z 441 do 334 tys. zł kosztu całkowitego.
+
+**Lekcja metodyczna:** pierwsza runda laboratorium (14.8a) sprawdzała, czy głupie strategie
+dostają głupie wyniki — i dostawały. Nie sprawdzała, czy POJEDYNCZA zła decyzja w dobrej grze
+jest widoczna. Kłamca grał jak rozsądny z dwoma kłamstwami — i tego nikt nie zobaczył, dopóki
+właściciel nie zapytał. Następna strategia-prowokacja powinna być „rozsądny + jedna zła rzecz"
+dla każdej kategorii decyzji.
+
 ## 14.9. Następne kroki (propozycja)
 
 1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, karty kampanii w `data/kampanie/wodociagi.js`.
