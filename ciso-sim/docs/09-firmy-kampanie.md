@@ -109,7 +109,7 @@ jest firma z zewnątrz na godziny.
 - **Oś kampanii:**
   | Okno | Test |
   |---|---|
-  | m. 2–5 | Phishing „e-ZLA / P1" na lekarzy + wspólne konta (S-zalążek) |
+  | m. 2–5 | Phishing „e-ZLA / P1" na lekarzy + wspólne konta (zalążek Z28) |
   | m. 4–8 | **S04 „Dostawca, któremu ufaliśmy"** (wyciek u dostawcy EDM) |
   | m. 9–14 | **S02 „Piątek, 23:47"** (ransomware w HIS) — kulminacja |
   | m. 15–20 | Kontrola UODO po S04/S02 + audyt na żądanie organu |

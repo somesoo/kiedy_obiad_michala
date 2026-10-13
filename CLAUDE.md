@@ -81,6 +81,7 @@ starej wersji.
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/sl/boss.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
 | **Wordle po polsku** (archiwum) | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **zakończony 2026-08-31** przez `GAME_END_AT`, trwale zablokowany i już nie wróci. Kod zostaje: strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). W rdzeniu zostało tylko to, czego używa też Snakes: `players`, `/api/register`, `/api/me`. Nie inwestuj tu czasu bez wyraźnej prośby. |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
+| **Linia Obrony** (symulator cyberbezpieczeństwa) | `ciso-sim/` (własny `CLAUDE.md`) | **osobna aplikacja w przygotowaniu**: projekt, dane, prototyp, scenariusze. Nie importuje nic z `server.js`/`lib/` i nie dotyka Snakes. |
 
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
 jest w `.gitignore` — baza produkcyjna żyje tylko na serwerze.

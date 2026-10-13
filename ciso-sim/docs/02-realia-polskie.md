@@ -61,7 +61,7 @@ dokładnie wtedy, gdy minął termin samorejestracji. Scenariusz S11 („Wykaz")
 | **Audyt** podmiotu kluczowego: co najmniej raz na 3 lata, pierwszy w ciągu 24 miesięcy; audytor niezależny (nie ten, kto wdrażał SZBI lub obsługiwał incydenty) | finał kampanii (scenariusz S12); niezależność audytora to decyzja (tańszy „swój" audytor = audyt nieważny) | ✅ |
 | Podmiot **ważny**: audyt na żądanie organu (np. po poważnym incydencie) | zdarzenie po incydencie | ✅ |
 | **Pełnomocnik / punkt kontaktowy** dla organów i CSIRT | rola w zespole; brak = opóźnione zgłoszenia | 🟡 (nazewnictwo w ustawie) |
-| **Dostawcy wysokiego ryzyka (DWR)**: minister może uznać dostawcę za DWR; skutek — zakaz wprowadzania nowych produktów, wycofanie istniejących w terminie (utrzymanie dozwolone dla ciągłości) | zdarzenie kampanii (S-zalążek „Decyzja o DWR"); według MC na sierpień 2026 **żaden dostawca nie został jeszcze uznany**; przepisy zaskarżone do TK | ✅ (mechanizm) / 🟡 (stan TK) |
+| **Dostawcy wysokiego ryzyka (DWR)**: minister może uznać dostawcę za DWR; skutek — zakaz wprowadzania nowych produktów, wycofanie istniejących w terminie (utrzymanie dozwolone dla ciągłości) | zdarzenie kampanii (zalążek Z26); według MC na sierpień 2026 **żaden dostawca nie został jeszcze uznany**; przepisy zaskarżone do TK | ✅ (mechanizm) / 🟡 (stan TK) |
 | **Polecenie zabezpieczające** (w sytuacji incydentu krytycznego minister może wydać polecenie) | zdarzenie w scenariuszu energetycznym | 🟡 (procedura) |
 
 ### Kary
@@ -177,14 +177,14 @@ tak jak w życiu.
 | 2025 (29 grudnia) | **atak na energetykę**: co najmniej 30 farm wiatrowych i PV, duża elektrociepłownia, firma produkcyjna; zerwana łączność OZE z operatorami; w elektrociepłowni **EDR zatrzymał destrukcję na ponad 100 maszynach**; atrybucja: grupy powiązane z rosyjskim wywiadem (ESET: Sandworm); „byliśmy bardzo blisko blackoutu" (min. cyfryzacji); stawką ciepło dla ~500 tys. osób | wiper w okresie świątecznym, mróz, EDR jako ostatnia linia | **S10** |
 | 2026 (styczeń) | ciepłownia w Rucianem-Nidzie — śledztwo prokuratury | małe podmioty też są celem | S10 (wariant) |
 | 2026 (marzec) | **fala ransomware w ochronie zdrowia**: Szpital Wojewódzki w Szczecinie (7/8.03, dokumentacja papierowa, pomoc WOT, żądanie okupu w milionach USD wg relacji), Bonifraterskie Centrum Medyczne (13.03), „Eskulap" Racibórz (24.03), Świętokrzyskie Centrum Rehabilitacji (31.03) — 4 ataki w 25 dni | ransomware w szpitalu: procedury papierowe, ciągłość opieki | **S02** |
-| 2026 (kwiecień) | **Uniwersytet Warszawski** — dane studentów i pracowników w darknecie, wejście przejętymi danymi logowania | MFA, infostealery | S-zalążek Z03 |
+| 2026 (kwiecień) | **Uniwersytet Warszawski** — dane studentów i pracowników w darknecie, wejście przejętymi danymi logowania | MFA, infostealery | zalążek Z03 |
 | 2026 | **Fakturownia** — incydent dotyczący wszystkich kont (NIP, adresy, e-maile, w części rachunki/IBAN) | SaaS u dostawcy; BEC na bazie wycieku | **S01** (tło), S04 |
 | 2026 (sierpień) | **MyDr** (oprogramowanie EDM dla przychodni): wg kontrolerów UODO ok. **18,8 mln osób** i ponad **12 tys. placówek**; dostęp do infrastruktury chmurowej (AWS); PESEL, kontakty, dane o zdrowiu; śledztwo CBZC i prokuratury; skutki ponoszą też przychodnie jako administratorzy | dostawca SaaS = ryzyko klienta; podmiot przetwarzający | **S04**, **S05** |
 | 2026 (sierpień) | **Medyc** (Qbusoft): SQL injection w API aplikacji (22–23.08) | bezpieczeństwo aplikacji u dostawcy | S05 (wariant) |
 | 2026 (wrzesień) | **ENEL-MED** — cyberatak zidentyfikowany 24.09, przerwany | wczesne wykrycie | tło |
 | 2026 (6 października) | **NFZ** — naruszenie obejmujące dane **11,1 mln osób** | skala w sektorze publicznym | tło |
 | 2026 (październik) | wakacje.pl (dane paszportowe), Legimi (dane 183 autorów) | różne skale | tło |
-| 2026 (październik) | **„nowa doktryna"** (min. cyfryzacji, Cyber24 Days): państwo będzie pomagać, ale też **publicznie wskazywać firmy, które się nie zabezpieczyły** | mechanika „wskazanie palcem" — reputacja | S-mechanika w `03-…` |
+| 2026 (październik) | **„nowa doktryna"** (min. cyfryzacji, Cyber24 Days): państwo będzie pomagać, ale też **publicznie wskazywać firmy, które się nie zabezpieczyły** | mechanika „wskazanie palcem" — reputacja | `03-…` (Reputacja) |
 
 Uwaga etyczna: **żadna z tych organizacji nie występuje w grze z nazwy.** Debrief może
 powiedzieć „scenariusz inspirowany atakami na stacje uzdatniania wody w 2025 r. (raport ABW)",

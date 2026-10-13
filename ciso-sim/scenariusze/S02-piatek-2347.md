@@ -183,7 +183,7 @@ jest błędem — debrief to tłumaczy.
 ## Warianty
 
 - **Szpital bez długu „dostawca bez MFA"** (gracz zamknął to wcześniej): wektor = phishing
-  na lekarza (Z-zalążek „e-ZLA"), napastnik wolniejszy, EDR ma więcej szans.
+  na lekarza (zalążek Z28), napastnik wolniejszy, EDR ma więcej szans.
 - **Okres świąteczny** (grudzień): mniej personelu IT, firma DFIR zajęta (+12 h przyjazdu).
 - **Przychodnia (POZ, 40 osób)**: bez SOR-u, ale z e-receptami i zwolnieniami (P1, ZUS) —
   skala mniejsza, obowiązki te same.

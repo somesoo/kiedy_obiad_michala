@@ -23,7 +23,7 @@ tym, jak się skończyło.
 |---|---|
 | Projekt gry (ten folder `docs/`) | **wersja 0.1, do dyskusji** |
 | Realia polskie (prawo, CSIRT-y, incydenty) | zweryfikowane na 13.10.2026 w źródłach wtórnych, z listą rzeczy do potwierdzenia w Dz.U. |
-| Scenariusze incydentów | 12 pełnych + ~30 zalążków (`scenariusze/`) |
+| Scenariusze incydentów | 12 pełnych + 32 zalążki (`scenariusze/`); S01 także jako plik danych, grywalny w terminalu |
 | Dane liczbowe (kontrole, zagrożenia, firmy) | `data/*.js`, pierwsza kalibracja |
 | Prototyp symulacji (Monte Carlo) | `proto/symulacja.js` — działa, wyniki w `proto/wyniki-*.txt` |
 | Silnik gry, serwer, front | **nie ma** — patrz roadmapa |
@@ -46,9 +46,9 @@ tym, jak się skończyło.
 | [`docs/12-architektura-i-reuzycie.md`](docs/12-architektura-i-reuzycie.md) | stos, moduły, logowanie hasłem, co bierzemy z repo, czego NIE bierzemy |
 | [`docs/13-roadmapa.md`](docs/13-roadmapa.md) | etapy budowy: od prototypu tekstowego do pełnej gry |
 | [`docs/14-samoewaluacja.md`](docs/14-samoewaluacja.md) | krytyczna ocena projektu, wyniki symulacji, ryzyka, pytania do właściciela |
-| [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, zalążki |
+| [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 jako dane |
 | [`data/`](data/) | liczby: kontrole, zagrożenia, firmy |
-| [`proto/`](proto/) | prototyp symulacji |
+| [`proto/`](proto/) | prototyp symulacji Monte Carlo + rozgrywacz scenariuszy w terminalu |
 
 ## Szybki start dla prototypu
 
@@ -57,9 +57,14 @@ node ciso-sim/proto/symulacja.js produkcja 2000   # firma: produkcja, szpital, w
                                                  # sklep, softwarehouse, bank, energetyka, biuro
 ```
 
-Wypisuje porównanie strategii (nic / papier / narzędzia bez ludzi / higiena / higiena+MDR /
-własny SOC): wydatki, straty, zły scenariusz (P90), liczba poważnych incydentów, zmęczenie
-alertami, poślizg projektów.
+Wypisuje porównanie strategii (nic / papier / narzędzia bez ludzi / mała firma / higiena /
+higiena+MDR / własny SOC): wydatki, straty, zły scenariusz (P90), liczba poważnych incydentów,
+zmęczenie alertami, poślizg i niewdrożone projekty.
+
+```bash
+node ciso-sim/proto/rozegraj.js S01                              # zagraj scenariusz przy stole
+node ciso-sim/proto/rozegraj.js S01 --kontrole=weryfikacja_platnosci   # z procedurą płatności
+```
 
 ## Zasady pracy w tym folderze
 
