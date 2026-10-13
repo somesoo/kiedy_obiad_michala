@@ -1,21 +1,36 @@
 // Testy prototypu: node --test ciso-sim/test/
 // Pierwsze automatyczne testy w tym repo (reszta repo ich nie ma — patrz CLAUDE.md główny).
-// Pilnują trzech rzeczy, na których stoi cała gra: deterministyczności, poprawności plików
-// scenariuszy i KIERUNKU uczenia się działów (nie konkretnych liczb).
+// Pilnują tego, na czym stoi gra (docs/18-silnik-ruchow.md): deterministyczności i zapisu,
+// pełnej dowolności ruchów (żaden ruch nie wysypuje modelu, nigdzie nie ma „ocen opcji"),
+// zależności między ruchami (przygotowanie zmienia incydent, kolejność akcji ma znaczenie,
+// cykl życia kontroli działa) i KIERUNKU wyników (nie konkretnych liczb).
 
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const { symuluj, STRATEGIE } = require('../proto/symulacja');
-const { waliduj } = require('../proto/rozegraj');
 const K = require('../proto/kampania');
+const S = require('../proto/silnik');
+const RU = require('../proto/ruchy');
+const SP = require('../proto/sprawy');
+const I = require('../proto/incydent');
+const B = require('../proto/brzegowe');
 const FIRMY = require('../data/firmy');
+const INICJATYWY = require('../data/dzialy');
+const RUCHY = require('../data/ruchy');
 
 const cicho = () => {};
+const graj = (strat, seed) => K.grajAuto(typeof strat === 'string' && B.STRATEGIE[strat] ? B.STRATEGIE[strat] : strat, seed, false, cicho, false);
+const nowa = (seed = 1) => K.nowaKampania('wodociagi', seed);
+// Zamyka miesiące, aż warunek się spełni (z bezpiecznikiem — inaczej test wisi zamiast pęknąć).
+const dopoki = (k, war, max = 8) => { for (let i = 0; i < max && !war(); i++) K.zamknijMiesiac(k); return war(); };
+
+// ── SILNIK I DANE ──
 
 test('silnik: migawka Monte Carlo (zmiana danych/silnika = świadoma aktualizacja tych liczb)', () => {
   // Liczby z 13.10.2026 po martwych polach narzędzi (EDR nie widzi insidera itd., docs/17-…, 17.6).
+  // Konfiguracja kontroli (st.konf) jest pusta w symulacji, więc silnik ruchów ich nie zmienia.
   // Jeśli zmieniasz dane albo model: przelicz, zaktualizuj tu i opisz zmianę w docs/14-….
   const oczekiwane = { nic: [763917676, 4265000], mala_firma: [79765180, 138960625] };
   for (const [s, [straty, wydatki]] of Object.entries(oczekiwane)) {
@@ -26,93 +41,244 @@ test('silnik: migawka Monte Carlo (zmiana danych/silnika = świadoma aktualizacj
   }
 });
 
-test('scenariusze: każdy plik .dane.js przechodzi walidację (najlepsza ścieżka = 100 pkt)', () => {
-  const dir = path.join(__dirname, '..', 'scenariusze');
-  const pliki = fs.readdirSync(dir).filter(f => f.endsWith('.dane.js'));
-  assert.ok(pliki.length >= 2);
-  for (const f of pliki) assert.deepStrictEqual(waliduj(require(path.join(dir, f))), [], f);
-});
-
-test('kampania: to samo ziarno i te same decyzje dają ten sam wynik', async () => {
-  const a = await K.grajAuto('rozsadny', 11, false, cicho, false);
-  const b = await K.grajAuto('rozsadny', 11, false, cicho, false);
-  assert.strictEqual(a.st.w.straty, b.st.w.straty);
-  assert.strictEqual(a.st.w.wydatki, b.st.w.wydatki);
-  assert.strictEqual(a.decyzje.length, b.decyzje.length);
-});
-
-test('kampania: zapis = lista decyzji; odtworzenie daje identyczny stan', async () => {
-  const a = await K.grajAuto('odmawiajacy', 5, false, cicho, false);
-  const b = await K.odtworz('wodociagi', 5, a.akcje);
-  assert.strictEqual(b.st.w.straty, a.st.w.straty);
-  assert.strictEqual(b.st.w.wydatki, a.st.w.wydatki);
-  for (const id of Object.keys(a.dzialy)) assert.strictEqual(b.dzialy[id].zaufanie, a.dzialy[id].zaufanie, id);
-});
-
-test('działy uczą się: odmowy obniżają zaufanie, bierność rodzi obejścia', async () => {
-  const sr = k => Object.values(k.dzialy).reduce((s, d) => s + d.zaufanie, 0) / Object.keys(k.dzialy).length;
-  const ukryte = k => Object.values(k.dzialy).reduce((s, d) => s + d.ukryte.filter(u => !u.odkryte).length, 0);
-  for (const seed of [1, 2, 3]) {
-    const roz = await K.grajAuto('rozsadny', seed, false, cicho, false);
-    const odm = await K.grajAuto('odmawiajacy', seed, false, cicho, false);
-    const bier = await K.grajAuto('bierny', seed, false, cicho, false);
-    assert.ok(sr(odm) < sr(roz), `seed ${seed}: zaufanie po odmowach (${sr(odm)}) < po „tak, ale" (${sr(roz)})`);
-    assert.ok(ukryte(bier) > ukryte(roz), `seed ${seed}: obejścia przy bierności > przy aktywnej współpracy`);
-  }
-});
-
-test('mgła wojny: raporty działów nie zdradzają, kto jest w sieci', async () => {
-  const k = await K.grajAuto('bierny', 3, false, cicho, false);
-  const tekst = k.raporty.flatMap(r => r.linie).join(' ') + k.raportIT.join(' ');
-  // „ransomware" wolno — po zaszyfrowaniu gracz widzi żądanie okupu. Sprawców w trakcie — nie.
-  for (const slowo of ['broker', 'apt', 'haktywista', 'intruz']) {
-    assert.ok(!new RegExp(`(^|[^\\p{L}])${slowo}`, 'iu').test(tekst), slowo);   // całe słowo, nie „adaptacja"
-  }
-});
-
-// ── PRZYPADKI BRZEGOWE (docs/17-przypadki-brzegowe.md) ──
-// Każdy test tu odpowiada absurdowi, który naprawdę wyszedł w laboratorium (proto/brzegowe.js).
-const B = require('../proto/brzegowe');
-const S = require('../proto/silnik');
-
 test('dane: kampania i wszystkie firmy przechodzą walidację; firma bez ludzi i zasobów — nie', () => {
   assert.deepStrictEqual(K.walidujKampanie(require('../data/kampanie/wodociagi')), []);
   for (const [id, f] of Object.entries(FIRMY)) assert.deepStrictEqual(S.walidujFirme(f), [], id);
   assert.ok(S.walidujFirme({ ...FIRMY.biuro, pracownicy: 0, zasoby: { stacje: 0, serwery: 0, znane: 0.5 } }).length >= 2);
 });
 
-test('niezmienniki trzymają się dla każdej głupiej i cwanej strategii', async () => {
-  for (const [nazwa, strat] of Object.entries(B.STRATEGIE)) {
-    for (const seed of [1, 2]) {
-      strat.reset?.(seed);
-      const k = await K.grajAuto(strat, seed, false, cicho, false);
-      assert.deepStrictEqual(B.sprawdz(k, nazwa, seed), []);
-    }
+test('incydenty: każdy plik .incydent.js przechodzi walidację (min. 4 akcje, zasady, debrief)', () => {
+  const dir = path.join(__dirname, '..', 'scenariusze');
+  const pliki = fs.readdirSync(dir).filter(f => f.endsWith('.incydent.js'));
+  assert.ok(pliki.length >= 2);
+  for (const f of pliki) assert.deepStrictEqual(I.waliduj(require(path.join(dir, f))), [], f);
+  // Walidator naprawdę pilnuje „bez quizu": akcja z oceną nie przechodzi.
+  const zly = { ...require(path.join(dir, pliki[0])) };
+  zly.akcje = { ...zly.akcje, x: { nazwa: 'x', czas_h: 1, efekt: () => '', ocena: 'dobra' } };
+  assert.ok(I.waliduj(zly).some(b => /nie mają ocen/.test(b)));
+});
+
+test('to nie quiz: nigdzie w ruchach, sprawach ani akcjach incydentów nie ma ocen ani punktów', () => {
+  const kamp = require('../data/kampanie/wodociagi');
+  for (const [id, r] of Object.entries(RUCHY)) assert.ok(!('ocena' in r) && !('pkt' in r), `ruch ${id}`);
+  for (const [sid, s] of Object.entries(kamp.sprawy)) {
+    for (const [v, c] of Object.entries(s.czasowniki)) assert.ok(!('ocena' in c) && !('pkt' in c), `${sid}.${v}`);
+  }
+  for (const id of ['S01', 'S03']) for (const [aid, a] of Object.entries(I.wczytaj(id).akcje)) assert.ok(!('ocena' in a), `${id}.${aid}`);
+});
+
+// ── ZAPIS I DETERMINIZM ──
+
+test('kampania: to samo ziarno i te same ruchy dają ten sam wynik', async () => {
+  const a = await graj('rozsadny', 11);
+  const b = await graj('rozsadny', 11);
+  assert.strictEqual(a.st.w.straty, b.st.w.straty);
+  assert.strictEqual(a.st.w.wydatki, b.st.w.wydatki);
+  assert.deepStrictEqual(a.akcje, b.akcje);
+});
+
+test('zapis = lista akcji; odtworzenie fuzzera (losowe ruchy, sprawy, incydenty) daje identyczny stan', async () => {
+  for (const seed of [3, 7]) {
+    const a = await graj('losowy', seed);
+    assert.ok(a.akcje.some(x => x.t === 'inc') && a.akcje.some(x => x.t === 'sprawa') && a.akcje.some(x => x.t === 'ruch'), 'fuzzer nie przećwiczył wszystkich rodzajów akcji');
+    const b = await K.odtworz('wodociagi', seed, a.akcje);
+    assert.strictEqual(b.st.w.straty, a.st.w.straty);
+    assert.strictEqual(b.st.w.wydatki, a.st.w.wydatki);
+    assert.deepStrictEqual(b.wskazniki, a.wskazniki);
+    assert.deepStrictEqual(b.st.konf, a.st.konf);
+    for (const id of Object.keys(a.dzialy)) assert.strictEqual(b.dzialy[id].zaufanie, a.dzialy[id].zaufanie, id);
   }
 });
 
-test('„zawsze pierwsza odpowiedź" nie wygrywa (kolejność opcji jest tasowana)', async () => {
-  let jd = 0;
+// ── DOWOLNOŚĆ RUCHÓW ──
+
+test('każdy ruch, który lista pokazuje jako dostępny, da się wykonać na świeżej kampanii', () => {
+  const k0 = nowa(2);
+  const dostepne = RU.lista(k0).filter(r => !r.powod);
+  assert.ok(dostepne.length >= 25, `za mało dostępnych ruchów na starcie: ${dostepne.length}`);
+  for (const r of dostepne) {
+    const k = nowa(2);
+    // Przykładowe parametry jak w liście: pierwsza wartość każdego parametru (ruchy z data/ruchy.js).
+    const p = r.id.includes(':') ? {} : Object.fromEntries(Object.entries(r.param).map(([n, w]) => [n, w[0]]));
+    assert.doesNotThrow(() => RU.wykonaj(k, r.id, p), r.id);
+    assert.deepStrictEqual(k.akcje.at(-1), { t: 'ruch', id: r.id, p }, `${r.id}: akcja nie trafiła do zapisu`);
+  }
+});
+
+test('limity: ruch ponad godziny albo budżet jest niedostępny, mówi dlaczego i nic nie zmienia', () => {
+  const k = nowa();
+  k.hKart = 1000;
+  assert.match(RU.dostepny(k, 'wdroz:mfa'), /brak godzin/);
+  k.hKart = 0; k.budzet[k.rok] = 0;
+  assert.match(RU.dostepny(k, 'wdroz:edr'), /brak budżetu/);
+  const przed = JSON.stringify([k.hKart, k.wydaneRok, k.akcje.length, Object.keys(k.obiekty)]);
+  assert.throws(() => RU.wykonaj(k, 'wdroz:edr'), /brak budżetu/);
+  assert.strictEqual(JSON.stringify([k.hKart, k.wydaneRok, k.akcje.length, Object.keys(k.obiekty)]), przed);
+});
+
+// ── CYKL ŻYCIA KONTROLI ──
+
+test('cykl życia: wdrożenie → działa; test odsłania usterkę, naprawa przywraca skuteczność', () => {
+  const k = nowa();
+  RU.wykonaj(k, 'wdroz:mfa', { zakres: 'wszyscy', metoda: 'numer' });
+  assert.strictEqual(k.obiekty.mfa.stan, 'projekt');
+  assert.ok(!S.dziala(k.st, 'mfa'), 'zlecone ≠ działa');
+  assert.ok(dopoki(k, () => k.obiekty.mfa.stan === 'dziala'), 'MFA nie weszło w kilka miesięcy');
+  assert.ok(S.dziala(k.st, 'mfa') && k.st.konf.mfa);
+
+  // Kopia „robi się", ale nie odtwarza — skuteczność spada; test to widzi, naprawa przywraca.
+  const k2 = nowa();
+  const o = RU.zainstalujGotowe(k2, 'backup', { zakres: 'biuro_ot', nosnik: 'offline' });
+  const dobra = RU.skutecznosc(k2, 'backup');
+  o.usterki.push({ id: 'nie_odtwarza', opis: 'kopia nie odtwarza', skutek: { odtwarzanie: 0.3 }, przeglad: 0, test: 1, naprawa_h: 8, odkryta: false, naprawiona: false });
+  RU.przeliczKonf(k2, 'backup');
+  assert.ok(RU.skutecznosc(k2, 'backup') < dobra * 0.5, 'ukryta usterka nie obniża skuteczności');
+  assert.match(RU.dostepny(k2, 'napraw:backup', { usterka: 'nie_odtwarza' }), /brak znanych usterek/);   // nie naprawisz, czego nie znasz
+  RU.wykonaj(k2, 'test:backup');
+  assert.ok(o.usterki[0].odkryta);
+  RU.wykonaj(k2, 'napraw:backup', { usterka: 'nie_odtwarza' });
+  assert.strictEqual(RU.skutecznosc(k2, 'backup'), dobra);
+});
+
+test('wycofanie: skutek znika od razu, abonament płacimy jeszcze miesiąc; potem można wdrożyć ponownie', () => {
+  const k = nowa();
+  RU.zainstalujGotowe(k, 'edr');
+  RU.wykonaj(k, 'wycofaj:edr');
+  assert.ok(!S.dziala(k.st, 'edr') && !k.st.konf.edr, 'wycofana kontrola dalej działa');
+  assert.ok(k.st.zamowione.has('edr'), 'okres wypowiedzenia: abonament jeszcze leci');
+  K.zamknijMiesiac(k); K.zamknijMiesiac(k);
+  assert.ok(!k.st.zamowione.has('edr'), 'abonament po wypowiedzeniu dalej naliczany');
+  assert.strictEqual(RU.dostepny(k, 'wdroz:edr'), null);
+});
+
+test('OT: pilotaż odsłania niezgodność; rozszerzenie na OT bez niego = awaria; powrót z OT ją kończy', () => {
+  let seed = 1;
+  while (!nowa(seed).otNiezgodne.edr) seed++;
+  const k = nowa(seed);
+  RU.zainstalujGotowe(k, 'edr', { zakres: 'biuro_serwery' });
+  const straty = k.st.w.straty;
+  RU.wykonaj(k, 'zmien:edr', { zakres: 'z_ot' });
+  assert.ok(k.st.w.straty > straty, 'brak awarii przy niezgodnym agencie na OT');
+  assert.ok(k.obiekty.edr.usterki.some(u => u.id === 'niezgodnosc_ot' && !u.naprawiona));
+  assert.ok(k.historia.some(h => h.t === 'ot_zmiana' && h.id === 'edr' && !h.pilot), 'zmiana OT bez pilotażu niezapisana (zasada jej nie oceni)');
+  RU.wykonaj(k, 'zmien:edr', { zakres: 'biuro_serwery' });
+  assert.ok(k.obiekty.edr.usterki.every(u => u.id !== 'niezgodnosc_ot' || u.naprawiona));
+
+  const k2 = nowa(seed);
+  assert.match(RU.wykonaj(k2, 'pilotaz:edr'), /zawieszać/);
+  assert.strictEqual(k2.st.w.straty, 0, 'pilotaż ma być bezpieczny');
+});
+
+// ── SPRAWY I WARUNKI ──
+
+test('warunki „tak, ale" składają się: resztka ryzyka na wektor maleje, zadowolenie działu też; warunek z MFA wymaga MFA', () => {
+  const k = nowa();
+  const ini = INICJATYWY.konto_wspolne;
+  const jeden = SP.policzWarunki(k, ini, 'imienne');
+  const dwa = SP.policzWarunki(k, ini, 'imienne,wygasanie');
+  assert.ok(dwa.ulamki.insider < jeden.ulamki.insider, 'drugi warunek nie tnie ryzyka');
+  assert.ok(dwa.nagroda < jeden.nagroda, 'każdy warunek kosztuje zadowolenie działu');
+  assert.throws(() => SP.policzWarunki(k, ini, 'mfa'), /wymaga/);
+  const s = SP.dodajProsbe(k, { dzial: 'kadry', ini: 'konto_wspolne' });
+  assert.match(SP.dostepnyCzasownik(k, s, 'warunki', { warunki: 'mfa' }), /wymaga/);
+  RU.zainstalujGotowe(k, 'mfa');
+  assert.strictEqual(SP.dostepnyCzasownik(k, s, 'warunki', { warunki: 'imienne,mfa' }), null);
+});
+
+test('ankieta ubezpieczyciela: uczciwe „nie" = brak polisy; „tak" wbrew prawdzie = polisa i kłamstwo w rejestrze', () => {
+  const k = nowa();
+  const s = SP.dodajScenariuszowa(k, 'S_ubezpieczenie');
+  SP.odpowiedz(k, s.id, 'ankieta', { mfa: 'nie', edr: 'nie', kopie: 'nie' });
+  assert.ok(!k.st.zamowione.has('ubezpieczenie') && !k.klamstwa.length);
+
+  const k2 = nowa();
+  const s2 = SP.dodajScenariuszowa(k2, 'S_ubezpieczenie');
+  SP.odpowiedz(k2, s2.id, 'ankieta', { mfa: 'tak', edr: 'tak', kopie: 'tak' });
+  assert.ok(k2.st.zamowione.has('ubezpieczenie'), 'kłamstwo musi coś dawać — inaczej nie jest pokusą');
+  assert.strictEqual(k2.klamstwa.length, 1);
+  assert.strictEqual(k2.klamstwa[0].wobec, 'ubezpieczyciel');
+});
+
+test('odmowa nie kasuje potrzeby: działy czasem robią swoje po cichu', async () => {
+  let po = 0;
+  for (const seed of [1, 2, 3, 4, 5]) po += (await graj('odmawiajacy', seed)).rejestr.filter(r => /po odmowie/.test(r.tekst)).length;
+  assert.ok(po > 0, 'po odmowach nigdy nie było obejścia');
+});
+
+test('działy uczą się: odmowy obniżają zaufanie, bierność rodzi obejścia', async () => {
+  const sr = k => Object.values(k.dzialy).reduce((s, d) => s + d.zaufanie, 0) / Object.keys(k.dzialy).length;
+  const ukryte = k => Object.values(k.dzialy).reduce((s, d) => s + d.ukryte.filter(u => !u.odkryte).length, 0);
   for (const seed of [1, 2, 3]) {
-    const k = await K.grajAuto({ karta: () => 0, scen: () => 0 }, seed, false, cicho, false);
-    jd += K.jakoscDecyzji(k);
+    const mad = await graj('madry', seed);
+    const odm = await graj('odmawiajacy', seed);
+    const bier = await graj('bierny', seed);
+    assert.ok(sr(odm) < sr(mad), `seed ${seed}: zaufanie po odmowach (${sr(odm)}) < przy „tak, ale" (${sr(mad)})`);
+    assert.ok(ukryte(bier) > ukryte(mad), `seed ${seed}: obejścia przy bierności > przy aktywnej współpracy`);
   }
-  assert.ok(jd / 3 < 0.7, `jakość decyzji „zawsze a)" = ${(jd / 3).toFixed(2)}`);
 });
 
-test('Wynik kampanii porządkuje style sensownie: mądry > potakiwacz > kłamca, kłamca daleko za rozsądnym', async () => {
+// ── INCYDENTY BEZ DRZEWA ──
+
+test('incydent S01: kolejność akcji ma znaczenie (bank od razu > bank po zebraniu > bank po mailu do sprawcy)', () => {
+  const odzysk = plan => {
+    const k = nowa();
+    I.rozpocznij(k, 'S01');
+    assert.ok(!k.incydent.s.udaremnione);
+    for (const a of plan) I.wykonaj(k, a);
+    return k.incydent.s.odzysk;
+  };
+  const odRazu = odzysk(['bank']), poZebraniu = odzysk(['zebranie', 'bank']), poMailu = odzysk(['mail_kontrahent', 'bank']);
+  assert.ok(odRazu > poZebraniu, `${odRazu} vs ${poZebraniu}`);
+  assert.ok(odRazu > poMailu * 2, `mail do przejętej skrzynki ostrzega sprawcę: ${odRazu} vs ${poMailu}`);
+});
+
+test('incydent: przygotowanie zmienia start (procedura płatności udaremnia S01, zamknięty panel HMI = tylko próba w S03)', () => {
+  const k = nowa();
+  RU.zainstalujGotowe(k, 'weryfikacja_platnosci');
+  I.rozpocznij(k, 'S01');
+  assert.ok(k.incydent.s.udaremnione);
+
+  const k2 = nowa();
+  assert.ok(k2.fakty.hmi_wystawiony.prawda);
+  I.rozpocznij(k2, 'S03');
+  assert.ok(!k2.incydent.s.proba, 'otwarty panel → prawdziwy atak');
+  const k3 = nowa();
+  k3.fakty.hmi_wystawiony.naprawiony = true;
+  I.rozpocznij(k3, 'S03');
+  assert.ok(k3.incydent.s.proba, 'zamknięty panel → tylko próba w logach');
+});
+
+test('incydent: bezczynność nie zalicza zasad „nie rób X", czas płynie także w czekaniu', () => {
+  const k = nowa();
+  I.rozpocznij(k, 'S01');
+  I.czekaj(k, 5);
+  assert.strictEqual(k.incydent.s.t, 5);
+  const w = I.zakoncz(k, true);
+  assert.ok(!w.oceny.some(o => o.wynik === 'spelniona'), `bezczynność zaliczyła: ${w.oceny.filter(o => o.wynik === 'spelniona').map(o => o.id)}`);
+});
+
+// ── OCENA: KIERUNEK WYNIKÓW ──
+
+test('Wynik kampanii porządkuje style sensownie: mądry > rozsądny > bierny; mądry > potakiwacz > kłamca', async () => {
   const w = {};
-  for (const n of ['madry', 'rozsadny', 'potakiwacz', 'klamca']) {
+  for (const n of ['madry', 'rozsadny', 'potakiwacz', 'klamca', 'bierny']) {
     w[n] = 0;
-    for (const seed of [1, 2, 3]) w[n] += (await K.indeksOdpornosci(await K.grajAuto(B.STRATEGIE[n], seed, false, cicho, false))).kampania / 3;
+    for (const seed of [1, 2, 3]) w[n] += (await K.indeksOdpornosci(await graj(n === 'bierny' ? K.AUTO.bierny : n, seed))).kampania / 3;
   }
+  assert.ok(w.madry > w.rozsadny && w.rozsadny > w.bierny, JSON.stringify(w));
   assert.ok(w.madry > w.potakiwacz && w.potakiwacz > w.klamca, JSON.stringify(w));
-  assert.ok(w.rozsadny - w.klamca > 300, `kłamstwo kosztuje za mało: ${JSON.stringify(w)}`);
+});
+
+test('bierność nie jest cnotą: kto nic nie robi, ma praktykę bliską zera', async () => {
+  for (const seed of [1, 2]) {
+    const io = await K.indeksOdpornosci(await graj(K.AUTO.bierny, seed));
+    assert.ok(io.jd < 0.2, `ziarno ${seed}: praktyka biernego ${io.jd}`);
+  }
 });
 
 test('kłamstwo nie popłaca: sufit 650 nawet nieujawnione, 450 i mniej po ujawnieniu', async () => {
   for (const seed of [1, 2, 3]) {
-    const k = await K.grajAuto(B.STRATEGIE.klamca, seed, false, cicho, false);
+    const k = await graj('klamca', seed);
     const io = await K.indeksOdpornosci(k);
     assert.ok(k.klamstwa.length > 0, 'kłamca nie skłamał — test nic nie sprawdza');
     const sufit = k.klamstwa.some(l => l.ujawnione) ? 450 : 650;
@@ -121,7 +287,7 @@ test('kłamstwo nie popłaca: sufit 650 nawet nieujawnione, 450 i mniej po ujawn
 });
 
 test('ujawnione kłamstwo uderza we współpracę: działy przestają ufać, zarząd tnie mandat', () => {
-  const k = K.nowaKampania('wodociagi', 1);
+  const k = nowa();
   k.klamstwa.push({ m: 1, tekst: 't', wobec: 'ubezpieczyciel', wykrywalnosc: 1, ujawnione: null });
   const przed = { man: k.wskazniki.mandat, zauf: Object.values(k.dzialy).map(d => d.zaufanie), q: Object.values(k.dzialy).map(d => d.Q.pytaj) };
   K.ujawnij(k, k.klamstwa[0], 'test');
@@ -129,48 +295,50 @@ test('ujawnione kłamstwo uderza we współpracę: działy przestają ufać, zar
   Object.values(k.dzialy).forEach((d, i) => { assert.ok(d.zaufanie < przed.zauf[i] || d.zaufanie === 0); assert.ok(d.Q.pytaj < przed.q[i]); });
 });
 
-test('audyt zamykający: po ujawnionym kłamstwie próba rozszerzona (drobne → główne); nieujawnione dokumenty wstecz „pomagają"', () => {
-  const k = K.nowaKampania('wodociagi', 1);
-  for (const id of ['szbi', 'ryzyko', 'mfa']) k.st.aktywne[id] = 0;
-  k.flagi.polityki_z_pudelka = true;                       // SZBI i ład: drobna
-  const czysty = K.ocenaKontroli(k);
+test('audyt zamykający: dowody, próbki usterek, rozszerzona próba po kłamstwie, plan naprawczy', () => {
+  const przygotuj = () => {
+    const k = nowa();
+    RU.zainstalujGotowe(k, 'szbi', { sposob: 'z_pudelka' });    // SZBI i ład: drobna
+    RU.zainstalujGotowe(k, 'ryzyko');
+    RU.zainstalujGotowe(k, 'mfa', { zakres: 'wszyscy' });
+    return k;
+  };
+  const czysty = K.ocenaKontroli(przygotuj());
   assert.ok(czysty.obszary.some(([, x]) => x === 'drobna') && !czysty.rozszerzonaProba);
+
+  const k = przygotuj();
   k.klamstwa.push({ m: 20, tekst: 'wstecz', wobec: 'audytor', wykrywalnosc: 0, ujawnione: null });
-  const ukryte = K.ocenaKontroli(k);                       // nikt nie wykrył: fałszywka „działa"
-  assert.ok(ukryte.wynik > czysty.wynik, `${ukryte.wynik} vs ${czysty.wynik}`);
-  k.klamstwa[0].wykrywalnosc = 1;
-  const wykryte = K.ocenaKontroli(k);
+  assert.ok(K.ocenaKontroli(k).wynik > czysty.wynik, 'niewykryte dokumenty wstecz „pomagają" (stąd sufit w BRAMKI)');
+
+  const k2 = przygotuj();
+  k2.klamstwa.push({ m: 20, tekst: 'wstecz', wobec: 'audytor', wykrywalnosc: 1, ujawnione: null });
+  const wykryte = K.ocenaKontroli(k2);
   assert.ok(wykryte.rozszerzonaProba && !wykryte.obszary.some(([, x]) => x === 'drobna'));
   assert.ok(wykryte.wynik < czysty.wynik, `${wykryte.wynik} vs ${czysty.wynik}`);
-});
 
-test('uczciwa ankieta bez EDR = brak polisy (prawda ma cenę, więc kłamstwo jest prawdziwym wyborem)', () => {
-  const k = K.nowaKampania('wodociagi', 1);
-  const c = { id: 'u', zrodlo: 'katalog', tytul: 'Ubezpieczenie', cele: [], opcje: [
-    { tekst: 'prawda', zlec: ['ubezpieczenie'], warunkowo: true, ocena: 'dobra', dlaczego: '-' }] };
-  k.karty.push(c);
-  K.rozstrzygnij(k, 'u', 0);
-  assert.ok(!k.st.zamowione.has('ubezpieczenie'));
-});
+  const k3 = przygotuj();
+  k3.flagi.plan_naprawczy = 20;
+  assert.strictEqual(K.ocenaKontroli(k3).wynik, czysty.wynik + 6, 'plan naprawczy: dwie główne niezgodności → drobne');
 
-test('odmowa nie kasuje potrzeby: działy czasem robią swoje po cichu', async () => {
-  let po = 0;
-  for (const seed of [1, 2, 3, 4, 5]) {
-    const k = await K.grajAuto('odmawiajacy', seed, false, cicho, false);
-    po += k.rejestr.filter(r => /po odmowie/.test(r.tekst)).length;
-  }
-  assert.ok(po > 0, 'po odmowach nigdy nie było obejścia');
+  // Znana, nienaprawiona usterka wychodzi w próbce zawsze; zaakceptowana przez zarząd — nie.
+  const k4 = przygotuj();
+  k4.obiekty.mfa.usterki.push({ id: 'stare_protokoly', opis: 'stare protokoły', odkryta: true, naprawiona: false });
+  const zUsterka = K.ocenaKontroli(k4);
+  assert.ok(zUsterka.proba.length === 1 && zUsterka.wynik < czysty.wynik);
+  const k5 = przygotuj();
+  k5.obiekty.mfa.usterki.push({ id: 'stare_protokoly', opis: 'stare protokoły', odkryta: true, naprawiona: false });
+  k5.akceptacje['usterka:mfa:stare_protokoly'] = 20;
+  assert.strictEqual(K.ocenaKontroli(k5).proba.length, 0);
 });
 
 test('ekspozycja widzi to, co zostawiasz: ukryte obejścia podnoszą oczekiwane straty', async () => {
-  const k = await K.grajAuto('madry', 1, false, cicho, false);
+  const k = await graj('madry', 1);
   const przed = K.ekspozycja(k, 60).pln;
   for (const [w, v] of Object.entries({ insider: 3, uslugi: 3, dostawca: 3 })) k.modStale[w] = v;
   assert.ok(K.ekspozycja(k, 60).pln > przed * 1.3, 'mnożniki ryzyka nie zmieniają ekspozycji');
 });
 
 test('martwe pola: EDR nie wykrywa insidera tak jak intruza z phishingu', () => {
-  const S = require('../proto/silnik');
   const st0 = () => { const st = S.nowyStan(FIRMY.wodociagi, 5); st.aktywne.edr = -12; st.zamowione.add('edr'); return st; };
   const wykryte = wektor => {
     let n = 0;
@@ -184,23 +352,27 @@ test('martwe pola: EDR nie wykrywa insidera tak jak intruza z phishingu', () => 
   assert.ok(wykryte('insider') < wykryte('phishing') * 0.7, `insider ${wykryte('insider')} vs phishing ${wykryte('phishing')}`);
 });
 
-test('limity: opcja ponad godziny albo budżet jest niedostępna i nic nie zmienia', () => {
-  const k = K.nowaKampania('wodociagi', 1);
-  k.karty.push({ id: 'test', zrodlo: 'katalog', tytul: 't', cele: [], opcje: [
-    { tekst: 'za dużo godzin', h: 1000, ocena: 'dobra', dlaczego: '-' },
-    { tekst: 'za drogo', pln: 10000000, ocena: 'dobra', dlaczego: '-' }] });
-  const przed = JSON.stringify([k.hKart, k.wydaneRok, k.akcje.length]);
-  assert.throws(() => K.rozstrzygnij(k, 'test', 0), /brak godzin/);
-  assert.throws(() => K.rozstrzygnij(k, 'test', 1), /brak budżetu/);
-  assert.strictEqual(JSON.stringify([k.hKart, k.wydaneRok, k.akcje.length]), przed);
+// ── NIEZMIENNIKI I MGŁA WOJNY ──
+
+test('niezmienniki trzymają się dla każdej głupiej, cwanej i losowej strategii', async () => {
+  for (const [nazwa, strat] of Object.entries(B.STRATEGIE)) {
+    for (const seed of [1, 2]) assert.deepStrictEqual(B.sprawdz(await graj(strat, seed), nazwa, seed), []);
+  }
+});
+
+test('mgła wojny: raporty działów nie zdradzają, kto jest w sieci', async () => {
+  const k = await graj(K.AUTO.bierny, 3);
+  const tekst = k.raporty.flatMap(r => r.linie).join(' ') + k.raportIT.join(' ');
+  // „ransomware" wolno — po zaszyfrowaniu gracz widzi żądanie okupu. Sprawców w trakcie — nie.
+  for (const slowo of ['broker', 'apt', 'haktywista', 'intruz']) {
+    assert.ok(!new RegExp(`(^|[^\\p{L}])${slowo}`, 'iu').test(tekst), slowo);   // całe słowo, nie „adaptacja"
+  }
 });
 
 test('mgła wojny: sygnały bywają fałszywe, a szacunek zasobów nie jest prawdą', async () => {
   let falszywe = 0;
-  for (const seed of [1, 2, 3]) {
-    await K.grajAuto({ karta: (c, k) => { if (c.zrodlo === 'sygnal' && !c.intruz) falszywe++; return c.obowiazkowa ? 0 : null; }, scen: () => 0 }, seed, false, cicho, false);
-  }
-  assert.ok(falszywe > 0, 'karta „sygnał" nie może oznaczać pewnego intruza');
-  const bledy = [1, 2, 3, 4].map(s => Math.abs(K.nowaKampania('wodociagi', s).mglaBlad));
+  for (const seed of [1, 2, 3]) falszywe += (await graj(K.AUTO.bierny, seed)).sprawyZamkniete.filter(s => s.rodzaj === 'sygnal' && !s.intruz).length;
+  assert.ok(falszywe > 0, 'sprawa „sygnał" nie może oznaczać pewnego intruza');
+  const bledy = [1, 2, 3, 4].map(s => Math.abs(nowa(s).mglaBlad));
   assert.ok(bledy.some(b => b > 0.02), 'środek przedziału nie może być prawdą');
 });

@@ -3,7 +3,7 @@
 const K = require('./kampania');
 (async () => {
   const N = 20;
-  console.log('styl          straty    wydatki   audyt  zaufanie  ukryte  zakłóc.  reput.  mandat  P(poważny)  JD   INDEKS  WYNIK');
+  console.log('styl          straty    wydatki   audyt  zaufanie  ukryte  zakłóc.  reput.  mandat  P(poważny) PRAKT. INDEKS  WYNIK');
   for (const s of ['madry', 'rozsadny', 'odmawiajacy', 'bierny']) {
     const a = { straty: 0, wyd: 0, audyt: 0, zauf: 0, ukr: 0, zak: 0, rep: 0, man: 0, pow: 0, jd: 0, io: 0, wk: 0 };
     for (let seed = 1; seed <= N; seed++) {
@@ -12,7 +12,7 @@ const K = require('./kampania');
       const dz = Object.values(k.dzialy);
       a.zauf += dz.reduce((x, d) => x + d.zaufanie, 0) / dz.length;
       a.ukr += dz.reduce((x, d) => x + d.ukryte.filter(u => !u.odkryte).length, 0);
-      a.zak += k.incydenty.filter(i => /sabota|S03|fala/.test(i.rodzaj) && i.pln >= 50000).length;
+      a.zak += k.incydenty.filter(i => (/sabota|S03|fala/.test(i.rodzaj) || i.ot) && i.pln >= 50000).length;
       a.rep += k.wskazniki.reputacja; a.man += k.wskazniki.mandat;
       a.pow += k.flagi.incydent_powazny ? 1 : 0;
       const io = await K.indeksOdpornosci(k);

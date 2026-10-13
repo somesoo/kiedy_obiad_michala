@@ -4,8 +4,8 @@ Pierwsza kampania gry (decyzja właściciela, 13.10.2026). **Grywalna w terminal
 
 ```bash
 node ciso-sim/proto/kampania.js --zapis=moja-gra.json      # własne tempo; q = zapisz i wyjdź
-node ciso-sim/proto/kampania.js --auto=rozsadny --szczegoly  # podgląd: co robią działy i reżyser
-node ciso-sim/proto/porownaj-style.js                       # 3 style gry × 20 ziaren
+node ciso-sim/proto/kampania.js --auto=madry --szczegoly     # podgląd: co robią działy i reżyser
+node ciso-sim/proto/porownaj-style.js                       # 4 style gry × 20 ziaren
 ```
 
 Dane: `data/kampanie/wodociagi.js`. Wszystko fikcyjne (spółka, gmina Rzecznów, Lipno, ludzie,
@@ -60,13 +60,22 @@ obciążenie = więcej inicjatyw i większa pokusa skrótów.
 | 15–20 | | **Druga fala haktywistów** | segmentacja, odcięcie HMI, BCP | |
 | 17 | VIII | **Kierownik stacji na emeryturę** (obow.) | ryzyko jednej osoby, zmiana haseł | |
 | 19–21 | | **Fałszywy komunikat „woda skażona"** | dementi w 30 minut | dezinformacja (PAP 2024) |
-| 21–22 | XII 2027–I 2028 | **Za dwa miesiące audyt** (obow.): plan naprawczy / sprint / dokumenty z datą wsteczną | uczciwy plan wygrywa z fałszywką | |
+| 21–22 | XII 2027–I 2028 | **Za dwa miesiące audyt** (obserwacja obow.) — ruchy: plan naprawczy, sprint dowodów albo dokumenty z datą wsteczną | uczciwy plan wygrywa z fałszywką | |
 | 23–24 | II–III 2028 | **Audyt zamykający** (🔵 zleca rada nadzorcza; 10 obszarów; wykrywa kłamstwa, po pierwszym — rozszerzona próba) | dowody zamiast deklaracji | audyt KSC |
 
-Poza osią reżyser dobiera karty z katalogu (inwentaryzacja, MFA, procedura płatności, kopie
-konfiguracji SCADA, plan IR i praca ręczna, MSP, EDR, segmentacja, łatki, program świadomości,
-szkolenie kierownika, SZBI, polityka zakupów, ubezpieczenie, telefon „od integratora" po hasło)
-— według aktualnego problemu firmy i tego, czego gracz jeszcze nie opanował.
+Wiersze „(obow.)" to dziś sprawy w skrzynce albo obserwacje — **nie podpowiadają ruchów**.
+Wszystko inne (inwentaryzacja, MFA, procedura płatności, kopie konfiguracji SCADA, plan IR,
+MSP, EDR, segmentacja, łatki, szkolenia, SZBI, rozpoznanie, odcięcie panelu…) gracz robi sam,
+kiedy chce, z katalogu ruchów (`18-…`). Reżyser dobiera tylko **obserwacje** (co mówią ludzie:
+księgowa o rachunkach, kierownik stacji o kopiach u integratora, ostrzeżenie CERT) według
+aktualnego problemu firmy i tego, czego gracz jeszcze nie opanował.
+
+**Fakty świata** (prawda losowana na starcie, odkrywana ruchami — `wodociagi.js`, `fakty`):
+panel HMI stacji widoczny z internetu (pilne; odkrywa go skan ekspozycji albo moje.cert.pl),
+narzędzie zdalne integratora ze stałym hasłem, domyślny PIN sterowników (inwentaryzacja,
+obchód OT), kopia konfiguracji SCADA tylko na laptopie integratora, intruz w sieci oczyszczalni
+(60% — wychodzi przy przeglądzie przed połączeniem). Zamknięty panel HMI zamienia S03 w próbę
+w logach; procedura płatności udaremnia S01.
 
 **Poprawka po pierwszych przebiegach:** S03 mógł wypaść w tym samym miesiącu co ostrzeżenie
 CERT, czyli bez uczciwej szansy na reakcję (łamało to filar „żadnych gotcha", `01-…`). Okno
@@ -74,35 +83,46 @@ przesunięte na m. 3–5.
 
 ## 16.4. Jak wygląda miesiąc
 
-1. **Nagłówek**: budżet roku (wydane / przyznane), Twoje godziny, mandat, reputacja, morale.
-2. **Briefing**: pilne incydenty, terminy na koniec miesiąca, raport IT z poprzedniego miesiąca
-   (wdrożenia, wykrycia, „nie nadążamy z alertami", projekty w toku).
-3. **Raporty działów** (`r`): wskaźnik działu, co zrobili, co planują (jeśli Ci ufają), jak
-   widzą bezpieczeństwo; przy wysokim zaufaniu — przyznanie się do obejść.
-4. **Karty** (`k`): pytania działów, karty reżysera, odkrycia (inwentaryzacja znalazła
-   obejście), sygnały od ludzi (jedyny wczesny ślad intruza bez narzędzi).
-5. **Zlecenia** (`z`): cały katalog kontroli z kosztami i pułapką.
-6. **Co wiemy** (`s`): ewidencja vs szacunek prawdziwej liczby zasobów (przedział zawęża się
-   po inwentaryzacji), działające zabezpieczenia, status KSC.
-7. **Zamknij miesiąc** (`n`), kiedy chcesz. Nierozpatrzone pytania działów = „odłóż".
+Bez kolejności i bez limitu ruchów — tylko godziny gracza (40 h + do 50% nadgodzin) i budżet
+roku (komendy: `18-…`, 18.9).
+
+1. **Nagłówek i briefing** (`b`): budżet roku, godziny, mandat, reputacja, morale; obserwacje
+   miesiąca; raport IT (wdrożenia, awarie, wykrycia, „bez Twojego udziału"); wynik incydentu.
+2. **Raporty działów** (`r`): co zrobili, co planują (jeśli Ci ufają), jak widzą bezpieczeństwo.
+3. **Skrzynka spraw** (`s`, `a`): prośby działów (zgoda / warunki z listy / alternatywa /
+   odmowa / odłóż), odkryte obejścia, sygnały od ludzi, sprawy kampanii — każda z terminem
+   i rozstrzygnięciem domyślnym.
+4. **Ruchy** (`m`, `x`): wdrożenia z parametrami, pilotaże, przeglądy, testy, naprawy, zmiany,
+   wycofania; rozpoznanie, OT, ludzie, zarząd, prawo, audyt.
+5. **Moje wdrożenia** (`o`) i **co wiemy** (`w`): przedział skuteczności, znane usterki, zasoby
+   (ewidencja vs szacunek), fakty, luki.
+6. **Incydent** (`i`): akcje w dowolnej kolejności, czekanie, koniec fazy ostrej.
+7. **Zamknij miesiąc** (`n`), kiedy chcesz.
 
 ## 16.5. Co pokazało 20 przebiegów na styl gry (`proto/wyniki-kampania-wodociagi-2026-10-13.txt`)
 
-Stan po poprawkach z przypadków brzegowych (`17-…`): twardy budżet, limit nadgodzin, tasowane
-opcje, oceniana bezczynność, Indeks Odporności (`11-…`).
+Stan po silniku ruchów (`18-…`): pełna dowolność ruchów, ocena praktyki zasadami, audyt
+zamykający z dowodami.
 
-| Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Jakość decyzji | Indeks | **Wynik** |
+| Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Praktyka | Indeks | **Wynik** |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **mądry** (dobre odpowiedzi + podstawy „tanie i ważne najpierw") | **112 tys.** | 506 tys. | **57** | 0,60 | 0,1 | 0,1 | 62 | **60** | 25% | 90% | **927** | **912** |
-| rozsądny („tak, ale bezpiecznie", dobre opcje) | 270 tys. | 255 tys. | 47 | **0,63** | 0,1 | 0,1 | 59 | 52 | 35% | 91% | 859 | 882 |
-| odmawiający (odmowa + kara za obejścia) | 163 tys. | 245 tys. | 51 | **0,01** | 1,1 | 0,0 | 61 | 24 | 20% | 70% | 818 | 760 |
-| bierny (tylko obowiązkowe, najgorsze opcje) | **1,34 mln** | 34 tys. | **15** | 0,31 | **16,6** | **2,7** | **19** | **0** | 100% | 14% | 152 | 147 |
+| **mądry** (rozpoznanie, „tanie i ważne", pilotaże, testy, warunki) | **230 tys.** | 493 tys. | **59** | **0,84** | 0,1 | 0,1 | 59 | **67** | 35% | 95% | **933** | **941** |
+| odmawiający (mądre ruchy, odmowa + kara za obejścia) | 315 tys. | 475 tys. | 58 | **0,01** | 2,3 | 0,2 | 58 | 35 | 50% | 72% | 824 | 774 |
+| rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 557 tys. | 356 tys. | 39 | 0,44 | 16,3 | 1,6 | 45 | 27 | 95% | 52% | 622 | 573 |
+| bierny (nic; sprawy same, incydenty bez niego) | **1,77 mln** | 14 tys. | **10** | 0,35 | 13,8 | **3,3** | **17** | **0** | 100% | 0% | 129 | 65 |
 
-Wynik kampanii = ½ Indeks + ½ Jakość Decyzji, z sufitami (`11-…`). Pozostałe strategie
-(potakiwacz, kłamca, skąpiec…) — `17-…`, 17.3; ile kosztuje pojedyncza zła decyzja — 17.7.
+Wynik kampanii = ½ Indeks + ½ Jakość praktyki, z sufitami (`11-…`). Pozostałe strategie
+(potakiwacz, kłamca, skąpiec, pracoholik, fuzzer…) — `18-…`, 18.10; ile kosztuje pojedyncze
+odstępstwo — `17-…`, 17.8.
+
+**Co się zmieniło względem kart.** Rozsądny laik spadł z 882 na 573: dawniej dostawał „dobre
+opcje" z kart, teraz sam musi wiedzieć, że trzeba zrobić rozpoznanie, pilotaż i test kopii.
+Wdraża dużo i z dobrymi intencjami, ale EDR na OT bez pilotażu wywołuje awarie, kopie nigdy nie
+są sprawdzone, a „tak, ale" z każdym warunkiem zniechęca działy (16 ukrytych obejść). Między
+dobrym CISO a laikiem jest teraz prawdziwa przepaść — i o to chodziło.
 
 Wnioski:
-1. **Bierność to katastrofa, ale nie z powodu „hakerów z filmów".** Ponad 21 obejść działów
+1. **Bierność to katastrofa, ale nie z powodu „hakerów z filmów".** Kilkanaście obejść działów
    (modemy 4G, dostęp integratora, kamery, czaty AI, wspólne konta), dziesiątki urządzeń poza
    ewidencją, przeciwnik, który po kilku miesiącach przesuwa próby na usługi wystawione
    (waga ×2) i dostawców (×1,9). Sama „tło-statystyka" silnika tego nie pokazywała — dopiero
@@ -114,7 +134,7 @@ Wnioski:
    boi się kary, ukrywa się lepiej. To jest realna dynamika i lekcja E9.
 3. **Budżet jest twardy, więc wygrywa kolejność zakupów.** Pierwsza wersja pozwalała
    „rozsądnemu" wydać 758 tys. zł przy ok. 530 tys. przyznanych. Teraz zakup przechodzi tylko
-   w ramach budżetu roku (+10%, z abonamentem do grudnia), a „mądry" — ta sama ocena kart, ale
+   w ramach budżetu roku (+10%, z abonamentem do grudnia), a „mądry" — te same odpowiedzi, ale
    podstawy kupowane w kolejności „tanie i ważne najpierw" — ma ponad dwa razy mniejsze straty
    i lepszy audyt. Bierny traci mandat do zera (odwołanie). To jest umiejętność, której gra ma
    uczyć: priorytety przy ograniczonym budżecie.

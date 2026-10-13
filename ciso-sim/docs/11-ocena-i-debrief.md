@@ -7,7 +7,7 @@ Gra pokazuje **dwa** wyniki obok siebie:
 | Wynik | Co mierzy | Skąd |
 |---|---|---|
 | **Indeks Odporności** (0–1000) | jak firma naprawdę wyszła na kampanii | straty, przestoje, zdrowie/ciepło/woda, zgodność, reputacja, stan firmy na koniec |
-| **Jakość Decyzji** (0–100%) | jak dobre były decyzje **przy wiedzy, którą gracz miał** | porównanie każdej decyzji z oceną ekspercką (rubryka scenariusza) i z wartością oczekiwaną w silniku |
+| **Jakość praktyki** (0–100%, dawniej Jakość Decyzji) | czy gracz postępował jak dobry praktyk **przy wiedzy, którą miał** | zasady sprawdzane na historii ruchów (11.3) — bez ocen przypisanych do opcji |
 
 Bez drugiego wyniku gra nagradzałaby szczęście (ktoś nic nie zrobił i akurat nic się nie
 stało) i karała pecha (ktoś zrobił wszystko dobrze i padł przez dostawcę). To dokładnie ten
@@ -15,10 +15,10 @@ błąd, który w realu kończy się zwolnieniem dobrego CISO i awansem szczęśc
 **pokazać**, a nie powtórzyć.
 
 **Wynik kampanii** (to, co wygrywa i trafia do rankingu biurowego) = **½ Indeks Odporności +
-½ Jakość Decyzji × 1000**, z sufitem za decyzje nie do obrony (11.2a). Dawniej ranking szedł
+½ Jakość praktyki × 1000**, z sufitem za decyzje nie do obrony (11.2a). Dawniej ranking szedł
 po samej Jakości Decyzji, a gracz widział Indeks jako „wynik" — i kłamca miał w nim tyle co
 gracz rozsądny (`17-…`, 17.6). Sam Indeks nie wystarcza: dobra technika (EDR, kopie) ratuje
-skutki mimo złych decyzji. Sama Jakość Decyzji też nie: nie widzi, czy firma przetrwała.
+skutki mimo złych decyzji. Sama Jakość praktyki też nie: nie widzi, czy firma przetrwała.
 
 ## 11.2. Indeks Odporności
 
@@ -81,30 +81,34 @@ najwyżej dwie niezgodności główne na drobne. Dokumenty z datą wsteczną, kt
 referencyjną. Gracz porównuje się z „jak by było, gdybyś nic nie robił" w tym samym świecie
 (to samo dla strategii „higiena" jako drugi punkt odniesienia).
 
-## 11.3. Jakość Decyzji
+## 11.3. Jakość praktyki (dawniej „Jakość Decyzji")
 
-Każda decyzja zapisuje w rejestrze zrzut **wiedzy gracza** (co było na ekranie: oszacowania,
-ostrzeżenia, stan). Ocena decyzji:
+Od silnika ruchów (`18-…`) **nie ma opcji z oceną** — ani w ruchach, ani w sprawach, ani w akcjach
+incydentu. Praktykę oceniają **zasady** (`proto/zasady.js`, ~30 sztuk + zasady każdego incydentu),
+sprawdzane na historii ruchów i stanie firmy — tak jak audytor albo doświadczony CISO patrzy na
+to, co zrobiono, a nie na to, co zaznaczono. Przykłady:
 
-1. **Decyzje scenariuszowe** (tryb incydentu): rubryka ekspercka w pliku scenariusza
-   (`scenariusze/`). Każda opcja ma ocenę: ✅ dobra praktyka / ⚠️ dopuszczalna z kosztem /
-   ❌ błąd. Rubryka opisuje DLACZEGO — i to trafia do debriefu.
-2. **Decyzje strategiczne** (miesiąc): wartość oczekiwana w silniku. Silnik może przeliczyć
-   miesiąc w tle (Monte Carlo jak `proto/`) dla 2–3 alternatyw i porównać: czy decyzja gracza
-   była w górnej części rozkładu **przy jego wiedzy** (nie przy prawdzie, której nie znał).
-   Kosztowne obliczeniowo — liczone asynchronicznie po turze.
-3. **Kary za ignorowanie sygnałów**: jeśli briefing zawierał wyraźne ostrzeżenie (CERT o
-   podatności w Twoim VPN-ie), a gracz go nie obsłużył — decyzja „nic" jest oceniana jako błąd,
-   nawet jeśli nic się nie stało.
-4. **Premie za naukę**: lekcje z incydentu zamienione na zadania i wykonane.
+- podstawy na czas: inwentaryzacja, MFA i kopie do 6. miesiąca, procedura płatności do 8.;
+- reakcja na ostrzeżenie dla sektora w ciągu miesiąca; znane „pilne drzwi" zamknięte w miesiąc;
+- pilotaż przed każdą zmianą na OT; test kopii do 3 miesięcy od wdrożenia; przegląd lub test
+  każdej kluczowej kontroli w ostatnim roku; EDR przełączony na blokowanie po strojeniu;
+- prośby działów: rozstrzygnięte, a „alternatywa" tylko wtedy, gdy ryzyko jest istotne;
+  odkrycia bez kar; każdy sygnał sprawdzony; wyjątki z akceptacją ryzyka przez zarząd;
+- prawo: wpis, status, SZBI (i to na miarę firmy), szkolenie kierownika co rok;
+- sprawy kampanii: przegląd przed połączeniem sieci, klauzule w umowie, nocny telefon, dementi…;
+- zachowanie: nadgodziny bez wypalenia, uczciwość (−1 za każde kłamstwo, waga 3), co najmniej
+  dwa rzetelne raporty dla zarządu w roku;
+- w incydencie: zasady pliku scenariusza (bank w pierwszej godzinie, proces przed śledztwem,
+  komunikat tylko z danymi…). Zasady „nie rób X" liczą się tylko, gdy gracz cokolwiek zrobił.
 
-Wynik: odsetek „punktów jakości" zdobytych z możliwych, **z wagą decyzji** (`jakoscDecyzji`
-w `proto/kampania.js`): karta może podać `waga`, obowiązkowa domyślnie 2, reszta 1 (ankieta
-ubezpieczyciela: 4); decyzje scenariusza ważone punktami rubryki (10 pkt = waga 1). Bez wag
-kłamstwo w ankiecie było 1/68 wyniku — tyle co odpowiedź na prośbę o czat AI.
-Decyzja **nieuczciwa** liczy się jako **−1** (nie 0): zabiera punkty innym decyzjom. Karta może
-mieć **kilka dobrych odpowiedzi** — różnią się kosztem, godzinami i ryzykiem na lata, a nie
-„poprawnością".
+**Jakość praktyki** = Σ waga × wynik / Σ waga (spełniona 1, naruszona 0, nieuczciwa −1). Każda
+ocena ma moment i „dlaczego" — to idzie do debriefu i do modelu gracza (BKT reżysera). Nie ma
+odpowiedzi „poprawnej": dwie różne drogi mogą dać ten sam wynik, ta sama decyzja w innej
+kolejności — inny (np. bank po zebraniu „czyja wina" odzyskuje mniej niż bank od razu).
+
+Wynik kampanii = ½ Indeks + ½ Jakość praktyki, z sufitami (11.2a). Dojrzałość w Indeksie liczy
+się z **prawdziwej** skuteczności kluczowych kontroli (jakość wdrożenia, dryf, ukryte usterki),
+a nie z „jest / nie ma".
 
 ## 11.4. Debrief incydentu (po każdym trybie operacyjnym)
 
@@ -122,7 +126,7 @@ Struktura (inspirowana „blameless postmortem"):
 ## 11.5. Raport końcowy kampanii
 
 Jedna strona dla gracza (i opcjonalnie do pobrania jako PDF):
-- Indeks Odporności i Jakość Decyzji, porównanie z referencjami (nic / higiena),
+- Indeks Odporności i Jakość praktyki, porównanie z referencjami (nic / higiena),
 - wykres miesięcy: wydatki, straty, etap dojrzałości, mandat, morale,
 - 3 najlepsze i 3 najgorsze decyzje (z rejestru),
 - „Gdyby to była prawdziwa firma" — ile realnie kosztowałby taki program bezpieczeństwa

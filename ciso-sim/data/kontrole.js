@@ -29,6 +29,20 @@
 //   tarcie                  — 0..10, ile przeszkadza ludziom w pracy (→ shadow IT, mandat)
 //   pulapka                 — realna pułapka, którą gra ma pokazać
 //
+//   ── cykl życia w kampanii (docs/18-silnik-ruchow.md; Monte Carlo ich nie używa) ──
+//   parametry               — { nazwa: { opis, domyslnie, wartosci: { id: { opis, ...skutki } } } }
+//                             skutki wartości: pokrycie {wektor: 0..1}, jakosc / utrudnia / wykrywa /
+//                             odtwarzanie (mnożniki), koszt / h (mnożniki wdrożenia), ot (dotyka stacji
+//                             OT — bez pilotażu grozi awarią), tarcie (+/-), dzial {id: {zaufanie…}},
+//                             mandat, morale, wektory {w: mnożnik} (nowe ryzyko), flagi, wymaga (id),
+//                             wyjatek (luka, którą zarząd powinien zaakceptować)
+//   usterki                 — ukryte wady losowane przy wdrożeniu: { id, opis, szansa, skutek {…jak
+//                             wyżej}, przeglad: P(znajdzie przegląd), test: P(znajdzie test), naprawa_h }
+//   test                    — { nazwa, h, pln } — test praktyczny (dowód dla audytu)
+//   pilot                   — { h } — pilotaż na jednej stacji OT przed wdrożeniem
+//   dryf                    — utrata jakości na miesiąc bez przeglądu (domyślnie 0,01)
+//   tylko_sprawa            — nie da się „wdrożyć" ruchem, tylko przez sprawę (np. polisa po ankiecie)
+//
 // Wektory dostępu: phishing, poswiadczenia, podatnosc, uslugi, dostawca, insider, bec, ddos
 // Etapy: dostep → eskalacja → ruch → cel   (patrz docs/07-zagrozenia-i-model-ataku.md)
 
@@ -36,6 +50,23 @@ module.exports = [
   // ─── SZYBKIE WYGRANE: głównie godziny, mało pieniędzy ───
   {
     id: 'mfa', nazwa: 'MFA dla wszystkich kont (poczta, VPN, chmura)', csf: 'PR', typ: 'projekt',
+    parametry: {
+      zakres: { opis: 'Kto ma MFA', domyslnie: 'wszyscy', wartosci: {
+        wszyscy: { opis: 'wszystkie konta, także zarząd', dzial: { siec: { zmeczenie: 0.1 } }, mandat: -2 },
+        bez_zarzadu: { opis: 'wszyscy oprócz zarządu', pokrycie: { poswiadczenia: 0.85, bec: 0.75 }, mandat: 1, wyjatek: 'mfa_zarzad' },
+        tylko_zdalni: { opis: 'tylko dostęp z zewnątrz (VPN, poczta poza biurem)', pokrycie: { poswiadczenia: 0.6, phishing: 0.7, bec: 0.7 }, wyjatek: 'mfa_czesciowe' },
+      } },
+      metoda: { opis: 'Drugi składnik', domyslnie: 'numer', wartosci: {
+        numer: { opis: 'aplikacja z dopasowaniem numeru' },
+        push: { opis: 'powiadomienie „zatwierdź" (MFA fatigue)', pokrycie: { phishing: 0.75, poswiadczenia: 0.85 }, h: 0.9 },
+        sms: { opis: 'kod SMS (SIM swap, przechwycenie)', pokrycie: { poswiadczenia: 0.85, phishing: 0.85 }, h: 0.8 },
+      } },
+    },
+    usterki: [
+      { id: 'stare_protokoly', opis: 'stare protokoły poczty (IMAP/POP) logują bez drugiego składnika', szansa: 0.4,
+        skutek: { pokrycie: { poswiadczenia: 0.6 } }, przeglad: 0.5, test: 0.9, naprawa_h: 4 },
+    ],
+    test: { nazwa: 'próba logowania samym hasłem do każdej usługi (poczta, VPN, chmura, stare protokoły)', h: 4 },
     wdrozenie: { pln: 5000, h: 80, mies: 1 },
     utrzymanie: { pln_na_uzytkownika: 0, h: 6 },
     zapobiega: { poswiadczenia: 0.85, phishing: 0.35 },
@@ -45,6 +76,10 @@ module.exports = [
   },
   {
     id: 'mfa_fido', nazwa: 'Klucze FIDO2 dla adminów i zarządu', csf: 'PR', typ: 'projekt',
+    usterki: [
+      { id: 'brak_procedury_odzyskania', opis: 'brak procedury na zgubiony klucz — ludzie dostają „tymczasowe" wyjątki', szansa: 0.4,
+        skutek: { jakosc: 0.7 }, przeglad: 0.7, test: 0.6, naprawa_h: 3 },
+    ],
     wdrozenie: { pln: 6000, h: 30, mies: 1 },
     utrzymanie: { h: 2 },
     wymaga: ['mfa'],
@@ -115,6 +150,18 @@ module.exports = [
   // ─── PODATNOŚCI I ZASOBY ───
   {
     id: 'inwentaryzacja', nazwa: 'Inwentaryzacja zasobów (CMDB + skan sieci)', csf: 'ID', typ: 'proces',
+    parametry: {
+      metoda_ot: { opis: 'Spis sieci OT', domyslnie: 'pasywna', wartosci: {
+        pasywna: { opis: 'pasywny spis z automatykiem (nasłuch, szafy, dokumentacja)', h: 1.1, dzial: { produkcja: { zaufanie: 0.05 } } },
+        aktywna: { opis: 'aktywny skan całej sieci, także sterowników — szybciej', h: 0.7, ot: true, awaria: 0.4,
+          dzial: { produkcja: { zaufanie: -0.15 } } },
+        bez_ot: { opis: 'tylko biuro, OT później', h: 0.6, jakosc: 0.7 },
+      } },
+    },
+    usterki: [
+      { id: 'dostepy_zewnetrzne_pominiete', opis: 'rejestr nie obejmuje dostępów zdalnych dostawców', szansa: 0.35,
+        skutek: { jakosc: 0.85 }, przeglad: 0.6, test: 0.3, naprawa_h: 6 },
+    ],
     wdrozenie: { pln: 15000, h: 100, mies: 2 },
     utrzymanie: { pln: 1500, h: 12 },
     odkrywa: 0.6,
@@ -133,6 +180,20 @@ module.exports = [
   },
   {
     id: 'patch', nazwa: 'Zarządzanie poprawkami (okna serwisowe, SLA na krytyczne)', csf: 'PR', typ: 'proces',
+    parametry: {
+      zakres_ot: { opis: 'Stacje OT (SCADA)', domyslnie: 'z_producentem', wartosci: {
+        z_producentem: { opis: 'tylko poprawki zatwierdzone przez producenta, z integratorem; reszta — odcięcie od internetu', h: 1.2,
+          dzial: { produkcja: { zaufanie: 0.05 } } },
+        bez_ot: { opis: 'OT pomijamy („nie wolno ruszać")', pokrycie: { uslugi: 0.7 } },
+        co_tydzien: { opis: 'wszystko co tydzień, także stacje SCADA', ot: true, awaria: 0.25, dzial: { produkcja: { zaufanie: -0.2 } } },
+      } },
+    },
+    usterki: [
+      { id: 'router_pominiety', opis: 'router brzegowy i firewall poza procesem łatania', szansa: 0.4,
+        skutek: { pokrycie: { podatnosc: 0.55 } }, przeglad: 0.6, test: 0.85, naprawa_h: 4 },
+    ],
+    test: { nazwa: 'skan podatności po oknie serwisowym', h: 6 },
+    dryf: 0.02,
     wdrozenie: { pln: 10000, h: 60, mies: 1 },
     utrzymanie: { pln_na_stanowisko: 5, h: 30 },
     inwentaryzacja: true,
@@ -164,6 +225,16 @@ module.exports = [
   },
   {
     id: 'szkolenia', nazwa: 'Program świadomości + symulacje phishingu', csf: 'PR', typ: 'usluga',
+    parametry: {
+      forma: { opis: 'Forma', domyslnie: 'program', wartosci: {
+        program: { opis: 'krótkie moduły co kwartał, symulacje phishingu bez zawstydzania, osobno terenowcy i księgowość',
+          dzial: { wszystkie: { swiadomosc: 0.12 } } },
+        elearning: { opis: 'jedno e-szkolenie z testem i listą obecności', koszt: 0.3, h: 0.3, jakosc: 0.4,
+          dzial: { wszystkie: { swiadomosc: 0.04 } } },
+      } },
+    },
+    usterki: [],
+    test: { nazwa: 'symulacja phishingu (bez zawstydzania)', h: 4 },
     wdrozenie: { pln: 4000, h: 40, mies: 1 },
     utrzymanie: { pln_na_uzytkownika: 6, h: 10 },
     zapobiega: { phishing: 0.3, bec: 0.3, poswiadczenia: 0.1 },
@@ -174,6 +245,19 @@ module.exports = [
   },
   {
     id: 'weryfikacja_platnosci', nazwa: 'Procedura zmiany rachunku (oddzwonienie z kartoteki + biała lista VAT)', csf: 'PR', typ: 'proces',
+    parametry: {
+      sposob: { opis: 'Jak wprowadzona', domyslnie: 'uzgodniona', wartosci: {
+        uzgodniona: { opis: 'uzgodniona z księgową: oddzwonienie, biała lista VAT, druga osoba', h: 1.25,
+          dzial: { finanse: { zaufanie: 0.1, swiadomosc: 0.15 } } },
+        zarzadzenie: { opis: 'zarządzenie prezesa bez rozmowy z działem', h: 0.5, jakosc: 0.75,
+          dzial: { finanse: { zaufanie: -0.1, zmeczenie: 0.1 } } },
+      } },
+    },
+    usterki: [
+      { id: 'wyjatek_pilne', opis: 'przy „pilnych" płatnościach procedurę się pomija', szansa: 0.3,
+        skutek: { pokrycie: { bec: 0.5 } }, przeglad: 0.4, test: 0.9, naprawa_h: 3 },
+    ],
+    test: { nazwa: 'kontrolowana próba „zmiany rachunku" wobec księgowości', h: 3 },
     wdrozenie: { pln: 0, h: 16, mies: 1 },
     utrzymanie: { h: 4 },
     zapobiega: { bec: 0.85 },
@@ -184,6 +268,23 @@ module.exports = [
   // ─── WYKRYWANIE I REAGOWANIE ───
   {
     id: 'edr', nazwa: 'EDR na stacjach i serwerach', csf: 'DE', typ: 'narzedzie',
+    parametry: {
+      zakres: { opis: 'Gdzie agent', domyslnie: 'biuro_serwery', wartosci: {
+        biuro_serwery: { opis: 'komputery biurowe i serwery; OT bez agenta', pokrycie: { uslugi: 0.6, dostawca: 0.75 } },
+        z_ot: { opis: 'także stacje inżynierskie OT (agent z listy producenta)', ot: true, awaria: 0.5 },
+      } },
+      tryb: { opis: 'Tryb', domyslnie: 'wykrywaj', wartosci: {
+        wykrywaj: { opis: 'tylko wykrywaj (na czas strojenia)', utrudnia: 0.3 },
+        blokuj: { opis: 'blokuj i izoluj', tarcie: 1, wczesnie: { miesiecy: 2, tarcie: 2, dzial: { wszystkie: { zmeczenie: 0.1 } } } },
+      } },
+    },
+    usterki: [
+      { id: 'agent_wylaczony', opis: 'agent wyłączony na serwerze, który „spowalniał"', szansa: 0.3,
+        skutek: { jakosc: 0.8 }, przeglad: 0.7, test: 0.6, naprawa_h: 2 },
+    ],
+    test: { nazwa: 'kontrolowana symulacja ataku na wybranych stacjach', h: 6 },
+    pilot: { h: 6 },
+    dryf: 0.015,
     // Martwe pola (silnik: widzi()): insider ma legalny dostęp i nie uruchamia złośliwego kodu; wystawione
     // usługi i panele OT rzadko mają agenta; dostawca używa podpisanych narzędzi zdalnych.
     martwe_pola: { insider: 0.2, uslugi: 0.4, dostawca: 0.6 },
@@ -263,6 +364,12 @@ module.exports = [
   },
   {
     id: 'plan_ir', nazwa: 'Plan reagowania na incydenty + playbooki + lista kontaktów', csf: 'RS', typ: 'proces',
+    usterki: [
+      { id: 'nikt_nie_zna_planu', opis: 'plan istnieje, ale ludzie go nie znają; kontakty nieaktualne', szansa: 0.5,
+        skutek: { jakosc: 0.6 }, przeglad: 0.2, test: 0.9, naprawa_h: 6 },
+    ],
+    test: { nazwa: 'ćwiczenie „przy stole" z zarządem i stacją', h: 6 },
+    dryf: 0.02,
     wdrozenie: { pln: 0, h: 80, mies: 1 },
     utrzymanie: { h: 4 },
     reakcja: 0.25,
@@ -291,6 +398,23 @@ module.exports = [
   // ─── ODTWARZANIE ───
   {
     id: 'backup', nazwa: 'Kopie zapasowe 3-2-1-1-0 (jedna niezmienialna/offline)', csf: 'RC', typ: 'projekt',
+    parametry: {
+      zakres: { opis: 'Co obejmuje', domyslnie: 'biuro', wartosci: {
+        biuro: { opis: 'systemy biurowe (3-2-1-1-0)' },
+        biuro_ot: { opis: 'biuro + projekty i konfiguracje SCADA od integratora, offline u nas', h: 1.15, flagi: { kopie_ot: true },
+          dzial: { produkcja: { zaufanie: 0.05 } } },
+      } },
+      nosnik: { opis: 'Gdzie kopia', domyslnie: 'offline', wartosci: {
+        offline: { opis: 'kopia offline / niezmienialna' },
+        tylko_siec: { opis: 'NAS w tej samej sieci (taniej)', koszt: 0.5, odtwarzanie: 0.5 },
+      } },
+    },
+    usterki: [
+      { id: 'nie_odtwarza', opis: 'kopia się wykonuje, ale nie da się z niej odtworzyć systemu', szansa: 0.35,
+        skutek: { odtwarzanie: 0.3 }, przeglad: 0.1, test: 0.95, naprawa_h: 8 },
+    ],
+    test: { nazwa: 'test odtworzenia: pełny serwer + projekt SCADA na zapasowej stacji', h: 10 },
+    dryf: 0.02,
     wdrozenie: { pln: 25000, h: 80, mies: 1 },
     utrzymanie: { pln: 3000, h: 10 },
     odtwarzanie: { przestoj: 0.4 },
@@ -308,6 +432,11 @@ module.exports = [
   },
   {
     id: 'bcp', nazwa: 'Plan ciągłości działania (procedury papierowe, priorytety)', csf: 'RC', typ: 'proces',
+    usterki: [
+      { id: 'procedura_nieprzecwiczona', opis: 'procedura pracy ręcznej spisana, ale nikt jej nie ćwiczył', szansa: 0.5,
+        skutek: { jakosc: 0.6, odtwarzanie: 0.7 }, przeglad: 0.2, test: 0.9, naprawa_h: 6 },
+    ],
+    test: { nazwa: 'ćwiczenie pracy ręcznej stacji ze zmianą', h: 6 },
     wdrozenie: { pln: 0, h: 100, mies: 2 },
     utrzymanie: { h: 6 },
     odtwarzanie: { przestoj: 0.75 },
@@ -318,6 +447,17 @@ module.exports = [
   // ─── SIEĆ, CHMURA, DANE ───
   {
     id: 'segmentacja', nazwa: 'Segmentacja sieci (strefy, oddzielenie OT, serwerów, gości)', csf: 'PR', typ: 'projekt',
+    parametry: {
+      zakres: { opis: 'Zakres', domyslnie: 'pelna', wartosci: {
+        pelna: { opis: 'strefa OT za zaporą + kontrolowana strefa pośrednia dla integratora, osobno serwery i goście' },
+        tylko_ot: { opis: 'tylko oddzielenie OT od biura (jedna zapora)', koszt: 0.5, h: 0.5, jakosc: 0.8 },
+      } },
+    },
+    usterki: [
+      { id: 'regula_any_any', opis: 'reguła „any-any" zostawiona „na chwilę" dla integratora', szansa: 0.3,
+        skutek: { utrudnia: 0.4 }, przeglad: 0.6, test: 0.9, naprawa_h: 6 },
+    ],
+    test: { nazwa: 'wewnętrzny test penetracyjny przejść między strefami', h: 4, pln: 15000 },
     martwe_pola: { insider: 0.5 },                // insider jest już w swojej strefie
     wdrozenie: { pln: 90000, h: 300, mies: 4 },
     utrzymanie: { pln: 1000, h: 12 },
@@ -378,6 +518,12 @@ module.exports = [
   // ─── GODZINY Z ZEWNĄTRZ ───
   {
     id: 'msp', nazwa: 'Zewnętrzny administrator / MSP (pakiet godzin)', csf: 'GV', typ: 'usluga',
+    parametry: {
+      umowa: { opis: 'Umowa', domyslnie: 'z_wymaganiami', wartosci: {
+        z_wymaganiami: { opis: 'MFA na ich kontach, osobne konta na osobę, logi dostępu, zgłaszanie incydentów w 24 h', h: 1.75 },
+        standardowa: { opis: 'standardowa umowa serwisowa', wektory: { dostawca: 1.15 } },
+      } },
+    },
     wdrozenie: { pln: 0, h: 8, mies: 1 },
     utrzymanie: { pln: 7000, h: 0 },
     godziny: 40,
@@ -400,6 +546,19 @@ module.exports = [
   // ─── ZARZĄDZANIE (GV) ───
   {
     id: 'szbi', nazwa: 'SZBI — system zarządzania bezpieczeństwem informacji (wymóg KSC)', csf: 'GV', typ: 'proces',
+    parametry: {
+      sposob: { opis: 'Jak wdrażamy', domyslnie: 'doradca', wartosci: {
+        doradca: { opis: 'na miarę firmy, z kierownikami działów; doradca na 10 dni', h: 0.6, dzial: { wszystkie: { zaufanie: 0.05 } } },
+        vciso: { opis: 'prowadzi vCISO (musi działać), Ty wdrażasz kontrole', h: 0.4, koszt: 0.5, wymaga: 'vciso', dzial: { wszystkie: { zaufanie: 0.05 } } },
+        sam: { opis: 'sam, wieczorami', koszt: 0.3, h: 1.5, morale: -10 },
+        z_pudelka: { opis: 'gotowy komplet „polityk pod NIS2" (9 900 zł)', koszt: 0.17, h: 0.2, jakosc: 0.3, flagi: { polityki_z_pudelka: true } },
+      } },
+    },
+    usterki: [
+      { id: 'polityki_martwe', opis: 'polityki zatwierdzone, ale nikt ich nie stosuje (brak przeglądów zarządczych)', szansa: 0.3,
+        skutek: { jakosc: 0.6 }, przeglad: 0.8, test: 0.5, naprawa_h: 8 },
+    ],
+    test: { nazwa: 'audyt wewnętrzny (próbka dowodów z działów)', h: 8 },
     wdrozenie: { pln: 60000, h: 400, mies: 6 },
     utrzymanie: { h: 30 },
     zgodnosc: 25,
@@ -427,7 +586,17 @@ module.exports = [
     pulapka: 'Ankieta na 200 pytań wypełniona „tak" na wszystko. Kluczowy dostawca nie odpowiada wcale.',
   },
   {
+    id: 'brama_dostepu', nazwa: 'Brama zdalnego dostępu dostawców (MFA, konta imienne, nagrywanie, dostęp na żądanie)', csf: 'PR', typ: 'narzedzie',
+    wdrozenie: { pln: 15000, h: 40, mies: 1 },
+    utrzymanie: { pln: 300, h: 2 },
+    zapobiega: { dostawca: 0.45, uslugi: 0.25 },
+    wykrywa: { dostep: 0.1 },
+    tarcie: 1,
+    pulapka: 'Brama postawiona, ale integrator dalej ma „awaryjny" TeamViewer na stacji inżynierskiej — bo tak było szybciej.',
+  },
+  {
     id: 'ubezpieczenie', nazwa: 'Ubezpieczenie cyber (wymaga MFA, EDR, kopii offline)', csf: 'GV', typ: 'usluga',
+    tylko_sprawa: true,
     wdrozenie: { pln: 0, h: 20, mies: 1 },
     utrzymanie: { pln: 5000, h: 0 },
     wymaga: ['mfa', 'edr', 'backup'],

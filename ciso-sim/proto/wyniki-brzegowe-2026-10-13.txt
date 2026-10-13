@@ -1,13 +1,13 @@
-strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  h/mies(maks)  karty/mies(maks)  JD   odwołany  sufit  INDEKS  WYNIK
-rozsadny           270k    255k    47     52  59     77  0.63    0.1     2.05            60                 7   91%     0/20   0/20     859    882
-madry              112k    506k    57     60  62     75  0.60    0.1     2.28            60                 6   90%     0/20   0/20     927    912
-potakiwacz         184k    281k    40     50  58     81  0.75    0.1     3.51            46                 8   62%     0/20  12/20     695    651
-wszystko_naraz     236k    226k    49     62  56     77  0.56    0.1     1.74            58                 8   86%     0/20   0/20     859    860
-odkladacz          834k     30k    21     19  36     81  0.28   14.8     4.00            40                 8   35%     1/20   3/20     395    376
-skapiec           1014k    202k    25      0  14     77  0.23    7.3     4.00             8                 7   24%    20/20   2/20     372    308
-klamca             154k    284k    32     34  52     77  0.16    0.5     2.05            60                 7   74%     0/20  20/20     385    385
-pracoholik         284k    248k    44     53  57     70  0.59    0.1     2.05            60                 8   88%     0/20   0/20     845    861
-paranoik           343k     42k    29     45  59     84  0.38    6.7     4.00            48                 6   62%     0/20   0/20     599    611
-losowy             650k    276k    33     18  34     79  0.24    4.9     4.00            60                 7   43%     6/20   7/20     535    497
+strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  awarie OT  praktyka odwołany  sufit  INDEKS  WYNIK
+madry              230k    493k    59     67  59     67  0.84    0.1     2.03        0.0       95%     0/20   0/20     933    941
+rozsadny           557k    356k    39     27  45     77  0.44   16.3     4.00        0.6       52%     0/20   0/20     622    573
+potakiwacz         240k    303k    38     17  46     77  0.18    0.3     3.50        0.0       58%     1/20  20/20     325    325
+wszystko_naraz     390k    199k    29     39  53     80  0.70    0.7     2.47        0.0       82%     0/20   0/20     744    780
+odkladacz         1770k     14k    10      0  17     76  0.35   13.8     4.00        0.0        0%    20/20   0/20     129     65
+skapiec            323k     18k    23     30  57     86  0.38    6.0     3.17        0.0       72%     0/20   0/20     718    721
+klamca             229k    499k    47      1  27     67  0.00    1.3     2.35        0.0       42%    18/20  20/20     250    250
+pracoholik         226k    370k    55     49  44     17  0.66    0.7     3.27        0.0       73%     0/20   0/20     808    771
+paranoik           482k     55k    10     22  34     78  0.36   19.8     3.66        0.0       58%     1/20   0/20     397    488
+losowy             959k    277k    17      2  19     52  0.06    6.7     4.00        0.1       24%    16/20   8/20     330    297
 
 Niezmienniki: OK

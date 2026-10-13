@@ -18,7 +18,7 @@ Dlatego są dwie warstwy „inteligencji":
 | Warstwa | Kto | Co robi | Czego się uczy |
 |---|---|---|---|
 | **Działy** | agenci z celami (finanse, produkcja, sieć, obsługa klienta, kadry, zarząd) | co okres podejmują własne inicjatywy; pytają bezpieczeństwo o zdanie albo działają po cichu; raportują | czy opłaca się pytać (zaufanie, nawyk konsultacji), świadomość (z zapominaniem), zmęczenie zasadami |
-| **Reżyser** | jeden na kampanię | diagnozuje „aktualny problem firmy", układa karty i zdarzenia, pilnuje rytmu, steruje przeciwnikiem | co gracz już umie (model gracza), skąd napastnicy mają najłatwiej (przeciwnik adaptacyjny) |
+| **Reżyser** | jeden na kampanię | diagnozuje „aktualny problem firmy", układa zdarzenia i obserwacje, pilnuje rytmu, steruje przeciwnikiem | co gracz już umie (model gracza), skąd napastnicy mają najłatwiej (przeciwnik adaptacyjny) |
 
 ## 15.2. Zasady konstrukcyjne (nie do złamania)
 
@@ -211,20 +211,28 @@ Karty i scenariusze mają przypisane cele (E-tagi). Reżyser woli sytuacje, któ
 cele o niskim `P` — ale z **odstępem** (ten sam cel najwyżej raz na 2 okresy), żeby gra nie
 stała się korepetycjami z jednego tematu.
 
-### Wybór zdarzeń i kart
+### Wybór zdarzeń i obserwacji (po silniku ruchów, `18-…`)
+
+Reżyser **nie podsuwa już ruchów** — każdy ruch jest dostępny zawsze (`18-…`, 18.2). Wybiera
+tylko to, co przychodzi z zewnątrz:
 
 ```
-pula = zdarzenia skryptowe, których okno obejmuje ten okres
-     + karty z katalogu kampanii (warunek spełniony)
-     + karty wygenerowane przez działy (pytania o zgodę)
-     + zdarzenia świata (fale — wspólne dla wszystkich graczy)
+zdarzenia (proto/rezyser.js → zaplanujMiesiac → { zdarzenia, obserwacje }):
+  skrypt kampanii, którego okno obejmuje ten miesiąc: incydenty (S01, S03), sprawy (budżet,
+  przejęcie, umowa, wodomierze…), fale haktywistów, kontrola — moment w oknie wg rytmu
 
-wynik(k) = 0,45·trafność_w_problem(k) + 0,30·(1 − P(opanowany cel_k)) + 0,15·nowość(k)
-         + 0,10·zgodność_z_rytmem(k)
-
-obowiązkowe: skrypt na końcu okna, karty działów (ktoś czeka na odpowiedź), zdarzenia świata
-reszta: najlepsze wg wyniku, łącznie 3–5 kart na okres
+obserwacje (informacja, nie pytanie — „co ludzie mówią i co widać"):
+  obowiązkowe: w pierwszym miesiącu swojego okna (status KSC, ostrzeżenie CERT, zapowiedź audytu)
+  reszta: najwyżej 2 na miesiąc, wynik(o) = trafność w aktualny problem firmy
+                                          + (1 − P(opanowany cel_o))
+  obserwacja może odsłonić fakt świata (`odkrywa`) albo ustawić flagę (`flaga`)
 ```
+
+Sprawy od działów (prośby, odkrycia obejść, sygnały) przychodzą od agentów działów, nie od
+reżysera. Prośba ma **warunki składane** (`data/dzialy.js`, `warunki`): gracz wybiera zestaw,
+resztka ryzyka na wektor = Π(1 − redukcja), a zadowolenie działu = max(0,1; 0,8 − 0,12·(n−1)
+− 0,3·opóźnienie) — każdy kolejny warunek i każde opóźnienie to mniej entuzjazmu. Warunek może
+wymagać działającej kontroli (MFA), a jego koszt znika, gdy kontrola „zamiast" już działa.
 
 ### Rytm (krzywa napięcia)
 
@@ -269,10 +277,10 @@ miesiąc"**, kiedy jest gotowy (decyzje podjęte albo świadomie odłożone). Ko
 
 - kampanię da się przejść w jeden wieczór albo rozłożyć na tygodnie — stan zapisuje się po
   każdej decyzji,
-- **nierozpatrzone karty** przy zamknięciu miesiąca mają skutek „odłożone" (dział dostaje
-  r = −0,5) — brak decyzji też jest decyzją,
-- incydent przerywa okres: tryb operacyjny trzeba rozegrać, zanim zamknie się miesiąc
-  (można go wstrzymać i wrócić — zegary gry stoją, gdy gracz nie gra),
+- **sprawy bez odpowiedzi** w terminie rozstrzygają się same (prośba: „odłożone", dział dostaje
+  r = −0,5; oferta wygasa; sygnał — nikt nie sprawdził) — brak decyzji też jest decyzją,
+- incydent można poprowadzić w dowolnym momencie miesiąca; **niepodjęty toczy się bez gracza**
+  do limitu fazy ostrej przy zamknięciu miesiąca (świat nie czeka),
 - multiplayer biurowy: świat ma wspólny kalendarz fal liczonych w **miesiącach gry**, nie
   w dniach realnych — każdy trafia na falę, gdy jego kampania do niej dojdzie.
 
@@ -280,12 +288,13 @@ miesiąc"**, kiedy jest gotowy (decyzje podjęte albo świadomie odłożone). Ko
 
 | Plik | Co |
 |---|---|
-| `proto/silnik.js` | silnik miesiąca (wspólny z Monte Carlo); `presjaWektorow` dla diagnozy |
-| `proto/dzialy.js` | agenci działów: wybór inicjatywy, pytaj/obejdź, uczenie, raporty |
-| `proto/rezyser.js` | diagnoza, model gracza (BKT), wybór kart, rytm, przeciwnik |
-| `proto/kampania.js` | kampania w terminalu we własnym tempie: briefing → raporty → karty → zamknij miesiąc |
-| `data/dzialy.js` | katalog inicjatyw i wzorce działów |
-| `data/kampanie/wodociagi.js` | kampania „Wodnik": działy, ludzie, oś 24 miesięcy, karty |
+| `proto/silnik.js` | silnik miesiąca (wspólny z Monte Carlo); `st.konf` (skuteczność wdrożeń), `wycofaj`; `presjaWektorow` dla diagnozy |
+| `proto/dzialy.js` | agenci działów: wybór inicjatywy, pytaj/obejdź, uczenie, raporty; ryzyko z ułamkami per wektor |
+| `proto/rezyser.js` | diagnoza, model gracza (BKT karmiony zasadami), wybór zdarzeń i obserwacji, rytm, przeciwnik |
+| `proto/ruchy.js`, `proto/sprawy.js`, `proto/incydent.js`, `proto/zasady.js` | silnik ruchów (`18-…`) |
+| `proto/kampania.js` | kampania w terminalu we własnym tempie: ruchy, sprawy, incydenty → zamknij miesiąc |
+| `data/dzialy.js` | katalog inicjatyw z warunkami „tak, ale" i wzorce działów |
+| `data/kampanie/wodociagi.js` | kampania „Wodnik": działy, fakty świata, obserwacje, sprawy, oś 24 miesięcy |
 
 ## 15.9. Model językowy — opcja na później, z barierkami
 

@@ -1,79 +1,117 @@
-// ── LABORATORIUM PRZYPADKÓW BRZEGOWYCH ──
+// ── LABORATORIUM PRZYPADKÓW BRZEGOWYCH (silnik ruchów) ──
 // „Test penetracyjny" własnej gry: automaty z celowo głupimi albo cwanymi strategiami
 // i sprawdzanie niezmienników. Pytania: czy da się grę oszukać? czy absurdalna gra daje
 // absurdalny (a nie dobry) wynik? czy coś wycieka zza mgły wojny? czy liczby się nie rozjeżdżają?
+// Fuzzer („losowy") gra losowymi ruchami z losowymi parametrami — przy pełnej dowolności ruchów
+// to on pilnuje, że żadna kombinacja nie rozsypuje modelu.
 //   node ciso-sim/proto/brzegowe.js [liczba_ziaren]
 // Wyniki i decyzje: docs/17-przypadki-brzegowe.md.
 
 const K = require('./kampania');
-const D = require('./dzialy');
 const S = require('./silnik');
+const RU = require('./ruchy');
+const SP = require('./sprawy');
+const I = require('./incydent');
 const KONTROLE = require('../data/kontrole');
 
-// Przy kilku dobrych — najtańsza rocznie (jak automaty w kampania.js); bez `k` — pierwsza.
-const dobra = (c, k) => Math.max(0, K.dobraNajtansza(c, k));
-const odp = (c, x) => c.opcje.findIndex(o => o.odpowiedz === x);
-const koszt = o => (o.pln || 0) + 300 * (o.h || 0);
+// Mądry z podmienionymi odpowiedziami (sprawy) i dodatkowymi ruchami.
+const zMadrego = ({ sprawa, ruchy, filtr, playbook } = {}) => ({
+  ruchy: (k, A) => {
+    const A2 = filtr ? { ...A, ruch: (id, p = {}) => { const r = filtr(id, p, k); return r ? A.ruch(r[0], r[1]) : null; } } : A;
+    K.madreRuchy(k, A2);
+    ruchy?.(k, A2);
+  },
+  sprawa: (k, s, A) => (sprawa && sprawa(k, s, A)) || K.madraSprawa(k, s, A),
+  incydent: (k, A) => {
+    const inc = k.incydent;
+    const plan = playbook ? playbook(inc.id, inc.s, K.PLAYBOOK[inc.id](inc.s)) : K.PLAYBOOK[inc.id](inc.s);
+    for (const a of plan) { if (!k.incydent) return; A.inc(a); }
+  },
+});
 
 const STRATEGIE = {
   // Punkty odniesienia.
-  rozsadny: K.AUTO.rozsadny,
   madry: K.AUTO.madry,
-  // „Tak" na wszystko, co mówią działy; w kartach — opcja najmilsza zarządowi (mandat).
-  potakiwacz: {
-    karta: (c, k) => {
-      if (c.zrodlo === 'dzial') return odp(c, 'zgoda');
-      if (c.zrodlo === 'odkrycie') return odp(c, 'zostaw');
-      // Przy remisie — dobra opcja: potakiwacz ma testować uprzejmość, nie kłamać przypadkiem.
-      let best = dobra(c, k);
-      c.opcje.forEach((o, j) => { if ((o.mandat || 0) > (c.opcje[best].mandat || 0)) best = j; });
-      return best;
-    },
-    scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
-  },
-  // Kupuje cały katalog w pierwszym miesiącu.
+  rozsadny: K.AUTO.rozsadny,
+  // Robi to, co miłe zarządowi i działom: wyjątki dla zarządu, zgoda na wszystko, akceptacja
+  // zamiast porządków, przejęcie od razu — i dokumenty „z datami wstecz", bo zarząd prosi.
+  potakiwacz: zMadrego({
+    filtr: (id, p) => (id === 'wdroz:mfa' ? [id, { ...p, zakres: 'bez_zarzadu' }] : id === 'wdroz:segmentacja' ? null : [id, p]),
+    ruchy: (k, A) => { if (k.flagi.audyt_zapowiedziany) A.ruch('dokumenty_wstecz'); },
+    sprawa: (k, s) => (s.rodzaj === 'prosba' ? { v: 'zgoda' } : s.rodzaj === 'odkrycie' ? { v: 'akceptuj' }
+      : ({ S_budzet2027: { v: 'bez_wniosku' }, S_przejecie: { v: 'polacz' }, S_umowa_integratora: { v: 'przedluz' },
+        S_wodomierze: { v: 'bez_udzialu' }, S_emerytura: { v: 'po_swojemu' } })[s.sid]),
+  }),
+  // Zamawia cały katalog w pierwszym miesiącu (domyślne parametry).
   wszystko_naraz: {
-    miesiac: k => { if (k.st.m === 1) for (const x of KONTROLE) K.zlecRecznie(k, x.id); },
-    karta: (c, k) => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : dobra(c, k)),
-    scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
+    ruchy: (k, A) => { if (k.st.m === 1) for (const x of KONTROLE) A.ruch(`wdroz:${x.id}`); },
+    sprawa: K.madraSprawa, incydent: K.madryIncydent,
   },
-  // Wszystko „odłóż", poza obowiązkowymi (pierwsza opcja).
-  odkladacz: {
-    karta: (c, k) => (c.zrodlo === 'dzial' ? odp(c, 'odloz') : c.obowiazkowa ? 0 : null),
-    scen: () => 0,
-  },
-  // Wybiera najtańszą opcję (PLN + godziny), wszystko inne jak rozsądny.
+  // Wszystko odkłada; sprawy rozstrzygają się same, incydenty toczą się bez niego.
+  odkladacz: { sprawa: (k, s) => (s.rodzaj === 'prosba' ? { v: 'odloz' } : null) },
+  // Tylko to, co nie kosztuje złotówek; najtańsze odpowiedzi.
   skapiec: {
-    karta: (c, k) => { let b = 0; c.opcje.forEach((o, j) => { if (koszt(o) < koszt(c.opcje[b])) b = j; }); return b; },
-    scen: o => { let b = 0; o.forEach((x, j) => { if ((x.h || 0) < (o[b].h || 0)) b = j; }); return b; },
-  },
-  // Kłamie, gdzie się da (ankieta ubezpieczeniowa, wyjątki, papier zamiast procesu).
-  klamca: {
-    karta: (c, k) => {
-      const kl = c.opcje.findIndex(o => o.nieuczciwe || o.flagi && (o.flagi.klamstwo_ankieta || o.flagi.wyjatek_mfa_zarzad || o.flagi.polityki_z_pudelka));
-      if (kl >= 0) return kl;
-      return c.zrodlo === 'dzial' ? odp(c, 'warunki') : dobra(c, k);
+    ruchy: (k, A) => {
+      for (const x of KONTROLE) if (!x.wdrozenie.pln && !S.kosztMiesieczny(k.st, x.id)) A.ruch(`wdroz:${x.id}`);
+      if (A.znany('hmi_wystawiony')) A.ruch('odetnij_hmi');
     },
-    scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
+    sprawa: (k, s, A) => (s.rodzaj === 'prosba' ? { v: 'alternatywa' } : s.rodzaj === 'odkrycie' ? { v: 'wylacz' } : s.rodzaj === 'sygnal' ? { v: 'zbadaj' }
+      : ({ S_budzet2027: { v: 'bez_wniosku' }, S_przejecie: { v: 'odloz' }, S_umowa_integratora: { v: 'przedluz' }, S_ubezpieczenie: { v: 'odrzuc' },
+        S_wodomierze: { v: 'bez_udzialu' }, S_emerytura: { v: 'po_swojemu' }, S_falszywy_komunikat: { v: 'dementi', p: { kanaly: 'strona' } }, S_noc_integrator: { v: 'odmow' } })[s.sid]),
+    incydent: K.madryIncydent,
   },
-  // „Tak, ale bezpiecznie" ZAWSZE — także gdy to kosztuje 200 h w miesiącu, który ma 40 h.
-  pracoholik: {
-    karta: (c, k) => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : (() => { let b = dobra(c, k); c.opcje.forEach((o, j) => { if ((o.h || 0) > (c.opcje[b].h || 0)) b = j; }); return b; })()),
-    scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
-  },
-  // Bada każdy sygnał i nic poza tym (czy sygnały zdradzają prawdę?).
+  // Mądry, który kłamie: upiększone raporty, „tak" w ankiecie ubezpieczyciela, dokumenty wstecz.
+  klamca: zMadrego({
+    filtr: (id, p) => (id === 'raport_zarzadowi' ? [id, { styl: 'upiekszony' }] : [id, p]),
+    ruchy: (k, A) => { if (k.flagi.audyt_zapowiedziany) A.ruch('dokumenty_wstecz'); },
+    sprawa: (k, s) => (s.sid === 'S_ubezpieczenie' ? { v: 'ankieta', p: { mfa: 'tak', edr: 'tak', kopie: 'tak' } } : undefined),
+  }),
+  // Wszystko, co kosztuje godziny: polowanie, przeglądy co miesiąc, szkolenia działów.
+  pracoholik: zMadrego({
+    ruchy: (k, A) => {
+      A.ruch('polowanie', { kto: 'sam' });
+      for (const o of Object.values(k.obiekty)) if (o.stan === 'dziala') A.ruch(`przeglad:${o.id}`);
+      for (const d of Object.keys(k.dzialy)) A.ruch('szkolenie_dzialu', { dzial: d });
+    },
+  }),
+  // Szuka intruzów i bada każdy sygnał, poza tym nic.
   paranoik: {
-    karta: (c, k) => (c.zrodlo === 'sygnal' ? 0 : c.obowiazkowa ? dobra(c, k) : null),
-    scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
+    ruchy: (k, A) => A.ruch('polowanie', { kto: 'sam' }),
+    sprawa: (k, s) => (s.rodzaj === 'sygnal' ? { v: 'zbadaj' } : null),
+    incydent: K.madryIncydent,
   },
-  // Losowe wszystko + losowe zakupy (fuzzing niezmienników).
+  // Fuzzer: losowe ruchy, parametry, czasowniki i akcje w incydentach.
   losowy: (() => {
     let r = S.mulberry32(99);
+    const los = a => a[Math.floor(r() * a.length)];
+    const losParam = param => Object.fromEntries(Object.entries(param || {}).map(([n, w]) => [n, w?.length ? los(w) : undefined]));
     return {
       reset: seed => { r = S.mulberry32(seed * 7919); },
-      miesiac: k => { if (r() < 0.3) K.zlecRecznie(k, KONTROLE[Math.floor(r() * KONTROLE.length)].id); },
-      karta: (c, k) => (r() < 0.2 && !c.obowiazkowa ? null : Math.floor(r() * c.opcje.length)),
-      scen: o => Math.floor(r() * o.length),
+      ruchy: (k, A) => {
+        for (let i = Math.floor(r() * 8); i > 0; i--) {
+          const ruchy = RU.lista(k);
+          const x = los(ruchy);
+          const p = losParam(x.param);
+          if (x.id.startsWith('zmien:')) delete p[los(Object.keys(p))];   // zmiana jednego, nie wszystkich
+          A.ruch(x.id, p);
+        }
+      },
+      sprawa: (k, s) => {
+        if (r() < 0.3) return null;
+        const cz = SP.czasowniki(k, s);
+        const v = los(Object.keys(cz));
+        const p = {};
+        for (const [n, d] of Object.entries(cz[v].param || {})) {
+          p[n] = d.wartosci ? los(d.wartosci) : d.lista ? d.lista.filter(() => r() < 0.5).join(',') || d.lista[0] : d.liczba ? Math.round(d.liczba[0] + r() * (d.liczba[1] - d.liczba[0])) : '';
+        }
+        return { v, p };
+      },
+      incydent: (k, A) => {
+        for (let i = 0; i < 12 && k.incydent; i++) {
+          if (r() < 0.15) { A.czekaj(1 + Math.floor(r() * 6)); continue; }
+          A.inc(los(I.akcje(k)).id);
+        }
+      },
     };
   })(),
 };
@@ -90,48 +128,47 @@ function sprawdz(k, nazwa, seed) {
   for (const d of Object.values(k.dzialy)) {
     for (const n of ['zaufanie', 'swiadomosc', 'zmeczenie']) if (!(d[n] >= 0 && d[n] <= 1)) bledy.push(`${d.id}.${n} = ${d[n]}`);
   }
+  // Konfiguracja kontroli w silniku: wszystko w [0, 1] — inaczej (1 − x) w silniku wychodzi ujemne.
+  for (const [id, c] of Object.entries(k.st.konf)) {
+    for (const v of [c.jakosc, c.utrudnia, c.wykrywa, c.odtwarzanie, ...Object.values(c.pokrycie)]) if (!(v >= 0 && v <= 1)) bledy.push(`konf ${id}: ${v}`);
+    if (!S.dziala(k.st, id)) bledy.push(`konf ${id} dla niedziałającej kontroli`);
+  }
+  for (const o of Object.values(k.obiekty)) {
+    if (o.stan === 'dziala' && !S.dziala(k.st, o.id) && o.dzialaOd !== null) bledy.push(`obiekt ${o.id} „działa", a silnik nie`);
+    if (o.stan === 'wycofany' && S.dziala(k.st, o.id)) bledy.push(`obiekt ${o.id} wycofany, a silnik dalej go stosuje`);
+  }
+  if (k.incydent) bledy.push('kampania skończona z otwartym incydentem');
   return bledy.map(b => `[${nazwa} #${seed}] ${b}`);
 }
 
 async function main() {
   const N = Number(process.argv[2] || 10);
-  const cicho = () => {};
   const wszystkieBledy = [];
-  console.log('strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  h/mies(maks)  karty/mies(maks)  JD   odwołany  sufit  INDEKS  WYNIK');
+  console.log('strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  awarie OT  praktyka odwołany  sufit  INDEKS  WYNIK');
   for (const [nazwa, strat] of Object.entries(STRATEGIE)) {
-    const a = { straty: 0, wyd: 0, audyt: 0, man: 0, rep: 0, mor: 0, zauf: 0, ukr: 0, mnoz: 0, h: 0, karty: 0, jd: 0, odw: 0, io: 0, sufit: 0, wk: 0 };
+    const a = { straty: 0, wyd: 0, audyt: 0, man: 0, rep: 0, mor: 0, zauf: 0, ukr: 0, mnoz: 0, aw: 0, jd: 0, odw: 0, io: 0, sufit: 0, wk: 0 };
     for (let seed = 1; seed <= N; seed++) {
-      strat.reset?.(seed);
-      let maxH = 0, maxKart = 0;
-      const obs = { ...strat, karta: (c, k) => { maxKart = Math.max(maxKart, k.karty.length); return strat.karta(c, k); } };
-      const oryg = K.zamknijMiesiac;
       let k;
-      try {
-        k = await K.grajAuto({ ...obs, miesiac: kk => { maxH = Math.max(maxH, kk.hKart); strat.miesiac?.call(strat, kk); } }, seed, false, cicho, false);
-      } catch (e) { wszystkieBledy.push(`[${nazwa} #${seed}] WYJĄTEK: ${e.message}`); continue; }
-      maxH = Math.max(maxH, ...k.decyzje.map(() => 0));
+      try { k = await K.grajAuto(strat, seed, false, () => {}, false); } catch (e) { wszystkieBledy.push(`[${nazwa} #${seed}] WYJĄTEK: ${e.stack.split('\n').slice(0, 3).join(' | ')}`); continue; }
       wszystkieBledy.push(...sprawdz(k, nazwa, seed));
       const dz = Object.values(k.dzialy);
+      const io = await K.indeksOdpornosci(k);
       a.straty += k.st.w.straty; a.wyd += k.st.w.wydatki; a.audyt += k.kontrola?.wynik || 0;
       a.man += k.wskazniki.mandat; a.rep += k.wskazniki.reputacja; a.mor += k.wskazniki.morale;
       a.zauf += dz.reduce((x, d) => x + d.zaufanie, 0) / dz.length;
       a.ukr += dz.reduce((x, d) => x + d.ukryte.filter(u => !u.odkryte).length, 0);
       a.mnoz = Math.max(a.mnoz, ...Object.values(k.st.mod.wektory), 1);
-      a.h = Math.max(a.h, k.maxHKart || 0);
-      a.karty = Math.max(a.karty, maxKart);
-      a.jd += K.jakoscDecyzji(k);
-      a.odw += k.wskazniki.mandat <= 0 ? 1 : 0;
-      const io = await K.indeksOdpornosci(k);
-      a.io += io.wynik; a.wk += io.kampania; a.sufit += io.bramki.length ? 1 : 0;
+      a.aw += k.incydenty.filter(i => i.wlasna).length;
+      a.jd += io.jd; a.odw += k.wskazniki.mandat <= 0 ? 1 : 0; a.io += io.wynik; a.wk += io.kampania; a.sufit += io.bramki.length ? 1 : 0;
     }
     const t = v => (v / N / 1000).toFixed(0).padStart(6) + 'k';
     console.log(nazwa.padEnd(15), t(a.straty), t(a.wyd), (a.audyt / N).toFixed(0).padStart(5), (a.man / N).toFixed(0).padStart(6),
       (a.rep / N).toFixed(0).padStart(3), (a.mor / N).toFixed(0).padStart(6), (a.zauf / N).toFixed(2).padStart(5), (a.ukr / N).toFixed(1).padStart(6),
-      a.mnoz.toFixed(2).padStart(8), String(Math.round(a.h)).padStart(13), String(a.karty).padStart(17),
-      ((100 * a.jd) / N).toFixed(0).padStart(4) + '%', `${a.odw}/${N}`.padStart(8), `${a.sufit}/${N}`.padStart(6), String(Math.round(a.io / N)).padStart(7), String(Math.round(a.wk / N)).padStart(6));
+      a.mnoz.toFixed(2).padStart(8), (a.aw / N).toFixed(1).padStart(10), ((100 * a.jd) / N).toFixed(0).padStart(8) + '%', `${a.odw}/${N}`.padStart(8),
+      `${a.sufit}/${N}`.padStart(6), String(Math.round(a.io / N)).padStart(7), String(Math.round(a.wk / N)).padStart(6));
   }
   console.log(wszystkieBledy.length ? `\nNARUSZENIA NIEZMIENNIKÓW (${wszystkieBledy.length}):\n${[...new Set(wszystkieBledy)].slice(0, 40).join('\n')}` : '\nNiezmienniki: OK');
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { STRATEGIE, sprawdz };
+module.exports = { STRATEGIE, sprawdz, zMadrego };

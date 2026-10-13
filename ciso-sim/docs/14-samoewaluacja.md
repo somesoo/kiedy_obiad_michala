@@ -248,9 +248,40 @@ gry szkoleniowej (gracz, który raz skłamał, nie ma już po co grać dalej)? A
 dopiero od drugiego kłamstwa, pierwsze — tylko skutki dla współpracy. Zostawiam surowo, bo
 pytanie właściciela brzmiało „czy to nie powinno przynieść dużo większej konsekwencji".
 
+## 14.8d. Szósta iteracja: silnik ruchów — gra bez quizu
+
+Decyzja właściciela (13.10.2026): „to nie może być w żadnym stopniu quiz; pełna dowolność, co
+i jak robię i w jakiej kolejności; to, co zrobiłem, mogę przejrzeć, przetestować i wycofać;
+wszystko ma zależności". Projekt i kod: `18-…`. Co się zmieniło:
+
+- **Karty z odpowiedziami a/b/c zniknęły.** Są ruchy z parametrami (cykl życia kontroli:
+  wdrożenie → pilotaż → przegląd / test / naprawa / zmiana → wycofanie, plus ~20 ruchów spoza
+  katalogu), sprawy z czasownikami i terminem, incydenty jako czas i stan zamiast drzewa.
+- **Prawda jest ukryta, wiedzę się zdobywa**: jakość wdrożenia, ukryte usterki, dryf
+  konfiguracji, niezgodność z OT, fakty świata (panel HMI w internecie, narzędzie integratora).
+- **Ocena = zasady** nad historią ruchów zamiast klucza odpowiedzi (`11-…`, 11.3).
+- **Migawka Monte Carlo bez zmian** (`test/prototyp.test.js`): `st.konf` jest w symulacji puste,
+  więc mnożniki = 1 i silnik liczy dokładnie jak wcześniej — świadomie sprawdzone, nie poprawione.
+
+**Wynik**: mądry 941, rozsądny laik 573 (było 882 — dawniej karty podsuwały mu dobre opcje),
+kłamca 250, bierny 65. Fuzzer z losowymi ruchami nie łamie niezmienników, a jego zapis odtwarza
+identyczny stan. Pełna tabela: `18-…`, 18.10; cennik odstępstw: `17-…`, 17.8.
+
+**Ryzyka do oceny przez CISO:**
+1. **Skąpiec (721) wygrywa z rozsądnym laikiem (573).** Uważam to za poprawne (procesy bez
+   narzędzi > narzędzia bez procesu), ale to mocna teza i gra ją wprost komunikuje.
+2. **Trudność dla laika.** Bez kart nikt nie podpowiada, że istnieje pilotaż albo test kopii.
+   Dla biura potrzebny będzie tryb łatwy: „trzy ruchy na Twój największy problem" (14.9).
+3. **Zasady to nowy klucz odpowiedzi** — mniej widoczny, ale nadal autorski. Każda ma
+   „dlaczego" i moment; lista do przeglądu przez CISO jest w `proto/zasady.js`.
+4. **Szkolenie kierownika prawie nic nie zmienia w wyniku** (odpowiedzialność osobista nie jest
+   modelowana, 🔵) — zasada je ocenia, skutki nie.
+
 ## 14.9. Następne kroki (propozycja)
 
-1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, karty kampanii w `data/kampanie/wodociagi.js`.
+1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, sprawy i fakty kampanii w `data/kampanie/wodociagi.js`,
+   zasady praktyki w `proto/zasady.js`.
 2. Rozgrywka kampanii „Wodnik” w terminalu z 3–5 osobami z biura (`proto/kampania.js --zapis=…`).
-3. Podpowiedź priorytetów dla żywego gracza (tryb łatwy) — reszta poprawek z 14.8 zrobiona (14.8a).
+3. Tryb łatwy dla żywego gracza: podpowiedź „trzy ruchy na Twój największy problem” (po silniku
+   ruchów to ważniejsze niż wcześniej — 14.8d).
 4. Szkielet aplikacji z logowaniem (`13-…`, etap C), z `proto/` przeniesionym do `lib/engine/`.

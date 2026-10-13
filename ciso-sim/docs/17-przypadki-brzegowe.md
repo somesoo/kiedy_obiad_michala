@@ -193,3 +193,57 @@ błędów to już −100…−200. Kłamstwa naprawić się nie da: kosztuje tyl
 **Wynik:** kłamca z 650 na **385** (sufit w 20/20, zaufanie działów 0,16 zamiast 0,63, audyt 32/60).
 Jest za graczem losowym (497) i tuż obok odkładacza (376). Rozsądny: 882, mądry: 912.
 
+
+## 17.8. Czwarta runda: pełna dowolność ruchów (silnik bez quizu, `18-…`)
+
+Decyzja właściciela (13.10.2026): „to nie może być w żadnym stopniu quiz". Karty z odpowiedziami
+a/b/c zniknęły (`18-…`), więc część reguł z 17.5 zmieniła formę:
+
+| Reguła z 17.5/17.7 | Teraz |
+|---|---|
+| obowiązkowa karta ma tanie uczciwe wyjście | **każda sprawa** ma czasownik bez złotówek i ≤ 8 h, i co najmniej dwa czasowniki (walidator kampanii) |
+| kolejność opcji tasowana | nie ma opcji; ruchy i czasowniki nie mają etykiet ani ocen (walidator i test „to nie quiz") |
+| brak decyzji jest oceniany | sprawa bez odpowiedzi rozstrzyga się sama w terminie; zasady oceniają też to, czego nie zrobiono (np. brak testu kopii) — ale zasady „nie rób X" w incydencie nie nagradzają bezczynności (`tylko_gdy_dzialal`) |
+| kłamstwo = `nieuczciwe` w opcji karty | kłamstwo = **ruch albo odpowiedź** (`nieuczciwe` w ruchu, `a.klamstwo` w sprawie), rejestr `k.klamstwa` bez zmian |
+| karta może mieć kilka dobrych odpowiedzi | każda sprawa i każdy ruch ma wiele dróg (parametry, warunki składane, kolejność) |
+| Jakość Decyzji z ocen opcji | **Jakość praktyki** z ~30 zasad nad historią ruchów (`11-…`, 11.3) |
+
+**Nowe absurdy, które wyszły na nowym silniku, i poprawki:**
+1. **Bierny zaliczał zasady „nie rób X"** (nie usunął maila z dowodami, nie zalogował się zdalnie
+   do przejętego panelu). Teraz takie zasady w incydencie liczą się tylko, gdy gracz cokolwiek
+   zrobił; zasada „bez nadgodzin" — dopiero od 12 ruchów.
+2. **Mądremu stały projekty**: pół etatu zjadały ruchy gracza i utrzymanie; EDR i SZBI nigdy się
+   nie kończyły, a „SZBI z pudełka" wychodził lepiej niż z doradcą. Poprawka w automacie (nie w
+   modelu): MSP z wymaganiami zaraz po MFA, limit trzech projektów naraz, rozmowa co dwa miesiące.
+3. **Pracoholik z morale 0 miał wynik jak mądry** (814). Wypalenie: limit godzin ×0,7 i jakość
+   nowych wdrożeń ×0,85. Teraz 771, z niższą praktyką.
+4. **„Alternatywa" zawsze była dobra** — także dla prośby, która prawie nie niesie ryzyka. Teraz
+   zasada uznaje ją tylko przy ciężarze ryzyka ≥ 0,1; przy drobnym ryzyku dobra jest zgoda.
+5. **Fuzzer** (losowe ruchy, parametry, czasowniki, akcje w incydentach): niezmienniki trzymają
+   się na 20 ziarnach, a zapis fuzzera odtwarza identyczny stan (test).
+
+**Cennik na nowym silniku** (`proto/cennik.js`, 20 ziaren, mądry 941; `proto/wyniki-cennik-2026-10-13.txt`):
+
+| Odstępstwo od praktyki | ΔWynik |
+|---|---|
+| upiększone raporty dla zarządu | **−676** |
+| dokumenty z datą wsteczną | **−631** |
+| kłamstwo w ankiecie ubezpieczyciela | **−363** |
+| bez rozpoznania + komunikat „woda bezpieczna" bez wyników (S03) | −265 |
+| odmowa każdej prośby działu | −85 |
+| bez rozpoznania + zdalne logowanie do przejętego panelu (S03) | −83 |
+| sygnały od ludzi ignorowane | −72 |
+| żadnych przeglądów ani testów | −66 |
+| bez rozpoznania (skan, obchód, przegląd dostępów) | −52 |
+| nocny telefon: podać hasło | −39 |
+| kara za każde odkryte obejście | −37 |
+| EDR na stacje OT bez pilotażu | −29 |
+| budżet „bo NIS2 i hakerzy" | −21 |
+| S01: najpierw szukanie winnych | −18 |
+| kopie nigdy nie testowane | −16 |
+| MFA bez zarządu bez akceptacji ryzyka | −12 |
+| pozostałe (SZBI z pudełka, EDR „wykrywaj", przejęcie bez przeglądu, szkolenie kierownika…) | −3…−10 |
+
+Nieuczciwość nadal kosztuje rząd wielkości więcej niż błąd. Odstępstwa w S03 u przygotowanego
+gracza kosztują 0 (S03 to tylko próba) — dlatego cennik liczy je razem z brakiem rozpoznania.
+Pełna tabela strategii: `18-…`, 18.10.

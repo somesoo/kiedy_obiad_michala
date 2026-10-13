@@ -1,9 +1,18 @@
 # Scenariusze incydentów
 
 Scenariusz = **tryb operacyjny** gry (zegar godzinowy): coś się dzieje, gracz decyduje pod
-presją czasu i niepełnej wiedzy, a zegary regulacyjne tykają. Scenariusz jest **danymi**
-(na razie Markdown do czytania i rozgrywki „papierowej", docelowo plik `.js` jak plansze
-w Snakes — wzorzec: `S01-faktura.dane.js`).
+presją czasu i niepełnej wiedzy, a zegary regulacyjne tykają. Scenariusz jest **danymi**:
+Markdown do czytania i rozgrywki „papierowej", a wersja grywalna to plik
+`SNN-nazwa.incydent.js` — **incydent bez drzewa decyzji** (wzorce: `S01-faktura.incydent.js`,
+`S03-pompa.incydent.js`; format i walidacja: `proto/incydent.js`, projekt: `docs/18-…`, 18.8).
+
+**Format grywalny (od silnika ruchów).** Nie ma faz z opcjami ✅/⚠️/❌. Plik ma: `start(ctx)`
+(stan zależny od tego, co gracz zrobił wcześniej w kampanii), `akcje` (każda: czas, godziny,
+koszt, `dostepna(s)` → powód, `efekt(s)` — bez ocen; walidator odrzuca akcję z `ocena`),
+`dynamika(s, dt)` (co dzieje się z upływem godzin), `zegary`, `koniec`, `wynik(s)`, **`zasady`**
+(ocena praktyki: każda z wagą, celem i „dlaczego"; `tylko_gdy_dzialal` dla zasad „nie rób X")
+i `debrief`. Gracz robi akcje w dowolnej kolejności, czeka albo kończy fazę ostrą. Tabele opcji
+w plikach `.md` poniżej to materiał do rozgrywki papierowej i źródło zasad, nie klucz odpowiedzi.
 
 Wszystkie firmy, osoby i nazwy produktów w scenariuszach są **fikcyjne**. Inspiracje z
 prawdziwych zdarzeń są opisane w debriefie, bez przypisywania winy.
@@ -12,9 +21,9 @@ prawdziwych zdarzeń są opisane w debriefie, bez przypisywania winy.
 
 | # | Tytuł | Rodzaj | Firmy | Trudność | Czas gry | Inspiracja |
 |---|---|---|---|---|---|---|
-| [S01](S01-faktura-z-nowym-numerem.md) (+ [dane](S01-faktura.dane.js)) | Faktura z nowym numerem konta | BEC / przejęta skrzynka | biuro, gmina, fabryka, wodociągi | ★ | 3 dni | powszechny wzorzec; wycieki z SaaS fakturowych 2026 |
+| [S01](S01-faktura-z-nowym-numerem.md) (+ [incydent](S01-faktura.incydent.js)) | Faktura z nowym numerem konta | BEC / przejęta skrzynka | biuro, gmina, fabryka, wodociągi | ★ | 3 dni | powszechny wzorzec; wycieki z SaaS fakturowych 2026 |
 | [S02](S02-piatek-2347.md) | Piątek, 23:47 | ransomware, ciągłość opieki | szpital | ★★★ | 30 dni | fala ataków na szpitale, marzec 2026 |
-| [S03](S03-pompa-na-maksimum.md) (+ [dane](S03-pompa.dane.js)) | Pompa na maksimum | OT, haktywiści | wodociągi | ★★ | 10 dni | stacje uzdatniania wody 2025 (raport ABW) |
+| [S03](S03-pompa-na-maksimum.md) (+ [incydent](S03-pompa.incydent.js)) | Pompa na maksimum | OT, haktywiści | wodociągi | ★★ | 10 dni | stacje uzdatniania wody 2025 (raport ABW) |
 | [S04](S04-dostawca-ktoremu-ufalismy.md) | Dostawca, któremu ufaliśmy | wyciek u dostawcy SaaS | szpital, przychodnia, gmina | ★★ | 30 dni | wyciek z dostawcy EDM, sierpień 2026 |
 | [S05](S05-klucz-w-repozytorium.md) | Klucz w repozytorium | wyciek z chmury, podmiot przetwarzający | software house | ★★★ | 30 dni | wycieki z chmury dostawców 2026 |
 | [S06](S06-czarny-piatek.md) | Czarny piątek | DDoS z wymuszeniem + przejęcia kont | sklep | ★★ | 4 dni | wzorce RDoS i credential stuffing |

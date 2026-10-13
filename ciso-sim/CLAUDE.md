@@ -2,15 +2,18 @@
 
 Osobna gra w tym repo: symulator osoby odpowiedzialnej za cyberbezpieczeństwo w polskiej
 organizacji. **Nie jest częścią Snakes** — nie importuje niczego z `../server.js` ani `../lib/`
-(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…17`.
+(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…18` (silnik gry: `docs/18-silnik-ruchow.md`).
 
-Stan: projekt + dane + silnik miesiąca + działy-agenci + reżyser + **grywalna kampania „Wodnik”
-w terminalu** + 12 scenariuszy (S01, S03 jako dane) + testy. Serwera, logowania i frontu w
+Stan: projekt + dane + silnik miesiąca + działy-agenci + reżyser + **silnik ruchów bez quizu**
++ **grywalna kampania „Wodnik” w terminalu** + 12 scenariuszy (S01, S03 jako incydenty bez
+drzewa) + testy. Serwera, logowania i frontu w
 przeglądarce jeszcze **nie ma** (roadmapa: `docs/13-roadmapa.md`).
 
 Decyzje właściciela (13.10.2026): odbiorcy — biuro; pierwsza kampania — wodociągi; **tempo
 gracza** (bez limitu „jeden ruch dziennie", gracz sam zamyka miesiąc); na koniec okresu
-raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; merytorykę oceni CISO.
+raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; merytorykę oceni CISO;
+**gra nie może być w żadnym stopniu quizem** — pełna dowolność ruchów i kolejności, każdą zmianę
+można przejrzeć, przetestować i wycofać (`docs/18-…`).
 
 ## Zasady
 
@@ -25,7 +28,7 @@ raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; m
 - **Mgła wojny**: prawda silnika (`campaign_state`) nigdy nie trafia do frontu — tylko
   oszacowania (`campaign_view`). To jak „atak nie nazywa celu" w Snakes.
 - **Rejestr, nie liczniki**: każda zmiana wskaźnika ma wiersz z przyczyną i zrzutem wiedzy
-  gracza; debrief i Jakość Decyzji czytają rejestr.
+  gracza; debrief i Jakość praktyki czytają rejestr.
 - **Gra o bezpieczeństwie musi być bezpieczna**: logowanie hasłem (scrypt), sesje z
   wygasaniem, limity prób, brak domyślnego hasła admina, hasła nigdy w URL. Nie kopiuj
   `/api/register` ani `checkAdmin` z Snakes (`docs/12-…`, 12.3).
@@ -35,39 +38,53 @@ raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; m
   „pogody" w innym. Każdy wybór loguje powód (`k.log`). Reżyser **nie zmienia skuteczności
   kontroli gracza**, wybiera tylko spośród prawdopodobnych zdarzeń i moment w oknie.
 - **Test obciążeniowy nie wypada przed swoim sygnałem** (S03 po ostrzeżeniu CERT) — „żadnych gotcha".
-- **Reguły z przypadków brzegowych** (`docs/17-…`, 17.5): obowiązkowa karta ma tanie uczciwe
-  wyjście (walidator); kolejność opcji zawsze tasowana; brak decyzji jest oceniany; żaden mnożnik
-  nie rośnie przyrostowo bez sufitu (rejestr `k.ryzyka`); wynik to **Wynik kampanii** (½ Indeks
-  Odporności + ½ ważona Jakość Decyzji), nie mandat; koszty reagowania nie idą z budżetu; sygnały
-  bywają fałszywe, szacunki mają błąd. Po 17.6: **kara musi trafić w wynik** (nie tylko w mandat);
-  wynik liczy się z prawdy, nie z wykrycia (ekspozycja, sufity `BRAMKI`); każde narzędzie
-  wykrywające ma `martwe_pola`; uczciwa opcja ma cenę, inaczej nieuczciwa nie jest pokusą.
-  Po 17.7: kłamstwo to `nieuczciwe: { wobec, wykrywalnosc }` w opcji (ocena zawsze „blad"),
-  rejestr `k.klamstwa`; ujawnienie (`ujawnij`) uderza we współpracę (zarząd, działy, ubezpieczyciel,
-  audytor). Kampania jest skończona i kończy się **audytem zamykającym**. Karta może mieć kilka
-  dobrych odpowiedzi; automaty biorą najtańszą rocznie (`dobraNajtansza`).
-- **Zapis gry = lista decyzji**, wczytanie = odtworzenie z ziarna. Nowa akcja gracza musi
-  przechodzić przez `rozstrzygnij`/`zlecRecznie`/`zagrajZdarzenie`/`zamknijMiesiac`
-  (`proto/kampania.js`) i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan.
+- **Bez quizu** (`docs/18-…`): nigdzie — w ruchach (`data/ruchy.js`), czasownikach spraw ani akcjach
+  incydentów — nie ma pól `ocena`/`pkt` (walidatory i test to sprawdzają). Praktykę ocenia
+  `proto/zasady.js` na historii ruchów (`k.historia`) i stanie; każda zasada ma wagę, cel
+  i „dlaczego". Ruch jest dostępny zawsze, chyba że jest obiektywny powód — i wtedy
+  `dostepny()` zwraca go po polsku. Nowy ruch: wpis w `data/ruchy.js` (albo parametry/usterki/
+  test/pilot kontroli w `data/kontrole.js`), zasada w `proto/zasady.js`, jeśli ma oceniać praktykę.
+- **Prawda ukryta, wiedza zdobywana**: jakość wdrożeń, usterki, dryf (strumień `wdrozenia`),
+  niezgodność z OT, fakty świata (`k.fakty`). Automaty widzą tylko to, co gracz (`apiAuto`).
+- **Incydent bez drzewa** (`proto/incydent.js`): akcje w dowolnej kolejności, czas płynie
+  (`dynamika`), zasady na końcu; zasady „nie rób X" z `tylko_gdy_dzialal`. Przygotowanie
+  z kampanii zmienia `start`. Niepodjęty incydent toczy się bez gracza przy zamknięciu miesiąca.
+- **Sprawy** (`proto/sprawy.js`): każda ma termin, rozstrzygnięcie domyślne, ≥ 2 czasowniki
+  i tani uczciwy (bez złotówek, ≤ 8 h) — walidator kampanii. Kłamstwo to ruch albo odpowiedź
+  (`nieuczciwe` w ruchu, `a.klamstwo` w sprawie), rejestr `k.klamstwa`.
+- **Reguły z przypadków brzegowych** (`docs/17-…`, 17.5–17.8): żaden mnożnik nie rośnie
+  przyrostowo bez sufitu (rejestr `k.ryzyka`); wynik to **Wynik kampanii** (½ Indeks Odporności
+  + ½ Jakość praktyki), nie mandat; koszty reagowania nie idą z budżetu; sygnały bywają
+  fałszywe, szacunki mają błąd; **kara musi trafić w wynik**; wynik liczy się z prawdy, nie
+  z wykrycia (ekspozycja, prawdziwa skuteczność kontroli, sufity `BRAMKI`); każde narzędzie
+  wykrywające ma `martwe_pola`; uczciwa opcja ma cenę, inaczej nieuczciwa nie jest pokusą;
+  ujawnienie kłamstwa (`ujawnij`) uderza we współpracę. Kampania jest skończona i kończy się
+  **audytem zamykającym** z dowodami (przegląd/test w ostatnim roku, próbki usterek).
+- **Zapis gry = lista akcji** (`k.akcje`: `ruch`, `sprawa`, `inc_start`, `inc`, `inc_czekaj`,
+  `inc_koniec`, `zamknij`), wczytanie = odtworzenie z ziarna (`wykonajAkcje`). Nowa akcja gracza
+  musi przechodzić przez `RU.wykonaj`/`SP.odpowiedz`/funkcje incydentu w `proto/kampania.js`
+  i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan. Nowe losowanie — tylko
+  z właściwego strumienia `k.rnd.*`.
 
 ## Narzędzia
 
 ```bash
 node ciso-sim/proto/symulacja.js <firma> [N]      # porównanie strategii (Monte Carlo)
-node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--auto=najlepsza|najgorsza]
-                                                 # scenariusz w terminalu + walidacja pliku
-node ciso-sim/proto/kampania.js [--zapis=plik.json] | --auto=rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
+node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--naprawione=fakt] [--auto=wzorcowo|bezczynnie]
+                                                 # incydent w terminalu + walidacja pliku
+node ciso-sim/proto/kampania.js [--zapis=plik.json] | --auto=madry|rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
 node ciso-sim/proto/porownaj-style.js            # 4 style gry × 20 ziaren (wyniki → docs/16-…)
 node ciso-sim/proto/brzegowe.js [N]              # strategie-prowokacje + niezmienniki (→ docs/17-…)
-node ciso-sim/proto/cennik.js [N]                # koszt JEDNEJ złej decyzji w dobrej grze (→ docs/17-…, 17.7)
+node ciso-sim/proto/cennik.js [N]                # koszt JEDNEGO odstępstwa w dobrej grze (→ docs/17-…, 17.8)
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 
 Test migawki Monte Carlo (`test/prototyp.test.js`) celowo pęka przy każdej zmianie danych
 zagrożeń/kontroli/silnika: przelicz, zaktualizuj liczby w teście i opisz zmianę w `docs/14-…`.
 Po zmianie danych: `node --check` na plikach i przebieg symulacji dla 2–3 firm; po zmianie
-scenariusza `.dane.js` — `rozegraj.js --auto=najlepsza` (walidator pilnuje, żeby najlepsza
-ścieżka dawała dokładnie 100 pkt). Wyniki ważnych przebiegów zapisuj w `proto/wyniki-<data>.txt`
+incydentu `.incydent.js` — `rozegraj.js <id> --auto=wzorcowo` i `--auto=bezczynnie` (walidator
+pliku + czy bezczynność nie zalicza zasad); po zmianie ruchów, spraw albo zasad — `brzegowe.js`
+(niezmienniki, fuzzer) i `cennik.js`. Wyniki ważnych przebiegów zapisuj w `proto/wyniki-<data>.txt`
 i wnioski w `docs/14-samoewaluacja.md`.
 
 ## Kalibracja (stan 13.10.2026)

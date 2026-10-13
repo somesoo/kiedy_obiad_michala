@@ -23,11 +23,12 @@ tym, jak się skończyło.
 |---|---|
 | Projekt gry (ten folder `docs/`) | **wersja 0.1, do dyskusji** |
 | Realia polskie (prawo, CSIRT-y, incydenty) | zweryfikowane na 13.10.2026 w źródłach wtórnych, z listą rzeczy do potwierdzenia w Dz.U. |
-| Scenariusze incydentów | 12 pełnych + 32 zalążki (`scenariusze/`); S01 także jako plik danych, grywalny w terminalu |
+| Scenariusze incydentów | 12 pełnych + 32 zalążki (`scenariusze/`); S01 i S03 jako incydenty bez drzewa decyzji (`*.incydent.js`), grywalne w terminalu |
 | Dane liczbowe (kontrole, zagrożenia, firmy) | `data/*.js`, pierwsza kalibracja |
 | Prototyp symulacji (Monte Carlo) | `proto/symulacja.js` — działa, wyniki w `proto/wyniki-*.txt` |
 | Działy jako uczące się agenty + reżyser | `docs/15-…`, `proto/dzialy.js`, `proto/rezyser.js` |
 | **Kampania „Wodnik” (wodociągi) — grywalna w terminalu**, własne tempo, zapis/wczytanie | `docs/16-…`, `proto/kampania.js` |
+| **Silnik ruchów — gra bez quizu**: dowolne ruchy z parametrami, cykl życia kontroli, sprawy, incydenty bez drzewa, ocena zasadami | `docs/18-…`, `proto/ruchy.js`, `sprawy.js`, `incydent.js`, `zasady.js` |
 | Testy automatyczne | `test/` — `node --test ciso-sim/test/*.test.js` |
 | Serwer, logowanie, front w przeglądarce | **nie ma** — patrz roadmapa |
 
@@ -45,17 +46,18 @@ tym, jak się skończyło.
 | [`docs/08-lancuch-dostaw.md`](docs/08-lancuch-dostaw.md) | szacowanie ryzyka dostawców, dostawca wysokiego ryzyka, koncentracja, umowy |
 | [`docs/09-firmy-kampanie.md`](docs/09-firmy-kampanie.md) | 9 firm (wodociągi, szpital, gmina, sklep, software house, fabryka, bank spółdzielczy, elektrociepłownia + samouczek) |
 | [`docs/10-etapy-rozwoju.md`](docs/10-etapy-rozwoju.md) | etapy dojrzałości firmy, rozwój biznesu (wzrost = nowe obowiązki), kariera gracza |
-| [`docs/11-ocena-i-debrief.md`](docs/11-ocena-i-debrief.md) | punktacja: jakość decyzji vs wynik, indeks odporności, raport końcowy |
+| [`docs/11-ocena-i-debrief.md`](docs/11-ocena-i-debrief.md) | punktacja: jakość praktyki (zasady) vs wynik, indeks odporności, sufity, audyt, raport końcowy |
 | [`docs/12-architektura-i-reuzycie.md`](docs/12-architektura-i-reuzycie.md) | stos, moduły, logowanie hasłem, co bierzemy z repo, czego NIE bierzemy |
 | [`docs/13-roadmapa.md`](docs/13-roadmapa.md) | etapy budowy: od prototypu tekstowego do pełnej gry |
 | [`docs/14-samoewaluacja.md`](docs/14-samoewaluacja.md) | krytyczna ocena projektu, wyniki symulacji, ryzyka, decyzje właściciela |
 | [`docs/15-dzialy-i-rezyser.md`](docs/15-dzialy-i-rezyser.md) | działy firmy jako agenci (inicjatywy, pytaj/obejdź, uczenie, raporty) i reżyser (diagnoza, model gracza, rytm, przeciwnik) |
 | [`docs/16-kampania-wodociagi.md`](docs/16-kampania-wodociagi.md) | pierwsza kampania: ludzie, oś 24 miesięcy, wyniki stylów gry |
-| [`docs/17-przypadki-brzegowe.md`](docs/17-przypadki-brzegowe.md) | „test penetracyjny" gry: 10 strategii-prowokacji, 20 znalezionych absurdów i poprawki |
-| [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 jako dane |
+| [`docs/17-przypadki-brzegowe.md`](docs/17-przypadki-brzegowe.md) | „test penetracyjny" gry: strategie-prowokacje, fuzzer, znalezione absurdy, poprawki, cennik złych decyzji |
+| [`docs/18-silnik-ruchow.md`](docs/18-silnik-ruchow.md) | silnik bez quizu: obiekty i cykl życia kontroli, ruchy, sprawy, incydent bez drzewa, zasady, komendy gry, wyniki |
+| [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 i S03 jako incydenty (`*.incydent.js`) |
 | [`data/`](data/) | liczby: kontrole, zagrożenia, firmy, inicjatywy działów, kampanie (`data/kampanie/`) |
 | [`proto/`](proto/) | silnik miesiąca, Monte Carlo, działy, reżyser, kampania i scenariusze w terminalu |
-| [`test/`](test/) | testy `node --test`: determinizm, zapis/odtworzenie, walidacja scenariuszy, kierunek uczenia się działów |
+| [`test/`](test/) | testy `node --test`: determinizm, zapis/odtworzenie (także fuzzera), „to nie quiz", cykl życia kontroli, kolejność w incydencie, kierunek wyników |
 
 ## Szybki start
 
@@ -77,8 +79,10 @@ higiena+MDR / własny SOC): wydatki, straty, zły scenariusz (P90), liczba powa�
 zmęczenie alertami, poślizg i niewdrożone projekty.
 
 ```bash
-node ciso-sim/proto/rozegraj.js S01                              # zagraj scenariusz przy stole
+node ciso-sim/proto/rozegraj.js S01                              # zagraj incydent przy stole
 node ciso-sim/proto/rozegraj.js S01 --kontrole=weryfikacja_platnosci   # z procedurą płatności
+node ciso-sim/proto/rozegraj.js S03 --naprawione=hmi_wystawiony --auto=wzorcowo   # panel zamknięty wcześniej
+node ciso-sim/proto/brzegowe.js 20 && node ciso-sim/proto/cennik.js 20   # strategie-prowokacje, cennik odstępstw
 ```
 
 ## Zasady pracy w tym folderze

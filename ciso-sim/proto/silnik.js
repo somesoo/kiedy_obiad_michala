@@ -65,6 +65,11 @@ function nowyStan(firma, seed) {
     // Modyfikatory z kampanii: działy obchodzące zasady, przeciwnik uczący się, zdarzenia.
     // Domyślnie puste — Monte Carlo strategii ich nie używa.
     mod: { wektory: {}, sprawcy: {}, h_extra: 0 },
+    // Konfiguracja wdrożonych kontroli z kampanii (docs/18-…): jakość wdrożenia, pokrycie
+    // wektorów (wyjątki, zakres), tryb (EDR „tylko wykrywaj"), odtwarzanie (kopia, która się
+    // nie odtwarza). Brak wpisu = 1 — Monte Carlo strategii liczy dokładnie jak wcześniej.
+    konf: {},
+    wypowiedzenia: {},                           // id → miesiąc, po którym abonament wygasa
     w: { wydatki: 0, straty: 0, powazne: 0, incydenty: 0, wykryte_wczesnie: 0,
       alert_niedobor_mies: 0, nadgodziny: 0, opoznienie_mies: 0, niewdrozone: 0, szczegoly: {} },
     ostatni: null,                               // podsumowanie ostatniego miesiąca (dla kampanii)
@@ -90,6 +95,15 @@ function zlec(st, id) {
 }
 function dodajEtat(st, ile = 1) { st.etaty += ile; }
 
+// Wycofanie zmiany: przestaje działać od razu, projekt w toku przepada, a abonament płaci się
+// jeszcze przez okres wypowiedzenia (miesiąc). Koszt wdrożenia nie wraca.
+function wycofaj(st, id, wypowiedzenieMies = 1) {
+  delete st.aktywne[id];
+  st.projekty = st.projekty.filter(p => p.id !== id);
+  if (st.zamowione.has(id)) st.wypowiedzenia[id] = st.m + wypowiedzenieMies;
+  delete st.konf[id];
+}
+
 function kosztMiesieczny(st, id) {
   const u = kontrola[id].utrzymanie;
   let pln = (u.pln || 0) + (u.pln_na_stanowisko || 0) * st.zasobyZnane + (u.pln_na_uzytkownika || 0) * st.uzytkownicy;
@@ -112,6 +126,9 @@ function zakonczMiesiac(st) {
   let abonamenty = 0;
   for (const id of st.zamowione) abonamenty += kosztMiesieczny(st, id);
   w.wydatki += abonamenty;
+  for (const [id, mm] of Object.entries(st.wypowiedzenia || {})) {
+    if (m >= mm) { st.zamowione.delete(id); delete st.wypowiedzenia[id]; }
+  }
 
   // Godziny. Kolejność jak w zdyscyplinowanym zespole: utrzymanie, potem alerty,
   // a projekty dostają RESZTĘ i się ślizgają. (W grze kolejność wybiera gracz —
@@ -129,6 +146,7 @@ function zakonczMiesiac(st) {
     let s = utrzymanieUlamek;
     if ((k.wymaga || []).some(r => !dziala(st, r))) s *= 0.3;
     if (k.inwentaryzacja) s *= st.znane;
+    s *= st.konf?.[k.id]?.jakosc ?? 1;
     skut[k.id] = s;
   }
   // Inwentaryzacja i skanery odkrywają zasoby — powoli, a shadow IT powoli odrasta.
@@ -159,9 +177,11 @@ function zakonczMiesiac(st) {
   for (let i = 0; i < st.projekty.length; i++) {
     const pr = st.projekty[i];
     const k = kontrola[pr.id];
-    const daj = Math.max(0, Math.min(h, hWdr(st, k) - pr.h));
+    // hMn: parametry wdrożenia z kampanii (pasywny spis OT trwa dłużej, „z pudełka" — krócej).
+    const potrzeba = hWdr(st, k) * (pr.hMn ?? 1);
+    const daj = Math.max(0, Math.min(h, potrzeba - pr.h));
     pr.h += daj; h -= daj;
-    if (pr.h >= hWdr(st, k) && m >= pr.start + k.wdrozenie.mies - 1) {
+    if (pr.h >= potrzeba && m >= pr.start + k.wdrozenie.mies - 1) {
       st.aktywne[pr.id] = m + 1;
       w.opoznienie_mies += (m + 1) - (pr.start + k.wdrozenie.mies);
       wdrozone.push(pr.id);
@@ -169,20 +189,25 @@ function zakonczMiesiac(st) {
     }
   }
 
-  const zapobieg = wekt => czynne.reduce((a, k) => a * (1 - (k.zapobiega?.[wekt] || 0) * skut[k.id]), 1);
+  // Pokrycie wektora przez konkretne wdrożenie (MFA z wyjątkiem dla zarządu słabiej chroni
+  // przed BEC; EDR bez stacji OT nie widzi drogi przez usługi przemysłowe).
+  const pok = (k, wekt) => st.konf?.[k.id]?.pokrycie?.[wekt] ?? 1;
+  const kf = (k, pole) => st.konf?.[k.id]?.[pole] ?? 1;
+  const zapobieg = wekt => czynne.reduce((a, k) => a * (1 - (k.zapobiega?.[wekt] || 0) * skut[k.id] * pok(k, wekt)), 1);
   // Martwe pola: narzędzie widzi tylko część dróg wejścia. EDR nie zobaczy pracownika, który
   // wkleja dane do prywatnego czatu, ani logowania haktywisty do wystawionego panelu HMI —
   // nie ma tam złośliwego kodu. Bez tego jeden EDR unieważniał skutki dziesiątek złych zgód
   // (docs/17-…, 17.6). `martwe_pola` w katalogu kontroli: wektor → mnożnik skuteczności.
   const widzi = (k, x) => k.martwe_pola?.[x?.wektor] ?? 1;
-  const utrudn = (etap, x) => czynne.reduce((a, k) => a * (1 - (k.utrudnia?.[etap] || 0) * skut[k.id] * widzi(k, x)), 1);
+  const utrudn = (etap, x) => czynne.reduce((a, k) => a * (1 - (k.utrudnia?.[etap] || 0) * skut[k.id] * widzi(k, x) * kf(k, 'utrudnia') * pok(k, x?.wektor)), 1);
   const wykryj = (etap, skryt, x) => {
-    const nie = czynne.reduce((a, k) => a * (1 - (k.wykrywa?.[etap] || 0) * skut[k.id] * jakosc(k.id) * widzi(k, x)),
+    const nie = czynne.reduce((a, k) => a * (1 - (k.wykrywa?.[etap] || 0) * skut[k.id] * jakosc(k.id) * widzi(k, x) * kf(k, 'wykrywa') * pok(k, x?.wektor)),
       1 - Z.WYKRYWANIE_BAZOWE[etap]);
     return Math.min(0.95, (1 - nie) * skryt);
   };
   const reakcja = Math.min(0.8, czynne.reduce((a, k) => a + (k.reakcja || 0) * skut[k.id], 0));
-  const przestojMn = czynne.reduce((a, k) => a * (k.odtwarzanie?.przestoj ? 1 - (1 - k.odtwarzanie.przestoj) * skut[k.id] : 1), 1);
+  // Kopia, która się nie odtwarza (konf.odtwarzanie < 1), skraca przestój tylko trochę.
+  const przestojMn = czynne.reduce((a, k) => a * (k.odtwarzanie?.przestoj ? 1 - (1 - k.odtwarzanie.przestoj) * skut[k.id] * kf(k, 'odtwarzanie') : 1), 1);
   // Kłamstwo w ankiecie = odmowa wypłaty (kampania ustawia mod.bez_ubezpieczenia).
   const ubezp = st.mod.bez_ubezpieczenia ? null : czynne.find(k => k.ubezpieczenie);
 
@@ -298,7 +323,7 @@ function presjaWektorow(st) {
     const skala = wek.skala === 'ludzie' ? Math.pow(st.uzytkownicy / Z.SKALA_ODNIESIENIA.ludzie, 0.7)
       : wek.skala === 'zasoby' ? Math.pow(st.zasobyZnane / Z.SKALA_ODNIESIENIA.zasoby, 0.5) : 1;
     const mn = (st.firma.wektory?.[wid] ?? wek.domyslnie ?? 1) * skala * (st.mod.wektory[wid] ?? 1);
-    const zap = czynne.reduce((a, k) => a * (1 - (k.zapobiega?.[wid] || 0) * skut(k.id)), 1);
+    const zap = czynne.reduce((a, k) => a * (1 - (k.zapobiega?.[wid] || 0) * skut(k.id) * (st.konf?.[k.id]?.jakosc ?? 1) * (st.konf?.[k.id]?.pokrycie?.[wid] ?? 1)), 1);
     wynik[wid] = wek.lambda * mn * wek.p * zap;
   }
   return wynik;
@@ -324,5 +349,5 @@ module.exports = {
   walidujFirme,
   TYGODNIE, H_NA_ETAT, KOSZT_ETATU, PROG_POWAZNY,
   mulberry32, poisson, pick, kontrola,
-  nowyStan, zlec, dodajEtat, zakonczMiesiac, dziala, kosztMiesieczny, presjaWektorow,
+  nowyStan, zlec, dodajEtat, wycofaj, zakonczMiesiac, dziala, kosztMiesieczny, presjaWektorow,
 };

@@ -1,6 +1,6 @@
 // ── REŻYSER (diagnoza, model gracza, rytm, przeciwnik adaptacyjny) ──
 // Projekt: docs/15-dzialy-i-rezyser.md, 15.6. Reżyser zna PRAWDĘ (silnik), ale gracz widzi
-// tylko jego wybory — karty i zdarzenia. Zasady: deterministyczny (własny strumień
+// tylko jego wybory — obserwacje, sprawy i zdarzenia. Zasady: deterministyczny (własny strumień
 // losowości), wyjaśnialny (każdy wybór ma powód w rejestrze), uczciwy (nie rusza skuteczności
 // kontroli gracza; wybiera tylko spośród prawdopodobnych zdarzeń i ich moment w oknie).
 
@@ -22,7 +22,7 @@ function nowyRezyser() {
     wagi: {},                        // przeciwnik: wektor → waga (start 1)
     odpalone: new Set(),             // zdarzenia skryptowe, które już były
     pominiete: new Set(),            // zdarzenia, którym nie wypadła szansa
-    uzyteKarty: {},                  // karta → miesiąc użycia
+    uzyteObserwacje: {},             // obserwacja → miesiąc pokazania
     diagnoza: [],
   };
 }
@@ -71,7 +71,7 @@ function poDecyzji(k, cele, ocena) {
   }
 }
 
-// ── PLAN MIESIĄCA: zdarzenia skryptowe + karty z katalogu ──
+// ── PLAN MIESIĄCA: zdarzenia skryptowe + obserwacje ──
 function zaplanujMiesiac(k) {
   const r = k.rezyser;
   const rnd = k.rnd.rezyser;
@@ -104,39 +104,30 @@ function zaplanujMiesiac(k) {
     }
   }
 
-  // 2) Karty z katalogu: obowiązkowe w swoim oknie + wybór reżysera według problemu i celów.
-  const wSkrypcie = new Set(def.zdarzenia.filter(z => z.typ === 'karta').map(z => z.id));
-  const karty = [];
+  // 2) Obserwacje (informacja, nie pytanie — docs/18-…): wymuszone w pierwszym miesiącu okna +
+  //    najwyżej dwie wybrane według diagnozy aktualnego problemu i słabych celów gracza.
+  const obserwacje = [];
   const diag = diagnoza(k);
   const top = diag[0]?.wynik || 1;
-  const trafnosc = c => Math.max(0, ...diag.filter(p => c.problemy?.includes(p.id)).map(p => p.wynik / top));
+  const trafnosc = o => Math.max(0, ...diag.filter(p => o.problemy?.includes(p.id)).map(p => p.wynik / top));
   const kandydaci = [];
-  for (const [id, c] of Object.entries(def.karty)) {
-    if (wSkrypcie.has(id)) continue;
-    const [od, doM] = c.okno;
-    const uzyta = r.uzyteKarty[id];
-    const powrot = c.powtorz_w && uzyta !== undefined && m >= uzyta + c.powtorz_w;
-    if (uzyta !== undefined && !powrot && !k.odlozone[id]) continue;
-    const okno = powrot ? true : (m >= od && m <= doM) || k.odlozone[id] === m;
-    if (!okno || (c.warunek && !c.warunek(k))) continue;
-    if (c.obowiazkowa || k.odlozone[id] === m) { karty.push({ id, powod: 'obowiązkowa w oknie' }); continue; }
-    // Karta bez sensu, gdy jej „dobra" opcja zleca rzeczy już zamówione.
-    const dobra = c.opcje.find(o => o.ocena === 'dobra');
-    if (dobra?.zlec && dobra.zlec.every(x => k.st.zamowione.has(x))) continue;
-    const odstep = (c.cele || []).some(e => r.ostatnioCel[e] !== undefined && m - r.ostatnioCel[e] < 2) ? 0.5 : 1;
-    const wynik = (0.45 * trafnosc(c) + 0.30 * (1 - opanowanie(r, c.cele)) + 0.15 * (uzyta === undefined ? 1 : 0.3)
-      + 0.10 * (r.napiecie < 0.5 ? 1 : 0.5)) * odstep;
-    kandydaci.push({ id, wynik, powod: `trafność ${trafnosc(c).toFixed(2)}, opanowanie celów ${opanowanie(r, c.cele).toFixed(2)}` });
+  for (const [id, o] of Object.entries(def.obserwacje || {})) {
+    if (r.uzyteObserwacje[id] !== undefined) continue;
+    const [od, doM] = o.okno;
+    if (m < od || m > doM || (o.warunek && !o.warunek(k))) continue;
+    if (o.wymuszona) { if (m === od) obserwacje.push({ id, powod: 'wymuszona w oknie' }); continue; }
+    const odstep = (o.cele || []).some(e => r.ostatnioCel[e] !== undefined && m - r.ostatnioCel[e] < 2) ? 0.5 : 1;
+    const wynik = (0.5 * trafnosc(o) + 0.3 * (1 - opanowanie(r, o.cele)) + 0.2 * (m === doM ? 1 : rnd())) * odstep;
+    kandydaci.push({ id, wynik, powod: `trafność ${trafnosc(o).toFixed(2)}, opanowanie celów ${opanowanie(r, o.cele).toFixed(2)}` });
   }
   kandydaci.sort((a, b) => b.wynik - a.wynik);
-  const miejsc = Math.max(1, 3 - karty.length - (k.kartyDzialow || 0));
-  for (const c of kandydaci.slice(0, miejsc)) karty.push(c);
-  for (const c of karty) r.uzyteKarty[c.id] = m;
+  for (const o of kandydaci.slice(0, Math.max(0, 2 - obserwacje.length))) obserwacje.push(o);
+  for (const o of obserwacje) r.uzyteObserwacje[o.id] = m;
 
   k.log('rezyser', `Diagnoza: ${diag.slice(0, 3).map(p => `${p.id} (${p.wynik.toFixed(2)}: ${p.powod})`).join('; ') || '—'}`);
   for (const p of powody) k.log('rezyser', `Zdarzenie ${p}`);
-  for (const c of karty) k.log('rezyser', `Karta ${c.id}: ${c.powod}`);
-  return { zdarzenia, karty };
+  for (const o of obserwacje) k.log('rezyser', `Obserwacja ${o.id}: ${o.powod}`);
+  return { zdarzenia, obserwacje };
 }
 
 // ── PO MIESIĄCU: rytm i przeciwnik ──
