@@ -117,6 +117,14 @@ co okres:         świadomość ← świadomość_bazowa + (świadomość − ba
 do pytania. To wprost realizuje znaną prawidłowość: jednorazowe szkolenie wietrzeje,
 a gotowość do zmian jest największa tuż po incydencie.
 
+### Wiarygodność: ujawnione kłamstwo zmienia działy
+
+Gdy kłamstwo gracza wychodzi na jaw (`ujawnij` w `proto/kampania.js`), każdy dział traci
+0,3 zaufania i 0,5 wartości Q(pytaj). To nie jest kara „z góry", tylko zwykła nauka agenta:
+skoro osoba od bezpieczeństwa kręci, pytanie jej o zgodę przestaje mieć wartość — a niższe
+Q(pytaj) i zaufanie to wprost mniejsze P(pytaj), czyli więcej obejść. Kłamca kończy kampanię
+z zaufaniem działów 0,16 (rozsądny: 0,63) i z obejściami, o których nie wie (`17-…`, 17.7).
+
 ### Rejestr ryzyk (po przypadkach brzegowych)
 
 Skutki inicjatyw nie mnożą się przyrostowo: każda para „dział:inicjatywa" ma wpis w rejestrze

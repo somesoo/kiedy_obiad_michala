@@ -1,0 +1,24 @@
+karta                      najgorsza opcja                                        ocena         ΔWYNIK   ΔIndeks  ΔJD(pp)  próbek
+K_ubezpieczenie            Zaznaczyć „tak" wszędzie — i tak to wdrażamy.          nieuczciwa      -469      -480    -11.1      10
+K_przed_audytem            Uzupełnić dokumenty z datą wsteczną: rejestr ryzyk, pr nieuczciwa      -409      -420     -8.5      10
+K_integrator_haslo         Niech poda — to przecież integrator.                   blad             -80      -124     -3.6      10
+K_budzet2027               Prośba o 400 tys. zł „bo NIS2 i hakerzy".              blad             -21        -5     -3.7      10
+K_przejecie                Łączymy od razu, sprawdzimy po drodze.                 blad             -20       -26     -1.5      10
+K_falszywy_komunikat       Poczekać, aż samo ucichnie.                            blad             -20       -19     -2.1      10
+K_szkolenie_kierownika     Przesunąć na koniec roku.                              dopuszczalna     -18        -3     -3.4      10
+K_wodomierze               Projekt biznesowy — nie mieszam się.                   blad             -15        -8     -2.1      10
+K_inwentaryzacja           Aktywny skan całej sieci, łącznie ze sterownikami — sz blad             -13       -11     -1.6      10
+K_samoidentyfikacja        Prezes ma rację — nas to nie dotyczy.                  blad             -13        -3     -2.4      10
+K_ostrzezenie_cert         Odnotować — mamy ważniejsze sprawy.                    blad             -10         0     -2.1      10
+K_kopie_ot                 Integrator jest niezawodny, zostawmy.                  blad              -8        -6     -1.1      10
+K_mfa                      Najpierw szkolenia, MFA za rok.                        blad              -8        -2     -1.3       5
+K_umowa_integratora        Przedłużyć jak zawsze.                                 dopuszczalna      -7        -3     -1.1      10
+K_emerytura                Niech przekaże następcy „po swojemu".                  dopuszczalna      -5         1     -1.1      10
+K_szkolenia                Jedno szkolenie e-learningowe z testem.                dopuszczalna      -5        -1     -0.8      10
+K_dwr                      Poczekamy na decyzję.                                  dopuszczalna      -5         1     -1.1       2
+K_polityka_zakupow         Zarządzenie prezesa: zakaz zakupów IT bez zgody IT.    dopuszczalna      -4        -2     -0.6      10
+K_msp                      Damy radę sami.                                        dopuszczalna       0         0      0.0      10
+K_edr                      Zostajemy przy darmowym antywirusie.                   dopuszczalna       0         0      0.0      10
+K_segmentacja              Wniosek do zarządu o finansowanie w przyszłym roku.    dopuszczalna       0         0      0.0      10
+K_szbi                     Zrobię to sam, wieczorami.                             dopuszczalna       0         0      0.0      10
+K_latki                    Zostawić automatyczne aktualizacje Windows i tyle.     blad               0         0      0.0       8

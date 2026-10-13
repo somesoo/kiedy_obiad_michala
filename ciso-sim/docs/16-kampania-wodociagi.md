@@ -60,7 +60,8 @@ obciążenie = więcej inicjatyw i większa pokusa skrótów.
 | 15–20 | | **Druga fala haktywistów** | segmentacja, odcięcie HMI, BCP | |
 | 17 | VIII | **Kierownik stacji na emeryturę** (obow.) | ryzyko jednej osoby, zmiana haseł | |
 | 19–21 | | **Fałszywy komunikat „woda skażona"** | dementi w 30 minut | dezinformacja (PAP 2024) |
-| 23–24 | II–III 2028 | **Kontrola / audyt** (10 obszarów, liczone z rejestru) | dowody zamiast deklaracji | audyt KSC |
+| 21–22 | XII 2027–I 2028 | **Za dwa miesiące audyt** (obow.): plan naprawczy / sprint / dokumenty z datą wsteczną | uczciwy plan wygrywa z fałszywką | |
+| 23–24 | II–III 2028 | **Audyt zamykający** (🔵 zleca rada nadzorcza; 10 obszarów; wykrywa kłamstwa, po pierwszym — rozszerzona próba) | dowody zamiast deklaracji | audyt KSC |
 
 Poza osią reżyser dobiera karty z katalogu (inwentaryzacja, MFA, procedura płatności, kopie
 konfiguracji SCADA, plan IR i praca ręczna, MSP, EDR, segmentacja, łatki, program świadomości,
@@ -92,13 +93,13 @@ opcje, oceniana bezczynność, Indeks Odporności (`11-…`).
 
 | Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Jakość decyzji | Indeks | **Wynik** |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **mądry** (dobre odpowiedzi + podstawy „tanie i ważne najpierw") | **113 tys.** | 509 tys. | **54** | 0,64 | 0,1 | 0,1 | 62 | **62** | 30% | 89% | **911** | **900** |
-| rozsądny („tak, ale bezpiecznie", dobre opcje) | 239 tys. | 252 tys. | 41 | **0,64** | 0,1 | 0,0 | 59 | 54 | 35% | 90% | 838 | 868 |
-| odmawiający (odmowa + kara za obejścia) | 163 tys. | 245 tys. | 45 | **0,01** | 1,1 | 0,0 | 61 | 26 | 20% | 69% | 803 | 746 |
-| bierny (tylko obowiązkowe, najgorsze opcje) | **1,25 mln** | 30 tys. | **13** | 0,34 | **16,6** | **2,7** | **20** | **1** | 100% | 16% | 148 | 155 |
+| **mądry** (dobre odpowiedzi + podstawy „tanie i ważne najpierw") | **112 tys.** | 506 tys. | **57** | 0,60 | 0,1 | 0,1 | 62 | **60** | 25% | 90% | **927** | **912** |
+| rozsądny („tak, ale bezpiecznie", dobre opcje) | 270 tys. | 255 tys. | 47 | **0,63** | 0,1 | 0,1 | 59 | 52 | 35% | 91% | 859 | 882 |
+| odmawiający (odmowa + kara za obejścia) | 163 tys. | 245 tys. | 51 | **0,01** | 1,1 | 0,0 | 61 | 24 | 20% | 70% | 818 | 760 |
+| bierny (tylko obowiązkowe, najgorsze opcje) | **1,34 mln** | 34 tys. | **15** | 0,31 | **16,6** | **2,7** | **19** | **0** | 100% | 14% | 152 | 147 |
 
 Wynik kampanii = ½ Indeks + ½ Jakość Decyzji, z sufitami (`11-…`). Pozostałe strategie
-(potakiwacz, kłamca, skąpiec…) — `17-…`, 17.3.
+(potakiwacz, kłamca, skąpiec…) — `17-…`, 17.3; ile kosztuje pojedyncza zła decyzja — 17.7.
 
 Wnioski:
 1. **Bierność to katastrofa, ale nie z powodu „hakerów z filmów".** Ponad 21 obejść działów

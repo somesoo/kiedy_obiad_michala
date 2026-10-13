@@ -42,6 +42,10 @@ raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; m
   bywają fałszywe, szacunki mają błąd. Po 17.6: **kara musi trafić w wynik** (nie tylko w mandat);
   wynik liczy się z prawdy, nie z wykrycia (ekspozycja, sufity `BRAMKI`); każde narzędzie
   wykrywające ma `martwe_pola`; uczciwa opcja ma cenę, inaczej nieuczciwa nie jest pokusą.
+  Po 17.7: kłamstwo to `nieuczciwe: { wobec, wykrywalnosc }` w opcji (ocena zawsze „blad"),
+  rejestr `k.klamstwa`; ujawnienie (`ujawnij`) uderza we współpracę (zarząd, działy, ubezpieczyciel,
+  audytor). Kampania jest skończona i kończy się **audytem zamykającym**. Karta może mieć kilka
+  dobrych odpowiedzi; automaty biorą najtańszą rocznie (`dobraNajtansza`).
 - **Zapis gry = lista decyzji**, wczytanie = odtworzenie z ziarna. Nowa akcja gracza musi
   przechodzić przez `rozstrzygnij`/`zlecRecznie`/`zagrajZdarzenie`/`zamknijMiesiac`
   (`proto/kampania.js`) i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan.
@@ -55,6 +59,7 @@ node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--auto=najlepsza|najgorsza
 node ciso-sim/proto/kampania.js [--zapis=plik.json] | --auto=rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
 node ciso-sim/proto/porownaj-style.js            # 4 style gry × 20 ziaren (wyniki → docs/16-…)
 node ciso-sim/proto/brzegowe.js [N]              # strategie-prowokacje + niezmienniki (→ docs/17-…)
+node ciso-sim/proto/cennik.js [N]                # koszt JEDNEJ złej decyzji w dobrej grze (→ docs/17-…, 17.7)
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 

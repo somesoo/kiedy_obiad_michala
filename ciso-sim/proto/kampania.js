@@ -28,10 +28,12 @@ const PKT = { dobra: 1, dopuszczalna: 0.5, blad: 0 };
 // ubezpieczyciela było 1/68 wyniku — tyle co odpowiedź na prośbę o czat AI (docs/17-…, 17.6).
 // Waga: karta może ją podać (`waga`), obowiązkowa domyślnie 2, reszta 1; scenariusz — z rubryki.
 const wagaKarty = c => c.waga ?? (c.obowiazkowa ? 2 : 1);
+// Decyzja nieuczciwa (kłamstwo wobec ubezpieczyciela, audytora…) to −1, nie 0: nie tylko nie
+// zdobywa punktów, ale zabiera je innym decyzjom. „Błąd" da się naprawić później, kłamstwa nie.
 function jakoscDecyzji(k) {
   let suma = 0, max = 0;
-  for (const d of k.decyzje) { const w = d.waga || 1; suma += w * PKT[d.ocena]; max += w; }
-  return max ? suma / max : 0;
+  for (const d of k.decyzje) { const w = d.waga || 1; suma += w * (d.nieuczciwa ? -1 : PKT[d.ocena]); max += w; }
+  return max ? Math.max(0, suma / max) : 0;
 }
 const IKONA = { dobra: '✅', dopuszczalna: '⚠️', blad: '❌' };
 const zl = n => `${Math.round(n).toLocaleString('pl-PL')} zł`;
@@ -47,6 +49,8 @@ function walidujKampanie(def) {
   for (const [id, c] of Object.entries(kart)) {
     if (!c.opcje || c.opcje.length < 2) b.push(`${id}: mniej niż 2 opcje`);
     if (!c.opcje?.some(o => o.ocena === 'dobra')) b.push(`${id}: brak opcji „dobra"`);
+    // Nieuczciwa opcja jest zawsze błędem i musi mieć adresata (komu skłamano) — rejestr kłamstw i BRAMKI.
+    for (const o of c.opcje || []) if (o.nieuczciwe && (o.ocena !== 'blad' || !o.nieuczciwe.wobec)) b.push(`${id}: nieuczciwa opcja musi mieć ocenę „blad" i „wobec"`);
     for (const o of c.opcje || []) {
       if (!['dobra', 'dopuszczalna', 'blad'].includes(o.ocena)) b.push(`${id}: ocena „${o.ocena}"`);
       if (!o.dlaczego) b.push(`${id}: opcja bez „dlaczego"`);
@@ -91,7 +95,7 @@ function nowaKampania(defId, seed) {
     rnd: { dzialy: S.mulberry32(seed ^ 0x9e3779b9), rezyser: S.mulberry32(seed ^ 0x85ebca6b),
       tasuj: S.mulberry32(seed ^ 0xc2b2ae35), mgla: S.mulberry32(seed ^ 0x27d4eb2f) },
     karty: [], kartyNastepne: [], zdarzenia: [], decyzje: [], rejestr: [], incydenty: [], raporty: [],
-    hKart: 0, koniec: false, akcje: [], kontrola: null,
+    hKart: 0, koniec: false, akcje: [], kontrola: null, klamstwa: [],
   };
   k.log = (kto, tekst) => k.rejestr.push({ m: k.st.m, kto, tekst });
   // Stały błąd szacunku „ile naprawdę mamy zasobów" (±25%), żeby środek przedziału nie był prawdą.
@@ -139,8 +143,24 @@ const TOLERANCJA_BUDZETU = 1.1;
 // wdrożenie, więc abonamenty kupione „w limicie" rozsadzały budżet w kolejnych miesiącach.
 function kosztOpcji(k, o) {
   const doKonca = 12 - k.miesiacKal + 1;
-  return (o.pln || 0) + (o.zlec || []).filter(id => !k.st.zamowione.has(id))
+  // Etat to też zobowiązanie do grudnia — dawniej „pół etatu u nas" przechodziło za darmo.
+  return (o.pln || 0) + (o.etat || 0) * S.KOSZT_ETATU * doKonca + (o.zlec || []).filter(id => !k.st.zamowione.has(id))
     .reduce((a, id) => a + S.kontrola[id].wdrozenie.pln + S.kosztMiesieczny(k.st, id) * doKonca, 0);
+}
+// Pełny rok skutków opcji (wdrożenie + 12 miesięcy abonamentu i pensji) — do porównania dwóch
+// dobrych dróg. Automaty biorą tańszą: przy budżecie 120–220 tys. zł/rok MDR z minimum 9 tys.
+// zł/mies. to decyzja na lata, nie na ten miesiąc (żywy gracz decyduje sam).
+function kosztRoczny(k, o) {
+  return (o.pln || 0) + (o.etat || 0) * S.KOSZT_ETATU * 12 + (o.zlec || []).filter(id => !k.st.zamowione.has(id))
+    .reduce((a, id) => a + S.kontrola[id].wdrozenie.pln + S.kosztMiesieczny(k.st, id) * 12, 0);
+}
+// Najtańsza z dobrych (dostępnych, jeśli się da) — wspólna dla automatów i laboratoriów.
+function dobraNajtansza(c, k) {
+  const dobre = c.opcje.map((o, j) => j).filter(j => c.opcje[j].ocena === 'dobra');
+  const dost = dobre.filter(j => !k || !niedostepna(k, c.opcje[j]));
+  const z = dost.length ? dost : dobre;
+  if (!z.length) return -1;
+  return k ? z.reduce((a, j) => (kosztRoczny(k, c.opcje[j]) < kosztRoczny(k, c.opcje[a]) ? j : a), z[0]) : z[0];
 }
 // Zwraca powód, dla którego opcji NIE da się wybrać, albo null.
 function niedostepna(k, o) {
@@ -211,6 +231,8 @@ function zastosuj(k, e, { straty = false } = {}) {
   if (e.h) { k.hKart += e.h; k.maxHKart = Math.max(k.maxHKart || 0, k.hKart); }
   for (const w of ['mandat', 'reputacja', 'morale']) if (e[w]) k.wskazniki[w] = przytnij(k.wskazniki[w] + e[w]);
   if (e.flagi) Object.assign(k.flagi, e.flagi);
+  // Rejestr kłamstw: prawda silnika. Gracz nie widzi, czy ktoś już wie — dowiaduje się, gdy wyjdzie.
+  if (e.nieuczciwe) k.klamstwa.push({ m: st.m, tekst: e.tekst, ...e.nieuczciwe, ujawnione: null });
   for (const [id, zm] of Object.entries(e.dzial || {})) {
     for (const d of id === 'wszystkie' ? Object.values(k.dzialy) : [k.dzialy[id]]) {
       if (!d) continue;
@@ -227,7 +249,8 @@ function zastosuj(k, e, { straty = false } = {}) {
   if (e.intruz) st.intruzi.push({ ...e.intruz, od: st.m });
   if (e.budzet) {
     // Zarząd daje tyle, na ile Ci ufa: przy mandacie 40 — tyle, o ile prosisz; przy 16 — ~70%.
-    const ufnosc = Math.max(0.6, Math.min(1.2, 0.5 + k.wskazniki.mandat / 80));
+    // Po ujawnionym kłamstwie zarząd sprawdza każdą liczbę we wniosku — i tnie o 30%.
+    const ufnosc = Math.max(0.6, Math.min(1.2, 0.5 + k.wskazniki.mandat / 80)) * (k.klamstwa.some(l => l.ujawnione) ? 0.7 : 1);
     for (const [rok, kw] of Object.entries(e.budzet)) {
       k.budzet[rok] = Math.round(kw * ufnosc / 1000) * 1000;
       k.log('zarzad', `Budżet ${rok}: wniosek ${zl(kw)}, przyznano ${zl(k.budzet[rok])} (mandat ${Math.round(k.wskazniki.mandat)})`);
@@ -262,7 +285,7 @@ function rozstrzygnij(k, kartaId, j) {
     } else if (o.zbadaj) c.wynik = 'Analiza nic nie znalazła. (To też dobra decyzja: o tym, że to fałszywy alarm, wiesz dopiero teraz.)';
   } else zastosuj(k, o);
   R.poDecyzji(k, c.cele, o.ocena);
-  k.decyzje.push({ m: k.st.m, karta: c.tytul, tekst: o.tekst, ocena: o.ocena, dlaczego: o.dlaczego, waga: wagaKarty(c) });
+  k.decyzje.push({ m: k.st.m, karta: c.tytul, tekst: o.tekst, ocena: o.ocena, dlaczego: o.dlaczego, waga: wagaKarty(c), nieuczciwa: !!o.nieuczciwe });
   k.karty.splice(i, 1);
   return c.wynik;
 }
@@ -297,6 +320,31 @@ async function zagrajZdarzenie(k, z, wybierz, wypisz) {
   return wynik;
 }
 
+// ── WIARYGODNOŚĆ: kłamstwo wychodzi na jaw ──
+// Kłamstwo ma skutek tam, gdzie boli osobę od bezpieczeństwa najbardziej: we WSPÓŁPRACY.
+// Dawniej kara szła tylko w mandat (którego nie ma w wyniku) i kłamca kończył obok rozsądnego
+// (docs/17-…, 17.6–17.7). Teraz ujawnienie uderza we wszystkich, z którymi gracz pracuje:
+//   zarząd    — mandat −15, kolejny budżet ×0,7 (każda liczba we wniosku jest sprawdzana),
+//   działy    — zaufanie −0,3 i Q(pytaj) −0,5: „po co go pytać, skoro i tak kręci" → więcej obejść,
+//   ubezpieczyciel — polisa wypowiedziana, nowej nie będzie,
+//   audytor   — rozszerza próbę (ocenaKontroli: drobne niezgodności stają się główne).
+function ujawnij(k, l, przez) {
+  l.ujawnione = { m: Math.min(k.st.m, k.def.miesiecy), przez };   // audyt zamykający: po ostatnim miesiącu
+  k.wskazniki.mandat = przytnij(k.wskazniki.mandat - 15);
+  k.wskazniki.reputacja = przytnij(k.wskazniki.reputacja - 5);
+  for (const d of Object.values(k.dzialy)) {
+    d.zaufanie = D.przytnij(d.zaufanie - 0.3);
+    d.Q.pytaj -= 0.5;
+  }
+  if (l.wobec === 'ubezpieczyciel') {
+    k.flagi.klamstwo_wykryte = true;
+    k.st.zamowione.delete('ubezpieczenie'); delete k.st.aktywne.ubezpieczenie;
+  }
+  const tekst = `Wyszło na jaw (${przez}): „${l.tekst}". Wiedzą zarząd, kierownicy działów i ${l.wobec}.`;
+  k.log('zarzad', tekst);
+  if (k.raportIT) k.raportIT.push(tekst + ' Kierownicy przestają Cię pytać o zdanie.');
+}
+
 // ── KONIEC MIESIĄCA ──
 function zamknijMiesiac(k) {
   const st = k.st;
@@ -329,7 +377,7 @@ function zamknijMiesiac(k) {
     intensywnosc += z.ciezar || 0;
     if (z.typ === 'termin') terminSzbi(k);
     if (z.typ === 'fala') falaHaktywistow(k);
-    if (z.typ === 'final') k.log('zarzad', 'Organ zapowiedział kontrolę — wynik na koniec kampanii.');
+    if (z.typ === 'final') k.log('zarzad', 'Rada nadzorcza zleciła niezależny audyt zamykający — odbędzie się na koniec kampanii.');
   }
   zastosujModyfikatory(k);
   k.rokZamkniety = k.rok;
@@ -357,8 +405,8 @@ function zamknijMiesiac(k) {
         }
       }
       if (k.flagi.klamstwo_ankieta && S.dziala(st, 'ubezpieczenie') && e.pln > 50000) {
-        k.wskazniki.mandat = przytnij(k.wskazniki.mandat - 6);
         k.raportIT.push('Ubezpieczyciel odmówił wypłaty: odpowiedzi w ankiecie (MFA, EDR, kopie) były niezgodne z prawdą.');
+        for (const l of k.klamstwa.filter(x => x.wobec === 'ubezpieczyciel' && !x.ujawnione)) ujawnij(k, l, 'likwidacja szkody');
       }
       for (const d of Object.values(k.dzialy)) d.dodatkoweObciazenie = (d.dodatkoweObciazenie || 0) + 0.3;
     } else if (e.typ === 'wykrycie') {
@@ -402,11 +450,8 @@ function zamknijMiesiac(k) {
   // Kłamstwo w ankiecie ubezpieczeniowej wychodzi nie tylko przy szkodzie: ubezpieczyciel
   // weryfikuje przy odnowieniu (w grze ~5%/mies.). Dawniej kłamca wychodził NA PLUS (docs/17-…).
   if (k.flagi.klamstwo_ankieta && !k.flagi.klamstwo_wykryte && S.dziala(st, 'ubezpieczenie') && k.rnd.mgla() < 0.05) {
-    k.flagi.klamstwo_wykryte = true;
-    st.zamowione.delete('ubezpieczenie'); delete st.aktywne.ubezpieczenie;
-    k.wskazniki.mandat = przytnij(k.wskazniki.mandat - 8);
-    k.wskazniki.reputacja = przytnij(k.wskazniki.reputacja - 3);
-    k.raportIT.push('Ubezpieczyciel sprawdził deklaracje z ankiety (MFA, EDR, kopie offline) — były nieprawdziwe. Polisa wypowiedziana, zarząd wie dlaczego.');
+    k.raportIT.push('Ubezpieczyciel sprawdził deklaracje z ankiety (MFA, EDR, kopie offline) — były nieprawdziwe.');
+    for (const l of k.klamstwa.filter(x => x.wobec === 'ubezpieczyciel' && !x.ujawnione)) ujawnij(k, l, 'weryfikacja przy odnowieniu');
   }
   // Przekroczenie budżetu boli proporcjonalnie (7× ponad budżet dawało dawniej −2/mies.).
   const rokZamk = k.rokZamkniety;
@@ -511,8 +556,32 @@ function ocenaKontroli(k) {
     ['Szkolenia (w tym kierownika)', ((sk) => (d('szkolenia') && sk ? 'zgodny' : d('szkolenia') || sk ? 'drobna' : 'glowna'))(f[`szkolenie_kierownika_${k.rok}`] || f[`szkolenie_kierownika_${k.rok - 1}`])],
     ['Wykaz', f.wpis ? (f.wpis_spozniony ? 'drobna' : 'zgodny') : 'glowna'],
   ];
+  // ── AUDYT ZAMYKAJĄCY ── (obowiązkowy koniec każdej kampanii; gra ma skończoną liczbę miesięcy)
+  // Audytor porównuje deklaracje z rzeczywistością. Każde jeszcze nieujawnione kłamstwo wychodzi
+  // z prawdopodobieństwem `wykrywalnosc` z danych (deklaracje techniczne łatwo sprawdzić, dokumenty
+  // z datą wsteczną trudniej). Strumień „mgła" — ten sam, co inne rzeczy, których gracz nie widzi.
+  const ujawnioneWczesniej = k.klamstwa.filter(l => l.ujawnione).length;
+  for (const l of k.klamstwa) if (!l.ujawnione && k.rnd.mgla() < (l.wykrywalnosc ?? 0.8)) ujawnij(k, l, 'audyt zamykający');
+  const krok = { glowna: 'drobna', drobna: 'zgodny', zgodny: 'zgodny' };
+  const wstecz = k.klamstwa.find(l => l.wobec === 'audytor');
+  const zmien = (nazwy, fn) => { for (const o of obszary) if (nazwy.includes(o[0])) o[1] = fn(o[1]); };
+  // Dokumenty z datą wsteczną: jeśli przeszły — wyglądają jak wdrożenie; jeśli nie — są dowodem przeciw.
+  if (wstecz && !wstecz.ujawnione) zmien(['SZBI i ład', 'Szacowanie ryzyka', 'Szkolenia (w tym kierownika)'], st => krok[st]);
+  if (wstecz && wstecz.ujawnione) zmien(['SZBI i ład', 'Szacowanie ryzyka', 'Szkolenia (w tym kierownika)'], () => 'glowna');
+  // Sprint przed audytem zrobiony naprawdę: rejestr ryzyk istnieje (świeży, ale prawdziwy).
+  if (f.sprint_audytowy) zmien(['Szacowanie ryzyka'], st => (st === 'glowna' ? 'drobna' : st));
+  // Uczciwy plan naprawczy z właścicielami i terminami: audytor uznaje działania w toku
+  // (najwyżej dwa obszary z „główna" na „drobna"). Prawda o lukach jest coś warta.
+  if (f.plan_naprawczy) { let n = 2; for (const o of obszary) if (n && o[1] === 'glowna') { o[1] = 'drobna'; n--; } }
+  // Rozszerzona próba: po pierwszej nieprawdzie audytor nie wierzy już deklaracjom — każda drobna
+  // niezgodność jest sprawdzana do końca i zostaje główną.
+  const ujawnione = k.klamstwa.filter(l => l.ujawnione);
+  if (ujawnione.length) for (const o of obszary) if (o[1] === 'drobna') o[1] = 'glowna';
   const pkt = { zgodny: 6, drobna: 4, glowna: 1 };
-  return { obszary, wynik: obszary.reduce((a, [, s]) => a + pkt[s], 0) };
+  return {
+    obszary, wynik: obszary.reduce((a, [, s]) => a + pkt[s], 0),
+    ujawnioneNaAudycie: ujawnione.length - ujawnioneWczesniej, rozszerzonaProba: ujawnione.length > 0,
+  };
 }
 
 // ── WIDOKI (to, co gracz WIE) ──
@@ -583,7 +652,8 @@ function podsumowanie(k) {
   // zdrowie, prawo i ogon ryzyka (docs/16-…, docs/14-…).
   l.push(`Tło silnika (Monte Carlo bez działów i scenariuszy, 300 przebiegów): „nic" ${zl(ref.nic)}, „mała firma" ${zl(ref.mala_firma)}, „higiena+MDR" ${zl(ref.higiena_mdr)}`);
   if (k.kontrola) {
-    l.push(`Kontrola/audyt: ${k.kontrola.wynik}/60 pkt`);
+    l.push(`AUDYT ZAMYKAJĄCY: ${k.kontrola.wynik}/60 pkt${k.kontrola.rozszerzonaProba ? ' — próba ROZSZERZONA (audytor nie wierzy już deklaracjom: drobne niezgodności liczone jako główne)' : ''}`);
+    for (const x of k.klamstwa) l.push(`  ${x.ujawnione ? '⛔ ujawnione' : '🤫 nieujawnione'}: „${x.tekst}" (wobec: ${x.wobec}${x.ujawnione ? `; ${x.ujawnione.przez}, m. ${x.ujawnione.m}` : ''})`);
     for (const [o, s] of k.kontrola.obszary) l.push(`  ${s === 'zgodny' ? '✅' : s === 'drobna' ? '⚠️' : '❌'} ${o}: ${s === 'glowna' ? 'niezgodność główna' : s === 'drobna' ? 'niezgodność drobna' : 'zgodny'}`);
   }
   l.push('Incydenty:');
@@ -599,8 +669,8 @@ function podsumowanie(k) {
   }
   l.push(`Przeciwnik — wagi wektorów: ${Object.entries(k.rezyser.wagi).map(([w, v]) => `${w} ${v.toFixed(2)}`).join(', ') || 'bez zmian'}`);
   l.push(`Model gracza (P opanowania celów): ${Object.entries(k.rezyser.bkt).map(([c, p]) => `${c} ${p.toFixed(2)}`).join(' ')}`);
-  const zle = k.decyzje.filter(d => d.ocena === 'blad').slice(0, 5);
-  if (zle.length) { l.push('Decyzje do przemyślenia:'); for (const d of zle) l.push(`  ❌ m. ${d.m} ${d.karta}: ${d.tekst}\n     ${d.dlaczego}`); }
+  const zle = [...k.decyzje.filter(d => d.nieuczciwa), ...k.decyzje.filter(d => d.ocena === 'blad' && !d.nieuczciwa)].slice(0, 6);
+  if (zle.length) { l.push('Decyzje do przemyślenia:'); for (const d of zle) l.push(`  ${d.nieuczciwa ? '⛔' : '❌'} m. ${d.m} ${d.karta}: ${d.tekst}\n     ${d.dlaczego}`); }
   return l.join('\n');
 }
 
@@ -652,19 +722,29 @@ function ekspozycja(k, n = EKSPOZYCJA_PRZEBIEGI) {
 // Bramki: decyzje, których żaden dobry wynik nie równoważy. W życiu kończą karierę osoby
 // odpowiedzialnej za bezpieczeństwo, niezależnie od tego, ile incydentów udało się uniknąć —
 // więc indeks ma SUFIT, a nie kilka punktów kary (dawniej kłamca ≈ rozsądny, 867 vs 864).
+// Kłamstwo: 650, gdy nikt się nie dowiedział (liczymy z prawdy), 450, gdy wyszło — ujawnione
+// kłamstwo wobec ubezpieczyciela czy audytora to w życiu koniec pracy na tym stanowisku, gorzej
+// niż odwołanie za słabe wyniki (500). Każde następne ujawnione: −100 (najniżej 250).
 const BRAMKI = [
-  { flaga: 'klamstwo_ankieta', sufit: 650,
-    powod: 'Nieprawdziwe oświadczenie wobec ubezpieczyciela (ankieta: MFA, EDR, kopie offline) — wykryte czy nie, polisa nie chroni, a podpisał je zarząd na Twoje słowo.' },
-  { flaga: 'falszywy_komunikat', sufit: 650,
-    powod: 'Komunikat „woda bezpieczna" bez wyników badań — obietnica o zdrowiu mieszkańców bez danych.' },
-  { gdy: k => k.wskazniki.mandat <= 0, sufit: 500, powod: 'Zarząd odwołał Cię ze stanowiska.' },
+  { gdy: k => k.klamstwa.some(l => !l.ujawnione) && !k.klamstwa.some(l => l.ujawnione), sufit: () => 650,
+    powod: k => `Nieuczciwość, której nikt nie wykrył (${k.klamstwa.map(l => `„${l.tekst}" wobec: ${l.wobec}`).join('; ')}) — wynik liczy się z prawdy.` },
+  { gdy: k => k.klamstwa.some(l => l.ujawnione),
+    sufit: k => Math.max(250, 450 - 100 * (k.klamstwa.filter(l => l.ujawnione).length - 1)),
+    powod: k => `Ujawnione kłamstwo (${k.klamstwa.filter(l => l.ujawnione).map(l => `${l.wobec}: ${l.ujawnione.przez}, m. ${l.ujawnione.m}`).join('; ')}) — w życiu koniec pracy na tym stanowisku.` },
+  { gdy: k => k.flagi.falszywy_komunikat, sufit: () => 650,
+    powod: () => 'Komunikat „woda bezpieczna" bez wyników badań — obietnica o zdrowiu mieszkańców bez danych.' },
+  { gdy: k => k.wskazniki.mandat <= 0, sufit: () => 500, powod: () => 'Zarząd odwołał Cię ze stanowiska.' },
 ];
 
+const REF_BIERNY = {};
 async function indeksOdpornosci(k) {
-  if (!k.refBierny) {
+  // Odniesienie zależy tylko od kampanii i ziarna — liczone raz (laboratoria grają tysiące kampanii).
+  const kluczRef = `${k.def.id || k.def.firma}:${k.seed}`;
+  if (!k.refBierny && !REF_BIERNY[kluczRef]) {
     const b = await grajAuto('bierny', k.seed, false, () => {}, false);
-    k.refBierny = { straty: b.st.w.straty, ekspozycja: ekspozycja(b).pln };
+    REF_BIERNY[kluczRef] = { straty: b.st.w.straty, ekspozycja: ekspozycja(b).pln };
   }
+  k.refBierny = k.refBierny || REF_BIERNY[kluczRef];
   const ref = k.refBierny;
   const ek = ekspozycja(k);
   const eksp = ek.pln;
@@ -695,11 +775,11 @@ async function indeksOdpornosci(k) {
   // mówić też o tym, jak grałeś. Jakość Decyzji nie zależy od szczęścia; Indeks — trochę tak.
   const jd = jakoscDecyzji(k);
   const kampaniaSurowy = Math.round((surowy + 1000 * jd) / 2);
-  const bramki = BRAMKI.filter(b => (b.flaga ? k.flagi[b.flaga] : b.gdy(k)));
+  const bramki = BRAMKI.filter(b => b.gdy(k)).map(b => ({ sufit: b.sufit(k), powod: b.powod(k) }));
   const sufit = Math.min(1000, ...bramki.map(b => b.sufit));
   return {
     wynik: Math.min(surowy, sufit), surowy, kampania: Math.min(kampaniaSurowy, sufit), kampaniaSurowy, jd,
-    bramki: bramki.filter(b => kampaniaSurowy > b.sufit || surowy > b.sufit).map(b => ({ sufit: b.sufit, powod: b.powod })),
+    bramki: bramki.filter(b => kampaniaSurowy > b.sufit || surowy > b.sufit),
     skladowe: sk, odniesienie: ref.straty, ekspozycja: eksp, sabotazeRok: ek.sabotaze, ekspozycjaOdniesienie: ref.ekspozycja,
   };
 }
@@ -721,18 +801,18 @@ function referencja(firmaId) {
 // ── STRATEGIE AUTOMATYCZNE (testy: czy działy i reżyser zachowują się sensownie) ──
 const AUTO = {
   rozsadny: {
-    karta: c => {
+    karta: (c, k) => {
       if (c.zrodlo === 'dzial') return c.opcje.findIndex(o => o.odpowiedz === (D.ciezarRyzyka(D.INICJATYWY[c.ini]) < 0.1 ? 'zgoda' : 'warunki'));
-      const j = c.opcje.findIndex(o => o.ocena === 'dobra');
+      const j = dobraNajtansza(c, k);
       return j >= 0 ? j : 0;
     },
     scen: opcje => Math.max(0, opcje.findIndex(o => o.ocena === 'dobra')),
   },
   odmawiajacy: {
-    karta: c => {
+    karta: (c, k) => {
       if (c.zrodlo === 'dzial') return c.opcje.findIndex(o => o.odpowiedz === 'odmowa');
       if (c.zrodlo === 'odkrycie') return c.opcje.findIndex(o => o.odpowiedz === 'kara');
-      return Math.max(0, c.opcje.findIndex(o => o.ocena === 'dobra'));
+      return Math.max(0, dobraNajtansza(c, k));
     },
     scen: opcje => Math.max(0, opcje.findIndex(o => o.ocena === 'dobra')),
   },
@@ -762,7 +842,8 @@ const AUTO = {
       }
       if (c.zrodlo === 'odkrycie') { const j = c.opcje.findIndex(o => o.odpowiedz === 'legalizacja'); if (dost(j)) return j; }
       const ranga = { dobra: 2, dopuszczalna: 1, blad: 0 };
-      const kolej = c.opcje.map((o, j) => j).filter(dost).sort((a, b) => ranga[c.opcje[b].ocena] - ranga[c.opcje[a].ocena]);
+      const kolej = c.opcje.map((o, j) => j).filter(dost)
+        .sort((a, b) => ranga[c.opcje[b].ocena] - ranga[c.opcje[a].ocena] || kosztRoczny(k, c.opcje[a]) - kosztRoczny(k, c.opcje[b]));
       return kolej.length ? kolej[0] : 0;
     },
     scen: opcje => Math.max(0, opcje.findIndex(o => o.ocena === 'dobra')),
@@ -925,4 +1006,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { walidujKampanie, indeksOdpornosci, ekspozycja, jakoscDecyzji, BRAMKI, niedostepna, nowaKampania, rozstrzygnij, zamknijMiesiac, zagrajZdarzenie, zlecRecznie, ocenaKontroli, podsumowanie, AUTO, grajAuto, odtworz };
+module.exports = { walidujKampanie, indeksOdpornosci, ekspozycja, jakoscDecyzji, BRAMKI, ujawnij, dobraNajtansza, kosztRoczny, niedostepna, nowaKampania, rozstrzygnij, zamknijMiesiac, zagrajZdarzenie, zlecRecznie, ocenaKontroli, podsumowanie, AUTO, grajAuto, odtworz };

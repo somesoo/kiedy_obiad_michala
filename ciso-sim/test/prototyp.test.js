@@ -100,23 +100,48 @@ test('„zawsze pierwsza odpowiedź" nie wygrywa (kolejność opcji jest tasowan
   assert.ok(jd / 3 < 0.7, `jakość decyzji „zawsze a)" = ${(jd / 3).toFixed(2)}`);
 });
 
-test('Wynik kampanii porządkuje style sensownie: mądry > potakiwacz > kłamca > odkładacz', async () => {
+test('Wynik kampanii porządkuje style sensownie: mądry > potakiwacz > kłamca, kłamca daleko za rozsądnym', async () => {
   const w = {};
-  for (const n of ['madry', 'potakiwacz', 'klamca', 'odkladacz']) {
+  for (const n of ['madry', 'rozsadny', 'potakiwacz', 'klamca']) {
     w[n] = 0;
-    for (const seed of [1, 2, 3]) w[n] += (await K.indeksOdpornosci(await K.grajAuto(B.STRATEGIE[n], seed, false, cicho, false))).kampania;
+    for (const seed of [1, 2, 3]) w[n] += (await K.indeksOdpornosci(await K.grajAuto(B.STRATEGIE[n], seed, false, cicho, false))).kampania / 3;
   }
-  assert.ok(w.madry > w.potakiwacz && w.potakiwacz > w.klamca && w.klamca > w.odkladacz, JSON.stringify(w));
+  assert.ok(w.madry > w.potakiwacz && w.potakiwacz > w.klamca, JSON.stringify(w));
+  assert.ok(w.rozsadny - w.klamca > 300, `kłamstwo kosztuje za mało: ${JSON.stringify(w)}`);
 });
 
-test('kłamstwo nie popłaca: sufit wyniku, wykryte czy nie (dawniej kłamca ≈ rozsądny)', async () => {
+test('kłamstwo nie popłaca: sufit 650 nawet nieujawnione, 450 i mniej po ujawnieniu', async () => {
   for (const seed of [1, 2, 3]) {
     const k = await K.grajAuto(B.STRATEGIE.klamca, seed, false, cicho, false);
     const io = await K.indeksOdpornosci(k);
-    assert.ok(k.flagi.klamstwo_ankieta, 'kłamca nie skłamał — test nic nie sprawdza');
-    assert.ok(io.kampania <= 650 && io.wynik <= 650, `ziarno ${seed}: ${io.kampania}/${io.wynik}`);
-    assert.ok(io.bramki.length > 0);
+    assert.ok(k.klamstwa.length > 0, 'kłamca nie skłamał — test nic nie sprawdza');
+    const sufit = k.klamstwa.some(l => l.ujawnione) ? 450 : 650;
+    assert.ok(io.kampania <= sufit && io.wynik <= sufit, `ziarno ${seed}: ${io.kampania}/${io.wynik} (sufit ${sufit})`);
   }
+});
+
+test('ujawnione kłamstwo uderza we współpracę: działy przestają ufać, zarząd tnie mandat', () => {
+  const k = K.nowaKampania('wodociagi', 1);
+  k.klamstwa.push({ m: 1, tekst: 't', wobec: 'ubezpieczyciel', wykrywalnosc: 1, ujawnione: null });
+  const przed = { man: k.wskazniki.mandat, zauf: Object.values(k.dzialy).map(d => d.zaufanie), q: Object.values(k.dzialy).map(d => d.Q.pytaj) };
+  K.ujawnij(k, k.klamstwa[0], 'test');
+  assert.ok(k.wskazniki.mandat <= przed.man - 15);
+  Object.values(k.dzialy).forEach((d, i) => { assert.ok(d.zaufanie < przed.zauf[i] || d.zaufanie === 0); assert.ok(d.Q.pytaj < przed.q[i]); });
+});
+
+test('audyt zamykający: po ujawnionym kłamstwie próba rozszerzona (drobne → główne); nieujawnione dokumenty wstecz „pomagają"', () => {
+  const k = K.nowaKampania('wodociagi', 1);
+  for (const id of ['szbi', 'ryzyko', 'mfa']) k.st.aktywne[id] = 0;
+  k.flagi.polityki_z_pudelka = true;                       // SZBI i ład: drobna
+  const czysty = K.ocenaKontroli(k);
+  assert.ok(czysty.obszary.some(([, x]) => x === 'drobna') && !czysty.rozszerzonaProba);
+  k.klamstwa.push({ m: 20, tekst: 'wstecz', wobec: 'audytor', wykrywalnosc: 0, ujawnione: null });
+  const ukryte = K.ocenaKontroli(k);                       // nikt nie wykrył: fałszywka „działa"
+  assert.ok(ukryte.wynik > czysty.wynik, `${ukryte.wynik} vs ${czysty.wynik}`);
+  k.klamstwa[0].wykrywalnosc = 1;
+  const wykryte = K.ocenaKontroli(k);
+  assert.ok(wykryte.rozszerzonaProba && !wykryte.obszary.some(([, x]) => x === 'drobna'));
+  assert.ok(wykryte.wynik < czysty.wynik, `${wykryte.wynik} vs ${czysty.wynik}`);
 });
 
 test('uczciwa ankieta bez EDR = brak polisy (prawda ma cenę, więc kłamstwo jest prawdziwym wyborem)', () => {

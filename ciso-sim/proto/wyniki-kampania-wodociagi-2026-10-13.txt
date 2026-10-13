@@ -1,5 +1,5 @@
 styl          straty    wydatki   audyt  zaufanie  ukryte  zakłóc.  reput.  mandat  P(poważny)  JD   INDEKS  WYNIK
-madry           113 tys.    509 tys.    54      0.64     0.1      0.1      62      62         30%   89%     911    900
-rozsadny        239 tys.    252 tys.    41      0.64     0.1      0.0      59      54         35%   90%     838    868
-odmawiajacy     163 tys.    245 tys.    45      0.01     1.1      0.0      61      26         20%   69%     803    746
-bierny         1247 tys.     30 tys.    13      0.34    16.6      2.7      20       1        100%   16%     148    155
+madry           112 tys.    506 tys.    57      0.60     0.1      0.1      62      60         25%   90%     927    912
+rozsadny        270 tys.    255 tys.    47      0.63     0.1      0.1      59      52         35%   91%     859    882
+odmawiajacy     163 tys.    245 tys.    51      0.01     1.1      0.0      61      24         20%   70%     818    760
+bierny         1339 tys.     34 tys.    15      0.31    16.6      2.7      19       0        100%   14%     152    147

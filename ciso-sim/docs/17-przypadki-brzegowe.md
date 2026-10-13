@@ -44,25 +44,25 @@ głupimi albo cwanymi strategiami + sprawdzanie niezmienników. Wyniki surowe:
 | 19 | Budżet przyznawany w pełni przy mandacie bliskim zera | brak zależności | przyznana kwota × zaufanie zarządu (0,6–1,2) | — |
 | 20 | Firma z 0 osób i 0 komputerów „traciła" 195 tys. zł | wektor dostawcy nie skaluje się z niczym | **walidator profilu firmy** (zły profil nie wchodzi do gry) | walidacja danych |
 
-## 17.3. Wyniki po poprawkach (20 ziaren; po drugiej rundzie — 17.6)
+## 17.3. Wyniki po poprawkach (20 ziaren; po trzeciej rundzie — 17.7)
 
 **Wynik kampanii** = ½ Indeks Odporności + ½ Jakość Decyzji (ważona), z sufitem za decyzje
 nie do obrony (`11-…`). „Sufit" = w ilu kampaniach wynik został ucięty.
 
-| Strategia | Straty | Audyt /60 | Mandat | Jakość decyzji | Odwołany | Sufit | Indeks | **Wynik** |
-|---|---|---|---|---|---|---|---|---|
-| **mądry** | 113 tys. | 54 | 62 | 89% | 0/20 | 0/20 | 911 | **900** |
-| rozsądny | 239 tys. | 41 | 54 | 90% | 0/20 | 0/20 | 838 | 868 |
-| pracoholik | 240 tys. | 41 | 54 | 89% | 0/20 | 0/20 | 843 | 865 |
-| wszystko naraz | 287 tys. | 43 | 64 | 85% | 0/20 | 0/20 | 829 | 841 |
-| potakiwacz | 184 tys. | 38 | 54 | 66% | 0/20 | 0/20 | 869 | 767 |
-| odmawiający (`porownaj-style.js`) | 163 tys. | 45 | 26 | 69% | 0/20 | 0/20 | 803 | 746 |
-| **kłamca** | 177 tys. | 39 | 52 | 85% | 0/20 | **20/20** | 644 | **650** |
-| paranoik | 372 tys. | 23 | 47 | 61% | 0/20 | 0/20 | 576 | 592 |
-| losowy | 540 tys. | 30 | 21 | 44% | 4/20 | 2/20 | 551 | 503 |
-| odkładacz | 882 tys. | 17 | 25 | 36% | 1/20 | 0/20 | 410 | 383 |
-| skąpiec | 892 tys. | 24 | 1 | 23% | **17/20** | 1/20 | 360 | 296 |
-| bierny (`porownaj-style.js`) | 1,25 mln | 13 | 1 | 16% | — | 0/20 | 148 | 155 |
+| Strategia | Straty | Audyt /60 | Mandat | Zaufanie działów | Jakość decyzji | Odwołany | Sufit | Indeks | **Wynik** |
+|---|---|---|---|---|---|---|---|---|---|
+| **mądry** | 112 tys. | 57 | 60 | 0,60 | 90% | 0/20 | 0/20 | 927 | **912** |
+| rozsądny | 270 tys. | 47 | 52 | 0,63 | 91% | 0/20 | 0/20 | 859 | 882 |
+| pracoholik | 284 tys. | 44 | 53 | 0,59 | 88% | 0/20 | 0/20 | 845 | 861 |
+| wszystko naraz | 236 tys. | 49 | 62 | 0,56 | 86% | 0/20 | 0/20 | 859 | 860 |
+| odmawiający (`porownaj-style.js`) | 163 tys. | 51 | 24 | 0,01 | 70% | 0/20 | 0/20 | 818 | 760 |
+| potakiwacz | 184 tys. | 40 | 50 | 0,75 | 62% | 0/20 | **12/20** | 695 | 651 |
+| paranoik | 343 tys. | 29 | 45 | 0,38 | 62% | 0/20 | 0/20 | 599 | 611 |
+| losowy | 650 tys. | 33 | 18 | 0,24 | 43% | 6/20 | 7/20 | 535 | 497 |
+| **kłamca** | 154 tys. | 32 | 34 | **0,16** | 74% | 0/20 | **20/20** | 385 | **385** |
+| odkładacz | 834 tys. | 21 | 19 | 0,28 | 35% | 1/20 | 3/20 | 395 | 376 |
+| skąpiec | 1,01 mln | 25 | 0 | 0,23 | 24% | **20/20** | 2/20 | 372 | 308 |
+| bierny (`porownaj-style.js`) | 1,34 mln | 15 | 0 | 0,31 | 14% | — | 0/20 | 152 | 147 |
 
 Niezmienniki (brak NaN, wskaźniki w zakresach, mnożniki ≤ 4, `znane` w (0, 1]) — **OK dla
 wszystkich strategii**. Silnik bez wyjątków także dla firm skrajnych (1 osoba; 50 000 osób;
@@ -73,9 +73,9 @@ cały katalog w 1. miesiącu).
 - **Potakiwacz ma mandat jak najlepszy gracz.** To jest prawda o organizacjach: uprzejmość
   jest nagradzana, dopóki nic nie wybuchnie. Gra tego nie ukrywa — pokazuje to w debriefie
   i nie liczy mandatu do wyniku.
-- **Potakiwacz ma wysoki Indeks Odporności (869)**, bo EDR i kopie łapią większość tego, co
-  wpuścił. To prawda o skutkach — dobra technika wybacza sporo. Ale **Wynik kampanii** (767)
-  liczy też decyzje i stawia go za rozsądnym.
+- **Potakiwacz fałszuje dokumenty w 12/20 kampanii** — bo przed audytem wybiera opcję
+  najmilszą zarządowi, a członek zarządu prosi właśnie o daty wsteczne. Nie poprawiałem tego
+  w automacie: to jest lekcja („potakiwanie kończy się podpisem pod cudzym kłamstwem").
 - **Odmawiający ma najmniejszą ekspozycję z aktywnych graczy** (karze każde odkryte obejście,
   a kara zeruje ryzyko), ale biznes 0%, mandat 26, zaufanie działów 0,01 i Wynik 746. „Nie"
   jest krótkoterminowo bezpieczne — tak to wygląda w życiu.
@@ -102,6 +102,13 @@ cały katalog w 1. miesiącu).
 11. **Decyzje nie do obrony mają sufit, nie punkty karne.** Żaden dobry wynik ich nie równoważy.
 12. **Każde narzędzie ma martwe pola.** Nowa kontrola wykrywająca musi powiedzieć, czego nie widzi.
 13. **Uczciwa opcja musi mieć cenę**, inaczej nieuczciwa nie jest pokusą, tylko pomyłką.
+14. **Kłamstwo to osobna kategoria, nie „błąd"**: `nieuczciwe: { wobec, wykrywalnosc }` w danych,
+    rejestr `k.klamstwa`, −1 w Jakości Decyzji, sufit wyniku, a po ujawnieniu — skutki dla
+    współpracy (zarząd, działy, ubezpieczyciel, audytor). Walidator pilnuje ocen i adresata.
+15. **Gra jest skończona i kończy się audytem zamykającym**, który porównuje deklaracje
+    z rzeczywistością. Każda pokusa „na skróty" ma swój moment rozliczenia.
+16. **Karta może mieć kilka dobrych odpowiedzi** — różnią się kosztem, godzinami i ryzykiem
+    na lata. Automaty biorą najtańszą w skali roku (`dobraNajtansza`), żywy gracz wybiera sam.
 
 ## 17.6. Druga runda: „jakim cudem kłamca ma tak wysoki indeks?" (pytanie właściciela, 13.10.2026)
 
@@ -131,3 +138,58 @@ Teraz przy remisie biorą dobrą opcję — każda prowokacja testuje jedną cec
 **Czego się nauczyłem:** kara, która trafia w wskaźnik spoza wyniku, nie istnieje. Ryzyko,
 którego wynik nie widzi, jest darmowe. Narzędzie bez martwych pól jest srebrną kulą. Każda
 z tych trzech rzeczy osobno wystarczała, żeby kłamstwo wyszło na zero.
+
+## 17.7. Trzecia runda: ile kosztuje zła decyzja i czy kłamstwo ma prawdziwe skutki
+
+Pytania właściciela (13.10.2026): „nie ma zawsze jednej najlepszej decyzji — jak wygląda strata
+za złe?" oraz „kłamca nadal wysoko — może odbicie na współpracy albo obowiązkowy audyt po
+ostatnim sezonie; gra ma mieć skończoną liczbę iteracji".
+
+**Co znalazłem.**
+1. **Każda z 25 kart miała dokładnie jedną dobrą odpowiedź.** Gra była quizem „zgadnij, co
+   myśli autor", a nie decyzjami z kompromisami. Teraz 6 kart ma dwie dobre drogi: EDR sam albo
+   z usługą MDR; MFA z aplikacją albo z kluczami FIDO dla zarządu i księgowości; administrator
+   z zewnątrz albo pół etatu u nas; plan reagowania sam albo z retainerem; kopie OT u nas albo
+   u integratora na naszym nośniku; SZBI z doradcą albo z vCISO. Różnią się kosztem na lata —
+   przy budżecie 120–220 tys. zł/rok MDR z minimum 9 tys. zł/mies. to zobowiązanie, które
+   rozsadza kolejne budżety (pierwszy przebieg: mandat wszystkich graczy spadł o połowę, bo
+   automaty brały drogie drogi losowo; teraz biorą najtańszą rocznie).
+2. **Etat nie liczył się do budżetu** przy zakupie (tylko w silniku po fakcie). Poprawione.
+3. **Kłamstwo po ujawnieniu kosztowało tylko mandat.** Teraz ujawnienie uderza we wszystkich,
+   z którymi gracz pracuje (funkcja `ujawnij`): zarząd — mandat −15 i kolejny budżet ×0,7;
+   działy — zaufanie −0,3 i Q(pytaj) −0,5, czyli przestają pytać i częściej obchodzą zasady;
+   ubezpieczyciel — polisa wypowiedziana; audytor — rozszerzona próba.
+4. **Nie było momentu rozliczenia.** Kampania jest skończona (24 miesiące), a ostatnim krokiem
+   jest teraz **audyt zamykający** (🔵 zleca go rada nadzorcza — `02-…`). Audytor wykrywa każde
+   nieujawnione kłamstwo z prawdopodobieństwem z danych (deklaracje techniczne 0,9, dokumenty
+   z datą wsteczną 0,6). Po pierwszej nieprawdzie nie wierzy już deklaracjom: każda drobna
+   niezgodność staje się główną.
+5. **Nowa pokusa przed audytem** (`K_przed_audytem`, m. 21–22, obowiązkowa): uczciwy plan
+   naprawczy (audytor uznaje najwyżej dwa obszary „w toku"), sprint zespołu (uczciwy, ale kosztem
+   ludzi) albo dokumenty z datą wsteczną. Fałszywka, której nie wykryto, POPRAWIA audyt — dlatego
+   jest pokusą. Wykryta zamienia audyt w katastrofę.
+
+**Cennik złych decyzji** (`proto/cennik.js`): gracz mądry gra normalnie, a w jednej karcie wybiera
+najgorszą opcję; różnica Wyniku kampanii na tych samych 10 ziarnach (`proto/wyniki-cennik-2026-10-13.txt`):
+
+| Rodzaj decyzji | Przykład | Koszt (Wynik, na 1000) |
+|---|---|---|
+| **Nieuczciwość** | „tak" wszędzie w ankiecie ubezpieczyciela | **−469** |
+| **Nieuczciwość** | dokumenty z datą wsteczną przed audytem | **−409** |
+| Błąd z trwałym skutkiem | integrator dostaje hasło przez telefon | −80 |
+| Błąd z trwałym skutkiem | przejęcie oczyszczalni: „łączymy sieci od razu" | −20 |
+| Błąd naprawialny | „Prezes ma rację — KSC nas nie dotyczy" (karta „Wykaz" daje drugą szansę) | −13 |
+| Błąd naprawialny | ignorowanie ostrzeżenia CERT (gdy panel i tak zostanie zamknięty) | −10 |
+| Dopuszczalna zamiast dobrej | jedno e-szkolenie zamiast programu | −5 |
+
+Zera w surowym wyniku (EDR, SZBI, łatki, segmentacja) to artefakt pomiaru: mądry przy braku
+budżetu i tak wybiera tam opcję słabszą, a brakującą kontrolę dokupuje później z listy priorytetów.
+
+**Dlaczego zwykły błąd kosztuje tylko 5–20 punktów — i to jest zamierzone.** Kampania ma ~65
+decyzji. Pojedynczy błąd da się naprawić później (nowa karta, zakup, druga szansa) i realnie
+rzadko kładzie program bezpieczeństwa — ryzyko jest jak plasterki sera, liczy się suma. Dziesięć
+błędów to już −100…−200. Kłamstwa naprawić się nie da: kosztuje tyle co dwadzieścia błędów.
+
+**Wynik:** kłamca z 650 na **385** (sufit w 20/20, zaufanie działów 0,16 zamiast 0,63, audyt 32/60).
+Jest za graczem losowym (497) i tuż obok odkładacza (376). Rozsądny: 882, mądry: 912.
+

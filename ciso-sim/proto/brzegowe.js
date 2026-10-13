@@ -10,7 +10,8 @@ const D = require('./dzialy');
 const S = require('./silnik');
 const KONTROLE = require('../data/kontrole');
 
-const dobra = c => Math.max(0, c.opcje.findIndex(o => o.ocena === 'dobra'));
+// Przy kilku dobrych — najtańsza rocznie (jak automaty w kampania.js); bez `k` — pierwsza.
+const dobra = (c, k) => Math.max(0, K.dobraNajtansza(c, k));
 const odp = (c, x) => c.opcje.findIndex(o => o.odpowiedz === x);
 const koszt = o => (o.pln || 0) + 300 * (o.h || 0);
 
@@ -20,11 +21,11 @@ const STRATEGIE = {
   madry: K.AUTO.madry,
   // „Tak" na wszystko, co mówią działy; w kartach — opcja najmilsza zarządowi (mandat).
   potakiwacz: {
-    karta: c => {
+    karta: (c, k) => {
       if (c.zrodlo === 'dzial') return odp(c, 'zgoda');
       if (c.zrodlo === 'odkrycie') return odp(c, 'zostaw');
       // Przy remisie — dobra opcja: potakiwacz ma testować uprzejmość, nie kłamać przypadkiem.
-      let best = dobra(c);
+      let best = dobra(c, k);
       c.opcje.forEach((o, j) => { if ((o.mandat || 0) > (c.opcje[best].mandat || 0)) best = j; });
       return best;
     },
@@ -33,36 +34,36 @@ const STRATEGIE = {
   // Kupuje cały katalog w pierwszym miesiącu.
   wszystko_naraz: {
     miesiac: k => { if (k.st.m === 1) for (const x of KONTROLE) K.zlecRecznie(k, x.id); },
-    karta: c => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : dobra(c)),
+    karta: (c, k) => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : dobra(c, k)),
     scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
   },
   // Wszystko „odłóż", poza obowiązkowymi (pierwsza opcja).
   odkladacz: {
-    karta: c => (c.zrodlo === 'dzial' ? odp(c, 'odloz') : c.obowiazkowa ? 0 : null),
+    karta: (c, k) => (c.zrodlo === 'dzial' ? odp(c, 'odloz') : c.obowiazkowa ? 0 : null),
     scen: () => 0,
   },
   // Wybiera najtańszą opcję (PLN + godziny), wszystko inne jak rozsądny.
   skapiec: {
-    karta: c => { let b = 0; c.opcje.forEach((o, j) => { if (koszt(o) < koszt(c.opcje[b])) b = j; }); return b; },
+    karta: (c, k) => { let b = 0; c.opcje.forEach((o, j) => { if (koszt(o) < koszt(c.opcje[b])) b = j; }); return b; },
     scen: o => { let b = 0; o.forEach((x, j) => { if ((x.h || 0) < (o[b].h || 0)) b = j; }); return b; },
   },
   // Kłamie, gdzie się da (ankieta ubezpieczeniowa, wyjątki, papier zamiast procesu).
   klamca: {
-    karta: c => {
-      const kl = c.opcje.findIndex(o => o.flagi && (o.flagi.klamstwo_ankieta || o.flagi.wyjatek_mfa_zarzad || o.flagi.polityki_z_pudelka));
+    karta: (c, k) => {
+      const kl = c.opcje.findIndex(o => o.nieuczciwe || o.flagi && (o.flagi.klamstwo_ankieta || o.flagi.wyjatek_mfa_zarzad || o.flagi.polityki_z_pudelka));
       if (kl >= 0) return kl;
-      return c.zrodlo === 'dzial' ? odp(c, 'warunki') : dobra(c);
+      return c.zrodlo === 'dzial' ? odp(c, 'warunki') : dobra(c, k);
     },
     scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
   },
   // „Tak, ale bezpiecznie" ZAWSZE — także gdy to kosztuje 200 h w miesiącu, który ma 40 h.
   pracoholik: {
-    karta: c => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : (() => { let b = dobra(c); c.opcje.forEach((o, j) => { if ((o.h || 0) > (c.opcje[b].h || 0)) b = j; }); return b; })()),
+    karta: (c, k) => (c.zrodlo === 'dzial' ? odp(c, 'warunki') : (() => { let b = dobra(c, k); c.opcje.forEach((o, j) => { if ((o.h || 0) > (c.opcje[b].h || 0)) b = j; }); return b; })()),
     scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
   },
   // Bada każdy sygnał i nic poza tym (czy sygnały zdradzają prawdę?).
   paranoik: {
-    karta: c => (c.zrodlo === 'sygnal' ? 0 : c.obowiazkowa ? dobra(c) : null),
+    karta: (c, k) => (c.zrodlo === 'sygnal' ? 0 : c.obowiazkowa ? dobra(c, k) : null),
     scen: o => Math.max(0, o.findIndex(x => x.ocena === 'dobra')),
   },
   // Losowe wszystko + losowe zakupy (fuzzing niezmienników).
@@ -71,7 +72,7 @@ const STRATEGIE = {
     return {
       reset: seed => { r = S.mulberry32(seed * 7919); },
       miesiac: k => { if (r() < 0.3) K.zlecRecznie(k, KONTROLE[Math.floor(r() * KONTROLE.length)].id); },
-      karta: c => (r() < 0.2 && !c.obowiazkowa ? null : Math.floor(r() * c.opcje.length)),
+      karta: (c, k) => (r() < 0.2 && !c.obowiazkowa ? null : Math.floor(r() * c.opcje.length)),
       scen: o => Math.floor(r() * o.length),
     };
   })(),

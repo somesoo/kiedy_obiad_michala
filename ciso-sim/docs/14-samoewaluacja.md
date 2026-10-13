@@ -230,6 +230,24 @@ jest widoczna. Kłamca grał jak rozsądny z dwoma kłamstwami — i tego nikt n
 właściciel nie zapytał. Następna strategia-prowokacja powinna być „rozsądny + jedna zła rzecz"
 dla każdej kategorii decyzji.
 
+## 14.8c. Piąta iteracja: cennik złych decyzji, wiarygodność, audyt zamykający
+
+Szczegóły: `17-…`, 17.7. Najważniejsze odkrycie nie dotyczyło kłamcy, tylko danych: **każda
+z 25 kart miała jedną dobrą odpowiedź** — gra uczyła zgadywania autora, nie wyboru między
+kompromisami. Sześć kart ma teraz po dwie dobre drogi. Pierwszy przebieg po tej zmianie
+pokazał, jak łatwo dobra w abstrakcji opcja (MDR, vCISO, retainer) rozsadza budżet małej spółki
+na kolejne lata — to jest dokładnie lekcja, której gra ma uczyć, ale automaty musiały dostać
+regułę „najtańsza z dobrych w skali roku", żeby porównania stylów nie mierzyły szumu.
+
+Kłamca: 867 → 650 (runda 4) → **385**. Kłamstwo kosztuje teraz tyle co ~20 zwykłych błędów
+(`proto/cennik.js`), a jego skutki widać tam, gdzie w życiu: w zaufaniu działów (0,63 → 0,16),
+w budżecie i w audycie, który po pierwszej nieprawdzie przestaje wierzyć deklaracjom.
+
+**Ryzyko do oceny przez CISO:** czy sufit 450 za ujawnione kłamstwo nie jest zbyt surowy dla
+gry szkoleniowej (gracz, który raz skłamał, nie ma już po co grać dalej)? Alternatywa: sufit
+dopiero od drugiego kłamstwa, pierwsze — tylko skutki dla współpracy. Zostawiam surowo, bo
+pytanie właściciela brzmiało „czy to nie powinno przynieść dużo większej konsekwencji".
+
 ## 14.9. Następne kroki (propozycja)
 
 1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, karty kampanii w `data/kampanie/wodociagi.js`.

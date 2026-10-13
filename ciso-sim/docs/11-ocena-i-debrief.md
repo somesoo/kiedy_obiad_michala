@@ -50,14 +50,32 @@ każdego gracza; przeciwnik bez wyuczonych wag, bo to miara postawy firmy). Impl
 
 | Decyzja | Sufit (Indeks i Wynik kampanii) |
 |---|---|
-| Nieprawdziwe oświadczenie wobec ubezpieczyciela (ankieta) | 650 |
+| Kłamstwo (ankieta ubezpieczyciela, dokumenty z datą wsteczną…), którego **nikt nie wykrył** | 650 |
+| Kłamstwo **ujawnione** (w trakcie gry albo na audycie zamykającym) | 450; każde kolejne −100 (najniżej 250) |
 | Komunikat „woda bezpieczna" bez wyników badań (S03) | 650 |
 | Odwołanie przez zarząd (mandat 0) | 500 |
 
-Liczone **z prawdy, wykryte czy nie**. W życiu takie decyzje kończą karierę osoby
-odpowiedzialnej za bezpieczeństwo niezależnie od reszty dorobku, więc kilka punktów kary
-byłoby kłamstwem gry. Podsumowanie mówi wprost: „bez tego: 869, wynik ograniczony do 650,
-bo…". Lista: `BRAMKI` w `proto/kampania.js`.
+Kłamstwo liczy się **z prawdy**: nieujawnione też ma sufit. Ujawnione jest gorsze niż odwołanie
+za słabe wyniki, bo w życiu to koniec pracy na tym stanowisku. Podsumowanie mówi to wprost:
+„bez tego: 789, wynik ograniczony do 350, bo…". Lista: `BRAMKI` w `proto/kampania.js`.
+
+### 11.2b. Wiarygodność i audyt zamykający (`17-…`, 17.7)
+
+Opcja z polem `nieuczciwe: { wobec, wykrywalnosc }` trafia do rejestru `k.klamstwa`. Kłamstwo
+wychodzi na jaw przy weryfikacji ubezpieczyciela (~5%/mies.), przy likwidacji szkody albo na
+**audycie zamykającym** — obowiązkowym ostatnim kroku każdej kampanii (gra ma skończoną liczbę
+miesięcy). Ujawnienie uderza we **współpracę**:
+
+| Kto | Skutek |
+|---|---|
+| Zarząd | mandat −15, kolejny budżet ×0,7 |
+| Działy | zaufanie −0,3, Q(pytaj) −0,5 → rzadziej pytają, częściej obchodzą zasady |
+| Ubezpieczyciel | polisa wypowiedziana |
+| Audytor | rozszerzona próba: drobne niezgodności liczone jako główne |
+
+Audyt zamykający uznaje też uczciwość: plan naprawczy z właścicielami i terminami zmienia
+najwyżej dwie niezgodności główne na drobne. Dokumenty z datą wsteczną, których nie wykryto
+(szansa 40%), poprawiają audyt — inaczej nie byłyby pokusą.
 
 „Ta sama pogoda": silnik przechowuje ziarno losowości kampanii i liczy na nim strategię
 referencyjną. Gracz porównuje się z „jak by było, gdybyś nic nie robił" w tym samym świecie
@@ -84,6 +102,9 @@ Wynik: odsetek „punktów jakości" zdobytych z możliwych, **z wagą decyzji**
 w `proto/kampania.js`): karta może podać `waga`, obowiązkowa domyślnie 2, reszta 1 (ankieta
 ubezpieczyciela: 4); decyzje scenariusza ważone punktami rubryki (10 pkt = waga 1). Bez wag
 kłamstwo w ankiecie było 1/68 wyniku — tyle co odpowiedź na prośbę o czat AI.
+Decyzja **nieuczciwa** liczy się jako **−1** (nie 0): zabiera punkty innym decyzjom. Karta może
+mieć **kilka dobrych odpowiedzi** — różnią się kosztem, godzinami i ryzykiem na lata, a nie
+„poprawnością".
 
 ## 11.4. Debrief incydentu (po każdym trybie operacyjnym)
 

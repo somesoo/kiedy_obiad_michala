@@ -118,8 +118,11 @@ module.exports = {
       opis: 'druga fala haktywistów: DDoS na e-BOK i próba na przepompownię' },
     { id: 'K_emerytura', typ: 'karta', okno: [17, 17], ciezar: 0.3 },
     { id: 'K_falszywy_komunikat', typ: 'karta', okno: [19, 21], ciezar: 0.6 },
+    { id: 'K_przed_audytem', typ: 'karta', okno: [21, 22], ciezar: 0.5 },
+    // 🔵 Podmiot ważny nie ma ustawowego audytu okresowego — audyt zamykający kampanię zleca rada
+    // nadzorcza (docs/02-…). Kampania ma skończoną liczbę miesięcy i zawsze kończy się audytem.
     { id: 'A_kontrola', typ: 'final', okno: [23, 24], ciezar: 0.8,
-      opis: 'audyt na żądanie organu (podmiot ważny po poważnym incydencie) albo przegląd roczny SZBI' },
+      opis: 'audyt zamykający zlecony przez radę nadzorczą (niezależny audytor, porównuje deklaracje z rzeczywistością)' },
   ],
 
   // ── KARTY ──
@@ -179,6 +182,9 @@ module.exports = {
           zlec: ['mfa'], mandat: -2, dzial: { siec: { zmeczenie: 0.1 } }, ocena: 'dobra',
           dlaczego: 'Najtańsza z dużych kontroli. Bez wyjątków dla zarządu — to ich konta są najcenniejsze.' },
         // Wyjątek nie jest darmowy: konta zarządu to najcenniejszy cel (przejęcie, „na prezesa").
+        { tekst: 'MFA dla wszystkich; zarząd, księgowość i administratorzy — klucze sprzętowe FIDO (odporne na phishing).',
+          zlec: ['mfa', 'mfa_fido'], mandat: -2, dzial: { siec: { zmeczenie: 0.1 } }, ocena: 'dobra',
+          dlaczego: 'Drożej, ale konta, z których płaci się faktury i zarządza systemami, dostają ochronę, której nie obejdzie fałszywa strona logowania.' },
         { tekst: 'MFA dla wszystkich oprócz zarządu.',
           zlec: ['mfa'], mandat: 1, flagi: { wyjatek_mfa_zarzad: true }, wektory: { poswiadczenia: 1.15, bec: 1.25 }, ocena: 'dopuszczalna',
           dlaczego: 'Wyjątek dla zarządu zostawia otwarte najcenniejsze konta (wraca w scenariuszach „na prezesa").' },
@@ -209,6 +215,9 @@ module.exports = {
         { tekst: 'Pozyskać od integratora aktualne kopie projektów i konfiguracji, trzymać offline u nas, sprawdzać co kwartał; kopie systemów biurowych 3-2-1-1-0.',
           zlec: ['backup'], h: 10, flagi: { kopie_ot: true }, dzial: { produkcja: { zaufanie: 0.05 } }, ocena: 'dobra',
           dlaczego: 'Jeśli laptop integratora zginie albo integrator zniknie, stacja nie ma z czego się odbudować.' },
+        { tekst: 'Kopie OT robi integrator, ale na NASZ nośnik offline, z testem odtworzenia co pół roku wpisanym do umowy; kopie biurowe 3-2-1-1-0.',
+          zlec: ['backup'], pln: 4000, h: 4, flagi: { kopie_ot: true }, ocena: 'dobra',
+          dlaczego: 'Integrator zna sterowniki lepiej niż my — ważne, żeby kopia była u nas i żeby ktoś sprawdził, że się odtwarza.' },
         { tekst: 'Tylko kopie systemów biurowych.', zlec: ['backup'], ocena: 'dopuszczalna',
           dlaczego: 'Biuro ochronione, ale najważniejszy proces dalej zależy od jednego laptopa.' },
         { tekst: 'Integrator jest niezawodny, zostawmy.', ocena: 'blad',
@@ -223,6 +232,9 @@ module.exports = {
         { tekst: 'Plan reagowania (kto, kiedy, kontakty na papierze, CSIRT INFRASTRUKTURA) + procedura pracy ręcznej przećwiczona ze zmianą.',
           zlec: ['plan_ir', 'bcp'], dzial: { produkcja: { zaufanie: 0.1, swiadomosc: 0.1 } }, ocena: 'dobra',
           dlaczego: 'W OT pierwszą kontrolą bezpieczeństwa jest umiejętność bezpiecznej pracy bez systemu.' },
+        { tekst: 'Krótki plan i procedura pracy ręcznej przećwiczone ze zmianą + umowa z zewnętrznym zespołem reagowania (retainer).',
+          zlec: ['plan_ir', 'bcp', 'retainer_ir'], dzial: { produkcja: { zaufanie: 0.1, swiadomosc: 0.1 } }, ocena: 'dobra',
+          dlaczego: 'Mała firma nie utrzyma własnego zespołu reagowania. Retainer kosztuje co miesiąc, ale ktoś przyjedzie w nocy.' },
         { tekst: 'Kupić gotowy plan od firmy doradczej.', pln: 9000, zlec: ['plan_ir'], ocena: 'dopuszczalna',
           dlaczego: 'Plan bez ćwiczenia i bez ludzi ze stacji zostaje na półce.' },
         { tekst: 'Później.', ocena: 'dopuszczalna', dlaczego: 'Każdy miesiąc bez planu to dłuższe pierwsze godziny incydentu.' },
@@ -236,6 +248,9 @@ module.exports = {
         { tekst: 'Bierzemy — z umową: MFA na ich kontach, osobne konta na osobę, logi dostępu, zgłaszanie incydentów w 24 h.',
           zlec: ['msp'], h: 6, ocena: 'dobra',
           dlaczego: 'W małej firmie godziny są najrzadszym zasobem. Umowa z wymaganiami ogranicza ryzyko, że MSP stanie się wektorem.' },
+        { tekst: 'Zamiast firmy — pół etatu informatyka u nas (umowa na rok), z MFA i osobnym kontem od pierwszego dnia.',
+          etat: 0.5, h: 8, ocena: 'dobra',
+          dlaczego: 'Drożej i wolniej na starcie (rekrutacja w małym mieście), ale wiedza zostaje w firmie, a nie u dostawcy.' },
         { tekst: 'Bierzemy na standardowej umowie.', zlec: ['msp'], wektory: { dostawca: 1.15 }, ocena: 'dopuszczalna',
           dlaczego: 'Godziny są, ale MSP z uprawnieniami admina bez wymagań to nowy, duży wektor (wzorzec Kaseya 2021).' },
         { tekst: 'Damy radę sami.', ocena: 'dopuszczalna', dlaczego: 'Może się udać, jeśli plan jest skromny. Symulacja pokazuje, że zwykle projekty się ślizgają.' },
@@ -249,6 +264,10 @@ module.exports = {
         { tekst: 'EDR na komputerach biurowych i serwerach; na stacjach OT tylko z listy producenta, po teście na jednej stacji.',
           zlec: ['edr'], dzial: { produkcja: { zaufanie: 0.05 } }, ocena: 'dobra',
           dlaczego: 'EDR działa nawet wtedy, gdy nikt nie patrzy — w ataku na polską energetykę 29.12.2025 zatrzymał niszczenie na ponad 100 maszynach.' },
+        // Druga dobra droga: przy pół etatu nikt nie patrzy na alerty w nocy — usługa zamiast narzędzia.
+        { tekst: 'EDR z usługą MDR (zewnętrzny SOC 24/7); na stacjach OT tylko z listy producenta, po teście.',
+          zlec: ['edr', 'mdr'], dzial: { produkcja: { zaufanie: 0.05 } }, ocena: 'dobra',
+          dlaczego: 'Gdy w firmie nie ma ludzi na alerty, usługa jest lepsza niż samo narzędzie. Drożej w abonamencie, taniej w Twoich godzinach.' },
         { tekst: 'EDR wszędzie od razu, także na stacjach OT.', zlec: ['edr'], dzial: { produkcja: { zaufanie: -0.15 } }, reputacja: -2, ocena: 'dopuszczalna',
           dlaczego: 'Niesprawdzony agent na stacji sterującej może zakłócić proces — kierownik stacji ma rację, że się boi.' },
         { tekst: 'Zostajemy przy darmowym antywirusie.', ocena: 'dopuszczalna',
@@ -299,6 +318,9 @@ module.exports = {
         { tekst: 'SZBI na miarę firmy: szacowanie ryzyka z kierownikami działów, krótkie polityki, rejestr dostawców; doradca na 10 dni.',
           zlec: ['szbi', 'ryzyko', 'dostawcy'], pln: 20000, dzial: { wszystkie: { zaufanie: 0.05 } }, ocena: 'dobra',
           dlaczego: 'Ryzyko szacowane z ludźmi z działów daje właścicieli ryzyk i lepsze decyzje — i dowody na audyt.' },
+        { tekst: 'SZBI z wirtualnym CISO na rok: prowadzi ryzyko i polityki z kierownikami, Ty wdrażasz kontrole.',
+          zlec: ['szbi', 'ryzyko', 'dostawcy', 'vciso'], dzial: { wszystkie: { zaufanie: 0.05 } }, ocena: 'dobra',
+          dlaczego: 'Drożej niż doradca na 10 dni, ale ktoś z doświadczeniem prowadzi przeglądy także po wdrożeniu.' },
         { tekst: 'Kupić komplet „polityk pod NIS2" za 9 900 zł.', pln: 9900, zlec: ['szbi'], flagi: { polityki_z_pudelka: true }, ocena: 'dopuszczalna',
           dlaczego: 'Szybko i tanio na papierze; dokumenty nie pasują do firmy i nikt ich nie stosuje — audyt zapyta o dowody.' },
         { tekst: 'Zrobię to sam, wieczorami.', zlec: ['szbi'], morale: -10, ocena: 'dopuszczalna',
@@ -415,9 +437,31 @@ module.exports = {
       opcje: [
         { tekst: 'Odpowiedzieć zgodnie z prawdą; kupić, jeśli warunki pozwolą.', zlec: ['ubezpieczenie'], warunkowo: true, ocena: 'dobra',
           dlaczego: 'Polisa działa tylko przy prawdziwej ankiecie. Bez MFA, EDR i kopii offline ubezpieczyciel odmówi — i to jest uczciwa informacja, co wdrożyć najpierw.' },
+        // nieuczciwe: rejestr kłamstw (proto/kampania.js, ujawnij). Wykrywalność na audycie zamykającym:
+        // deklaracje techniczne (MFA, EDR, kopie) audytor sprawdza wprost.
         { tekst: 'Zaznaczyć „tak" wszędzie — i tak to wdrażamy.', zlec: ['ubezpieczenie'], flagi: { klamstwo_ankieta: true }, ocena: 'blad',
+          nieuczciwe: { wobec: 'ubezpieczyciel', wykrywalnosc: 0.9 },
           dlaczego: 'Nieprawdziwa ankieta to odmowa wypłaty dokładnie wtedy, gdy polisa jest potrzebna.' },
         { tekst: 'Nie teraz.', ocena: 'dopuszczalna', dlaczego: 'Polisa to transfer ryzyka, nie obowiązek.' },
+      ],
+    },
+    K_przed_audytem: {
+      tytul: 'Za dwa miesiące audyt', od: 'Radca prawny', okno: [21, 22], waga: 4,
+      tresc: 'Audytor poprosi o dowody: rejestr ryzyk z datami przeglądów, protokoły, listy szkoleń. Części nie mamy albo są niekompletne. ' +
+        'Członek zarządu: „Dopiszcie, co trzeba, z datami wstecz. Wszyscy tak robią, a audytor i tak tego nie sprawdzi."',
+      problemy: ['zgodnosc'], cele: ['E6', 'E7'],
+      opcje: [
+        { tekst: 'Pokazać stan uczciwie: lista luk z planem naprawczym, właścicielami i terminami; to, co zrobione — z prawdziwymi dowodami.',
+          h: 8, mandat: -2, flagi: { plan_naprawczy: true }, ocena: 'dobra',
+          dlaczego: 'Audytor widział setki firm z lukami. Plan z właścicielami i terminami to dowód, że system zarządzania działa — i taki audyt da się wygrać.' },
+        { tekst: 'Dwa tygodnie intensywnej pracy zespołu: zrobić brakujący rejestr ryzyk naprawdę, z prawdziwymi datami.',
+          h: 30, morale: -8, flagi: { sprint_audytowy: true }, ocena: 'dopuszczalna',
+          dlaczego: 'Uczciwe, ale robione pod audyt, a nie dla firmy — i kosztem zmęczonego zespołu.' },
+        { tekst: 'Uzupełnić dokumenty z datą wsteczną: rejestr ryzyk, protokoły przeglądów, listy obecności.',
+          h: 12, flagi: { dokumenty_wstecz: true }, ocena: 'blad',
+          // Trudniej wykryć niż deklaracje techniczne (metadane, rozmowy z ludźmi) — ale jeśli wyjdzie, wychodzi wszystko.
+          nieuczciwe: { wobec: 'audytor', wykrywalnosc: 0.6 },
+          dlaczego: 'Fałszowanie dowodów. Metadane plików i rozmowy z kierownikami („jaki przegląd w marcu?") wykrywają to częściej, niż się wydaje — a wtedy audytor nie wierzy już niczemu.' },
       ],
     },
     K_latki: {
