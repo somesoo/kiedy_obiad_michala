@@ -27,6 +27,9 @@ const RU = require('./ruchy');
 const SP = require('./sprawy');
 const I = require('./incydent');
 const ZA = require('./zasady');
+const CY = require('./cykl');
+const DR = require('./doradztwo');
+const CYKLICZNE = require('../data/cykliczne');
 const FIRMY = require('../data/firmy');
 const KONTROLE = require('../data/kontrole');
 const INICJATYWY = require('../data/dzialy');
@@ -76,6 +79,12 @@ function walidujKampanie(def) {
     // do złej decyzji (przypadki brzegowe, docs/17-…).
     if (!cz.some(([, c]) => !c.pln && !c.koszt && (c.h || 0) <= 8 && !c.nieuczciwe)) b.push(`sprawa ${id}: brak taniego wyjścia (≤ 8 h, bez pieniędzy)`);
   }
+  for (const c of def.certyfikaty || []) {
+    if (!c.id || !c.nazwa || !(c.pierwszy >= 1) || !(c.co >= 1) || !c.skutek?.opis) b.push(`certyfikat ${c.id || '?'}: id, nazwa, pierwszy, co, skutek.opis`);
+  }
+  for (const e of def.koniec_wsparcia || []) {
+    if (!e.id || !e.nazwa || !e.opis || !(e.m >= 1) || !e.wektory || !(e.pln >= 0) || !(e.pln_wsparcie >= 0)) b.push(`koniec wsparcia ${e.id || '?'}: id, nazwa, opis, m, wektory, pln, pln_wsparcie`);
+  }
   for (const z of def.zdarzenia) {
     okno(z.okno, `zdarzenie ${z.id}`);
     if (!['incydent', 'sprawa', 'termin', 'fala', 'final'].includes(z.typ)) b.push(`zdarzenie ${z.id}: typ ${z.typ}`);
@@ -88,8 +97,15 @@ function walidujKampanie(def) {
 }
 
 // ── TWORZENIE ──
+// Definicja kampanii razem ze sprawami cyklicznymi (odnowienia, certyfikaty, koniec wsparcia…),
+// które są wspólne dla wszystkich kampanii (data/cykliczne.js).
+function pelnaDefinicja(defId) {
+  const baza = require(`../data/kampanie/${defId}`);
+  return { ...baza, sprawy: { ...CYKLICZNE.sprawy, ...baza.sprawy } };
+}
+
 function nowaKampania(defId, seed) {
-  const def = require(`../data/kampanie/${defId}`);
+  const def = pelnaDefinicja(defId);
   const bledy = walidujKampanie(def);
   if (bledy.length) throw new Error(`Kampania ${defId} ma błędy w danych:\n - ${bledy.join('\n - ')}`);
   const firma = FIRMY[def.firma];
@@ -100,7 +116,9 @@ function nowaKampania(defId, seed) {
     // Osobne strumienie: każdy podsystem losuje ze swojego — dołożenie losowania w jednym nie
     // przesuwa „pogody" w innym (silnik, działy, reżyser, mgła, wdrożenia, incydenty).
     rnd: { dzialy: S.mulberry32(seed ^ 0x9e3779b9), rezyser: S.mulberry32(seed ^ 0x85ebca6b), mgla: S.mulberry32(seed ^ 0x27d4eb2f),
-      wdrozenia: S.mulberry32(seed ^ 0x165667b1), incydent: S.mulberry32(seed ^ 0xd3a2646c) },
+      wdrozenia: S.mulberry32(seed ^ 0x165667b1), incydent: S.mulberry32(seed ^ 0xd3a2646c), cykl: S.mulberry32(seed ^ 0x2545f491),
+      doradztwo: S.mulberry32(seed ^ 0x5bd1e995) },
+    cykl: CY.nowyCykl(), doradztwo: DR.nowe(), obciazenia: [], kosztyStale: [], bonusH: [],
     obiekty: {}, pilotaze: {}, rekrutacje: [], akceptacje: {}, wiedza: {}, zrobioneRuchy: new Set(), ostatnieRuchy: {},
     sprawy: [], sprawyZamkniete: [], licznikSpraw: 0, planowaneSprawy: [], obserwacje: [], zdarzenia: [],
     historia: [], rejestr: [], incydenty: [], raporty: [], raportIT: [], ocenyIncydentow: [], bktZnane: new Set(),
@@ -132,7 +150,8 @@ function zastosujModyfikatory(k) {
   for (const w of new Set([...Object.keys(dz), ...Object.keys(k.modStale), ...Object.keys(fk), ...Object.keys(k.rezyser.wagi)])) {
     k.st.mod.wektory[w] = Math.max(0.25, Math.min(4, (dz[w] ?? 1) * (k.modStale[w] ?? 1) * (fk[w] ?? 1) * (k.rezyser.wagi[w] ?? 1)));
   }
-  k.st.mod.h_extra = (k.def.h_gracza || 0) - k.hKart;
+  // Godziny gracza, których nie zużył, idą do zespołu; minus przełączanie między projektami.
+  k.st.mod.h_extra = (k.def.h_gracza || 0) - k.hKart + Z.zmianaGodzin(k) - Math.round(Z.karaWip(k) * Z.godzinyZespolu(k));
   k.st.mod.bez_ubezpieczenia = !!k.flagi.klamstwo_ankieta;
 }
 
@@ -143,6 +162,10 @@ function rozpocznijMiesiac(k) {
   if (k.budzet[k.rok] === undefined) k.budzet[k.rok] = k.budzet[k.rok - 1] ?? st.firma.budzet_rok;
   D.ustawObciazenie(k);
   k.mandatZDzialow = 0;
+  // Koordynacja projektów w toku zjada godziny gracza, zanim zrobi cokolwiek nowego.
+  k.hKart = Z.koordynacja(k) + Z.obciazenieGracza(k);
+  k.maxHKart = Math.max(k.maxHKart || 0, k.hKart);
+  k.maxProjekty = Math.max(k.maxProjekty || 0, st.projekty.length);
   k.obserwacje = []; k.zdarzenia = [];
   for (const d of Object.values(k.dzialy)) {
     const w = D.wykonajPlan(k, d);
@@ -150,6 +173,8 @@ function rozpocznijMiesiac(k) {
     k.log('dzial', `${d.nazwa}: ${w.typ === 'pytanie' ? 'PYTA' : 'OBCHODZI'} — ${INICJATYWY[w.ini].nazwa}; ${w.powod}`);
     if (w.typ === 'pytanie') SP.dodajProsbe(k, w);
   }
+  // Decyzje cykliczne ze stanu firmy: odnowienia, certyfikaty, koniec wsparcia, właściciele procesów.
+  CY.nowyMiesiac(k);
   for (const p of k.planowaneSprawy.filter(x => x.m === st.m)) SP.dodajScenariuszowa(k, p.sid);
   k.planowaneSprawy = k.planowaneSprawy.filter(x => x.m !== st.m);
   const plan = R.zaplanujMiesiac(k);
@@ -268,6 +293,9 @@ function zamknijMiesiac(k) {
   k.tarcie = RU.tarcie(k);
   zastosujModyfikatory(k);
   k.rokZamkniety = k.rok;
+  // Stałe koszty z decyzji (np. zastępstwo w IT) — z budżetu, jak pensje.
+  const stale = Z.kosztyStale(k);
+  if (stale) { st.w.wydatki += stale; k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + stale; }
   const wydatkiPrzed = st.w.wydatki, reagPrzed = st.w.reagowanie || 0;
   const zdarzenia = S.zakonczMiesiac(st);
   // Budżet bezpieczeństwa = abonamenty, pensje, zakupy; NIE koszty reagowania na incydenty.
@@ -298,6 +326,8 @@ function zamknijMiesiac(k) {
     }
   }
   RU.poMiesiacu(k, st.ostatni.wdrozone);
+  CY.koniecMiesiaca(k, RU.api(k));
+  DR.koniecMiesiaca(k);
   if (st.ostatni.wdrozone.length) k.raportIT.push(`Wdrożono: ${st.ostatni.wdrozone.map(id => S.kontrola[id].nazwa).join('; ')}.`);
   if (st.ostatni.jakosc_ops < 0.8) k.raportIT.push(`Nie nadążamy z alertami — przejrzano ok. ${Math.round(st.ostatni.jakosc_ops * 100)}%.`);
   if (st.ostatni.utrzymanie_ulamek < 1) k.raportIT.push(`Brakuje godzin na utrzymanie zabezpieczeń (${Math.round(st.ostatni.utrzymanie_ulamek * 100)}% potrzeb).`);
@@ -505,6 +535,21 @@ function ekspozycja(k, n = EKSPOZYCJA_PRZEBIEGI) {
   return { pln: suma / n, sabotaze: sabotaze / n };
 }
 
+// „Co jeśli": ekspozycja po hipotetycznej zmianie (doradca wycenia rekomendacje). Zmiana idzie
+// na kopiach — prawdziwy stan kampanii i strumienie losowości zostają nietknięte.
+function coJesli(k, zmiana, n = EKSPOZYCJA_PRZEBIEGI) {
+  const oryg = { aktywne: k.st.aktywne, zamowione: k.st.zamowione, konf: k.st.konf, obiekty: k.obiekty, fakty: k.fakty, ryzyka: k.ryzyka, modStale: k.modStale };
+  k.st.aktywne = { ...oryg.aktywne }; k.st.zamowione = new Set(oryg.zamowione); k.st.konf = structuredClone(oryg.konf);
+  k.obiekty = structuredClone(oryg.obiekty); k.fakty = structuredClone(oryg.fakty); k.ryzyka = structuredClone(oryg.ryzyka); k.modStale = { ...oryg.modStale };
+  try {
+    if (zmiana) zmiana(k);
+    return ekspozycja(k, n);
+  } finally {
+    Object.assign(k.st, { aktywne: oryg.aktywne, zamowione: oryg.zamowione, konf: oryg.konf });
+    Object.assign(k, { obiekty: oryg.obiekty, fakty: oryg.fakty, ryzyka: oryg.ryzyka, modStale: oryg.modStale });
+  }
+}
+
 // Sufity: decyzje, których żaden dobry wynik nie równoważy (docs/11-…, 11.2a).
 const BRAMKI = [
   { gdy: k => k.klamstwa.some(l => !l.ujawnione) && !k.klamstwa.some(l => l.ujawnione), sufit: () => 650,
@@ -562,7 +607,10 @@ const jakoscDecyzji = k => ZA.jakoscPraktyki(ZA.ocen(k, true));
 function naglowek(k) {
   return `\n══════ Miesiąc ${k.st.m}/${k.def.miesiecy} — ${nazwaMiesiaca(k)} ══════\n` +
     `Budżet ${k.rok}: wydane ${zl(k.wydaneRok[k.rok] || 0)}, z abonamentami do grudnia ${zl(Z.zobowiazaniaRoku(k))} z ${zl(k.budzet[k.rok] || 0)} · ` +
-    `Twoje godziny: ${k.hKart}/${k.def.h_gracza} h (z nadgodzinami maks. ${Math.round(k.def.h_gracza * Z.LIMIT_NADGODZIN)}) · ` +
+    `Twoje godziny: ${k.hKart}/${k.def.h_gracza} h (z nadgodzinami maks. ${Math.round(Z.limitGodzin(k))}` +
+    `${k.st.projekty.length ? `; w tym koordynacja ${k.st.projekty.length} projektów: ${Z.koordynacja(k)} h` : ''}` +
+    `${Z.obciazenieGracza(k) ? `; stałe obowiązki: ${Z.obciazenieGracza(k)} h` : ''}) · ` +
+    `${Z.karaWip(k) ? `Zespół traci ${Math.round(100 * Z.karaWip(k))}% czasu na przełączanie między projektami · ` : ''}` +
     `Mandat ${Math.round(k.wskazniki.mandat)} · Reputacja ${Math.round(k.wskazniki.reputacja)} · Morale ${Math.round(k.wskazniki.morale)}`;
 }
 
@@ -735,8 +783,32 @@ const PLAYBOOK = {
     : ['proces_reczny', 'odetnij', 'probki', 'komunikat_prawda', 'csirt', 'dowody', 'zmien_pin', 'odtworz_konfiguracje', 'przeglad_ekspozycji', 'usun_furtke']),
 };
 
+// Pierwsza dostępna odpowiedź z listy (budżet, godziny, wymagania) — jak człowiek, który ma
+// plan A, B i C, zamiast zostawiać sprawę do terminu, gdy plan A nie przejdzie.
+function pierwszaDostepna(k, s, lista) {
+  return lista.find(d => d && !SP.dostepnyCzasownik(k, s, d.v, d.p || {})) || null;
+}
+// Decyzje cykliczne i zmiany firmy (data/cykliczne.js, sprawy S_rozbudowa/S_ciecie/S_odejscie).
+function madraCykliczna(k, s, A) {
+  const dowod = id => { const o = A.obiekt(id); return o && Math.max(o.ostPrzeglad ?? -99, o.ostTest ?? -99) >= k.st.m - 12; };
+  const cert = (k.def.certyfikaty || []).find(c => c.id === s.dane?.klucz);
+  const plany = {
+    C_odnowienie: () => [dowod(s.dane.klucz) ? { v: 'negocjuj' } : null, { v: 'przedluz' }],
+    C_certyfikat: () => [cert?.auto ? { v: 'automatyzuj' } : null, { v: 'zlec_msp' }, { v: 'odnow' }],
+    C_eol: () => [{ v: 'izoluj' }, { v: 'modernizuj', p: { tryb: 'z_pilotazem' } }, { v: 'wsparcie' }, { v: 'akceptuj' }],
+    C_alerty: () => [{ v: 'mdr' }, { v: 'strojenie' }],
+    C_kolejka: () => [{ v: 'msp' }, { v: 'priorytety' }],
+    S_rozbudowa: () => [{ v: 'wlacz' }],
+    S_ciecie: () => [{ v: 'argumentuj' }],
+    S_odejscie: () => [A.dziala('msp') ? { v: 'msp' } : null, { v: 'zatrudnij' }, { v: 'przejmij' }],
+  }[s.sid];
+  return plany ? pierwszaDostepna(k, s, plany()) : undefined;
+}
+
 // Sprawy z kampanii — odpowiedzi „mądre" (uczciwe, z priorytetami i budżetem).
 function madraSprawa(k, s, A) {
+  const cyk = madraCykliczna(k, s, A);
+  if (cyk !== undefined) return cyk;
   if (s.rodzaj === 'prosba') {
     if (D.ciezarRyzyka(INICJATYWY[s.ini]) < 0.1) return { v: 'zgoda' };
     const w = najlepszeWarunki(k, s, A);
@@ -835,6 +907,11 @@ const AUTO = {
       if (s.rodzaj === 'prosba') return { v: 'warunki', p: { warunki: INICJATYWY[s.ini].warunki.filter(w => !w.wymaga || A.dziala(w.wymaga)).map(w => w.id).join(',') } };
       if (s.rodzaj === 'odkrycie') return { v: 'legalizuj', p: { warunki: INICJATYWY[s.ini].warunki.filter(w => !w.wymaga || A.dziala(w.wymaga)).map(w => w.id).join(',') } };
       if (s.rodzaj === 'sygnal') return { v: 'zbadaj' };
+      // Laik: odnawia jak leci, modernizuje „od razu", zatrudnia, gdy coś nie działa.
+      const cyk = { C_odnowienie: [{ v: 'przedluz' }], C_certyfikat: [{ v: 'odnow' }], C_eol: [{ v: 'modernizuj', p: { tryb: 'od_razu' } }, { v: 'zostaw' }],
+        C_alerty: [{ v: 'zatrudnij' }, { v: 'zostaw' }], C_kolejka: [{ v: 'nadgodziny' }], S_rozbudowa: [{ v: 'nic' }], S_ciecie: [{ v: 'przyjmij' }],
+        S_odejscie: [{ v: 'przejmij' }] }[s.sid];
+      if (cyk) return pierwszaDostepna(k, s, cyk);
       return ({ S_budzet2027: { v: 'wniosek', p: { kwota: 180000, uzasadnienie: 'potrzeby' } }, S_przejecie: { v: 'polacz' }, S_umowa_integratora: { v: 'przedluz' },
         S_ubezpieczenie: { v: 'odrzuc' }, S_dwr: s.dane.lista ? null : { v: 'lista' }, S_wodomierze: { v: 'srodki', p: { srodki: 'umowa_powierzenia' } },
         S_emerytura: { v: 'srodki', p: { srodki: 'zmiana_hasel' } }, S_falszywy_komunikat: { v: 'dementi', p: { kanaly: 'strona' } }, S_noc_integrator: { v: 'odmow' } })[s.sid] || null;
@@ -932,6 +1009,7 @@ Komendy (wszystko w dowolnej kolejności, ile chcesz w miesiącu):
   m [kategoria|szukaj]  lista ruchów (kontrole, rozpoznanie, ot, ludzie, zarzad, prawo, audyt)
   x <ruch> [k=v …]      wykonaj ruch (np. x wdroz:edr zakres=biuro_serwery tryb=wykrywaj · x test:backup · x rozmowa dzial=produkcja)
   o                     Twoje wdrożenia: stan, parametry, co wiesz o skuteczności, usterki
+  p                     doradztwo: cennik tematów, zlecenia w toku, raporty z rekomendacjami
   w                     co wiemy (zasoby, fakty, luki, status)
   i                     poprowadź trwający incydent
   d                     dziennik (prowadzący/debug)
@@ -974,6 +1052,7 @@ async function grajInteraktywnie(plikZapisu) {
     else if (cmd === 's') console.log(widokSpraw(k));
     else if (cmd === 'm') console.log(widokRuchow(k, tok[1] || ''));
     else if (cmd === 'o') console.log(widokObiektow(k));
+    else if (cmd === 'p') console.log(DR.widok(k));
     else if (cmd === 'w') console.log(coWiemy(k));
     else if (cmd === 'd') for (const r of k.rejestr.filter(x => x.m === k.st.m)) console.log(`  [${r.kto}] ${r.tekst}`);
     else if (cmd === 'x') sprobuj(() => RU.wykonaj(k, tok[1] || '', parametry(tok.slice(2))));
@@ -1008,9 +1087,12 @@ async function main() {
   } else await grajInteraktywnie(arg('zapis'));
 }
 
-if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
 module.exports = {
-  walidujKampanie, nowaKampania, zamknijMiesiac, rozpocznijIncydent, incydentAkcja, incydentCzekaj, incydentZakoncz,
-  ujawnij, ocenaKontroli, indeksOdpornosci, ekspozycja, jakoscDecyzji, BRAMKI, KLUCZOWE, podsumowanie, widokRuchow, widokSpraw,
-  apiAuto, najlepszeWarunki, madraSprawa, madreRuchy, madryIncydent, PLAYBOOK, AUTO, grajAuto, wykonajAkcje, odtworz,
+  walidujKampanie, pelnaDefinicja, nowaKampania, zamknijMiesiac, rozpocznijIncydent, incydentAkcja, incydentCzekaj, incydentZakoncz,
+  ujawnij, ocenaKontroli, indeksOdpornosci, ekspozycja, coJesli, jakoscDecyzji, BRAMKI, KLUCZOWE, podsumowanie, widokRuchow, widokSpraw,
+  apiAuto, najlepszeWarunki, madraSprawa, pierwszaDostepna, madreRuchy, madryIncydent, PLAYBOOK, AUTO, grajAuto, wykonajAkcje, odtworz,
 };
+
+// Po module.exports: moduły ładowane leniwie (doradztwo → kampania.coJesli) muszą widzieć eksporty,
+// także gdy kampania jest uruchomiona z terminala jako program główny.
+if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });

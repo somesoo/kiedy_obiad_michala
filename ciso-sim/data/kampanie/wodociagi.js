@@ -92,17 +92,44 @@ module.exports = {
   // po_naprawie: mnożniki po naprawie (gdy profil firmy już zawiera ekspozycję, np. usługi ×3)
   // jak się odkrywa: widoczne_z_internetu (przegląd ekspozycji), dostep_zdalny (przegląd dostępów),
   //   na_obiekcie (obchód stacji), zna: id działu (rozmowa, gdy dział Ci ufa), odkrywa_wdrozenie
+  // naprawa: ruch, który to zamyka — doradca poleca go w raporcie (proto/doradztwo.js)
+  // widoczny_od_sprawy: doradca może to znaleźć dopiero, gdy sprawa się pojawiła (przejęcie)
   fakty: {
     hmi_wystawiony: { opis: 'panel HMI stacji uzdatniania dostępny z internetu (przekierowanie portu u integratora)',
-      prawda: true, widoczne_z_internetu: true, pilne: true, po_naprawie: { uslugi: 0.45 }, odkrywa_wdrozenie: ['moje_cert', 'ekspozycja', 'asm'] },
+      prawda: true, widoczne_z_internetu: true, pilne: true, po_naprawie: { uslugi: 0.45 }, odkrywa_wdrozenie: ['moje_cert', 'ekspozycja', 'asm'],
+      naprawa: { ruch: 'odetnij_hmi' } },
     narzedzie_zdalne_integratora: { opis: 'narzędzie zdalnej pomocy integratora na stacji inżynierskiej, ze stałym hasłem',
-      prawda: true, dostep_zdalny: true, pilne: true, wektory: { dostawca: 1.3, uslugi: 1.15 } },
+      prawda: true, dostep_zdalny: true, pilne: true, wektory: { dostawca: 1.3, uslugi: 1.15 }, naprawa: { ruch: 'usun_narzedzie_zdalne' } },
     pin_domyslny: { opis: 'PIN-y sterowników i paneli niezmienione od montażu (zna je pół powiatu)',
-      prawda: true, na_obiekcie: true, zna: 'produkcja', wektory: { uslugi: 1.1 }, odkrywa_wdrozenie: ['inwentaryzacja'] },
+      prawda: true, na_obiekcie: true, zna: 'produkcja', wektory: { uslugi: 1.1 }, odkrywa_wdrozenie: ['inwentaryzacja'], naprawa: { ruch: 'zmien_pin' } },
     kopia_scada_u_integratora: { opis: 'projekty SCADA i programy sterowników są tylko na laptopie integratora',
-      prawda: true, zna: 'produkcja' },
-    oczyszczalnia_intruz: { opis: 'w sieci przejmowanej oczyszczalni od miesięcy siedzi broker dostępu', prawda: 0.6 },
+      prawda: true, zna: 'produkcja', ciaglosc: true, naprawa: { ruch: 'wdroz:backup', p: { zakres: 'biuro_ot', nosnik: 'offline' } } },
+    oczyszczalnia_intruz: { opis: 'w sieci przejmowanej oczyszczalni od miesięcy siedzi broker dostępu', prawda: 0.6, widoczny_od_sprawy: 'S_przejecie' },
   },
+
+  // ── DECYZJE CYKLICZNE (data/cykliczne.js, proto/cykl.js) ──
+  // Certyfikaty i domeny: `pierwszy` — miesiąc kampanii, `co` — okres w miesiącach, `auto` — da
+  // się odnawiać automatycznie (TLS). Bez ewidencji część wygasa „po cichu" (nikt nie wiedział).
+  certyfikaty: [
+    { id: 'ebok_tls', nazwa: 'certyfikat TLS e-BOK', pierwszy: 5, co: 12, auto: true,
+      skutek: { opis: 'mieszkańcy widzą „połączenie niebezpieczne", płatności online stoją, telefony do BOK', reputacja: -3, pln: 4000, dzial: { bok: { zaufanie: -0.1 } } } },
+    { id: 'vpn_tls', nazwa: 'certyfikat bramy VPN (terenowcy, integrator)', pierwszy: 9, co: 12, auto: true,
+      skutek: { opis: 'terenowcy i integrator bez dostępu — ktoś „tymczasowo" otworzy coś bokiem', mandat: -2, pln: 6000,
+        dzial: { siec: { zaufanie: -0.1 }, produkcja: { zaufanie: -0.1 } }, presja: ['produkcja', 'zdalny_integrator', 0.3] } },
+    { id: 'domena', nazwa: 'domena wodnik-rzecznow.pl (poczta i strona)', pierwszy: 11, co: 12, auto: false,
+      skutek: { opis: 'poczta i strona przestają działać na dwa dni, a domenę próbuje wykupić ktoś obcy', reputacja: -6, mandat: -4, pln: 15000 } },
+    { id: 'podpis_prezesa', nazwa: 'kwalifikowany podpis elektroniczny prezesa', pierwszy: 14, co: 24, auto: false,
+      skutek: { opis: 'zarząd nie podpisze w terminie dokumentów urzędowych i umów', mandat: -3 } },
+  ],
+  // Koniec wsparcia producenta: `wektory` — ryzyko, dopóki nikt nic nie zrobi; `ot` — zmiana na stacji.
+  koniec_wsparcia: [
+    { id: 'win10_inz', nazwa: 'system stacji inżynierskich SCADA', m: 7, ot: true, wektory: { podatnosc: 1.3, uslugi: 1.1 }, pln: 28000, h: 14, pln_wsparcie: 9000,
+      opis: 'Stacje inżynierskie SCADA działają na systemie po końcu wsparcia; płatne łatki rozszerzone drożeją, a nowsza wersja wymaga zgody producenta SCADA.' },
+    { id: 'serwer_fk', nazwa: 'serwer systemu finansowo-księgowego', m: 10, ot: false, wektory: { podatnosc: 1.2 }, pln: 18000, h: 10, pln_wsparcie: 7000,
+      opis: 'System operacyjny serwera księgowości wychodzi ze wsparcia producenta w tym miesiącu.' },
+    { id: 'router_przepomp', nazwa: 'routery w przepompowniach', m: 16, ot: true, wektory: { podatnosc: 1.2, uslugi: 1.15 }, pln: 22000, h: 12, pln_wsparcie: 6000,
+      opis: 'Producent routerów w przepompowniach kończy wydawanie aktualizacji dla tej serii.' },
+  ],
 
   // ── OBSERWACJE (informacja, nie pytanie; reżyser wybiera je według diagnozy) ──
   // wymuszona: [od, do] — pojawia się w pierwszym miesiącu okna (jeśli warunek); inaczej okno
@@ -352,6 +379,61 @@ module.exports = {
       // Bez Twojej decyzji operator decyduje sam — pół na pół.
       domyslnie: (k, a) => (a.rnd() < 0.5 ? (podanieHasla(a), 'operator podał hasło') : 'operator odmówił na własną rękę'),
     },
+
+    // ── ZMIANY FIRMY: rozwój, cięcia, odejścia (w każdej organizacji, nie tylko w tej) ──
+    S_rozbudowa: {
+      tytul: 'Nowe osiedle Zielone Wzgórze: trzy przepompownie i nowe stanowiska', od: 'Zarząd', termin: 1, problemy: ['uslugi', 'zasoby'], cele: ['E4'],
+      tresc: 'Gmina oddaje osiedle: 3 nowe przepompownie z telemetrią po 4G (od wykonawcy sieci) i 10 stanowisk w BOK na nowych mieszkańców. Start za miesiąc.',
+      czasowniki: {
+        wlacz: { opis: 'Włączyć od pierwszego dnia w procesy: ewidencja, konfiguracja z szablonu, MFA, kopie (szybciej z ewidencją)',
+          koszt: (k, p, a) => ({ h: a.dziala('inwentaryzacja') ? 4 : 12 }),
+          wykonaj: (k, p, a) => { a.zasoby(13); a.ryzyko('rozbudowa', { uslugi: 1.15 }, 0.2, 'rozbudowa'); return 'Nowe urządzenia w ewidencji i w procesach od pierwszego dnia; telemetria przez prywatny APN.'; } },
+        przez_msp: { opis: 'Zlecić włączenie firmie administrującej (MSP)', h: 2, pln: 5000,
+          dostepny: (k, p, a) => (a.dziala('msp') ? null : 'nie masz firmy administrującej (MSP)'),
+          wykonaj: (k, p, a) => { a.zasoby(13); a.ryzyko('rozbudowa', { uslugi: 1.15 }, 0.3, 'rozbudowa'); return 'MSP włącza nowe stanowiska; telemetrię konfiguruje wykonawca według Twoich wymagań.'; } },
+        nic: { opis: 'Niech wykonawca i BOK zrobią po swojemu', h: 0, wykonaj: (k, p, a) => skutkiRozbudowy(a) },
+      },
+      domyslnie: (k, a) => skutkiRozbudowy(a),
+    },
+
+    S_ciecie: {
+      tytul: 'Gmina tnie dotację — zarząd tnie budżety', od: 'Zarząd', termin: 0, problemy: ['budzet'], cele: ['E1'],
+      tresc: 'Gmina obniża dopłatę do taryfy. Zarząd tnie wszystkie budżety o 20% do końca roku. „Bezpieczeństwo też — chyba że Pan/Pani pokaże, czego nie możemy ruszyć."',
+      czasowniki: {
+        przyjmij: { opis: 'Przyjąć cięcie (sam wycofasz to, co najmniej ważne)', h: 0,
+          wykonaj: (k, p, a) => { const b = a.budzetMn(0.8); return `Budżet roku −20% (teraz ${Math.round(b / 1000)} tys. zł); kolejny rok startuje od tej kwoty.`; } },
+        argumentuj: { opis: 'Pokazać zarządowi ryzyko w złotówkach (z rejestrem ryzyk działa najlepiej)', h: 4,
+          wykonaj: (k, p, a) => {
+            const mn = a.dziala('ryzyko') ? 0.95 : k.wskazniki.mandat >= 50 ? 0.88 : 0.8;
+            const b = a.budzetMn(mn);
+            return mn > 0.9 ? `Rejestr ryzyk przekonał zarząd: cięcie tylko 5% (budżet ${Math.round(b / 1000)} tys. zł).`
+              : mn > 0.8 ? 'Zarząd Ci ufa: cięcie 12%.' : 'Bez liczb trudno bronić — cięcie 20%, jak wszystkim.';
+          } },
+        zaproponuj: { opis: 'Samemu wskazać cięcia (−15% zamiast −20%; zarząd docenia)', h: 3,
+          wykonaj: (k, p, a) => { a.budzetMn(0.85); a.wskaznik('mandat', 2); return 'Zarząd przyjął Twoją listę: −15%. Wycofaj teraz to, co zaproponowałeś (x wycofaj:…).'; } },
+      },
+      domyslnie: (k, a) => { a.budzetMn(0.8); return 'cięcie 20% weszło bez dyskusji'; },
+    },
+
+    S_odejscie: {
+      tytul: 'Pani Jola z IT odchodzi z końcem miesiąca', od: 'Kadry i Administracja', termin: 1, problemy: ['ludzie'], cele: ['E3'],
+      tresc: 'Druga połowa IT (helpdesk, konta, drukarki, „wszystko, co się zepsuje") odchodzi do większej firmy. Zostaje 20 h miesięcznie pracy, którą ktoś musi robić.',
+      czasowniki: {
+        zatrudnij: { opis: 'Rekrutacja następczyni na pół etatu (3 miesiące luki — wtedy helpdesk jest Twój; potem 5500 zł/mies. z budżetu)', h: 8,
+          koszt: (k, p, a) => ({ h: 8, msc: 5500 }),
+          wykonaj: (k, p, a) => { a.hUtrata(20, 3, 'helpdesk do czasu zatrudnienia'); a.kosztStaly(5500, 3, 'pół etatu helpdesku'); return 'Rekrutacja ruszyła. Do czasu zatrudnienia helpdesk spada na Ciebie.'; } },
+        msp: { opis: 'Przenieść helpdesk do firmy administrującej (MSP)',
+          koszt: (k, p, a) => ({ h: 4, msc: a.dziala('msp') || k.obiekty.msp?.stan === 'projekt' ? 3000 : 10000 }),
+          wykonaj: (k, p, a) => {
+            if (!a.dziala('msp') && k.obiekty.msp?.stan !== 'projekt') a.wdrozZeSprawy('msp');
+            a.cena('msp', 1.4);
+            return 'Helpdesk przechodzi do MSP (umowa rozszerzona o ok. 40%).';
+          } },
+        przejmij: { opis: 'Przejąć jej pracę samemu (−20 h miesięcznie na bezpieczeństwo, na stałe)', h: 0,
+          wykonaj: (k, p, a) => { a.hUtrata(20, 999, 'helpdesk po odejściu'); return 'Od teraz drukarki i konta są Twoje.'; } },
+      },
+      domyslnie: (k, a) => { a.hUtrata(20, 999, 'helpdesk po odejściu'); return 'nikt nic nie zrobił — jej praca spadła na Ciebie (−20 h/mies.)'; },
+    },
   },
 
   // ── OŚ KAMPANII (reżyser wybiera moment w oknie) ──
@@ -373,6 +455,10 @@ module.exports = {
     { id: 'F_haktywisci2', typ: 'fala', okno: [15, 20], ciezar: 0.8, opis: 'druga fala haktywistów: DDoS na e-BOK i próba na przepompownię' },
     { id: 'S_emerytura', typ: 'sprawa', okno: [17, 17], ciezar: 0.3 },
     { id: 'S_falszywy_komunikat', typ: 'sprawa', okno: [19, 21], ciezar: 0.6 },
+    // Zmiany firmy (rozwój, cięcia, odejścia) — decyzje, których nie da się „odhaczyć" na starcie.
+    { id: 'S_rozbudowa', typ: 'sprawa', okno: [10, 13], ciezar: 0.3 },
+    { id: 'S_odejscie', typ: 'sprawa', okno: [11, 16], ciezar: 0.3 },
+    { id: 'S_ciecie', typ: 'sprawa', okno: [15, 18], ciezar: 0.4 },
     // 🔵 Podmiot ważny nie ma ustawowego audytu okresowego — audyt zamykający kampanię zleca rada
     // nadzorcza (docs/02-…). Kampania ma skończoną liczbę miesięcy i zawsze kończy się audytem.
     { id: 'A_kontrola', typ: 'final', okno: [23, 24], ciezar: 0.8,
@@ -381,6 +467,12 @@ module.exports = {
 };
 
 // ── Skutki spraw złożonych (wspólne dla czasownika i rozstrzygnięcia domyślnego) ──
+// Rozbudowa „po swojemu": urządzenia poza ewidencją, telemetria z publicznym IP od wykonawcy.
+function skutkiRozbudowy(a) {
+  a.nieznane(13);
+  a.ryzyko('rozbudowa', { uslugi: 1.15 }, 1, 'rozbudowa');
+  return 'Wykonawca podłączył telemetrię po swojemu (publiczne IP, domyślne hasła); nowe stanowiska są poza ewidencją.';
+}
 function polaczOczyszczalnie(k, a, s) {
   a.flaga('oczyszczalnia_polaczona', true);
   const zapora = a.dziala('segmentacja') || a.dziala('ngfw');

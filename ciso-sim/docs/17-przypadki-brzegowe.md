@@ -247,3 +247,44 @@ a/b/c zniknęły (`18-…`), więc część reguł z 17.5 zmieniła formę:
 Nieuczciwość nadal kosztuje rząd wielkości więcej niż błąd. Odstępstwa w S03 u przygotowanego
 gracza kosztują 0 (S03 to tylko próba) — dlatego cennik liczy je razem z brakiem rozpoznania.
 Pełna tabela strategii: `18-…`, 18.10.
+
+## 17.9. Piąta runda: „wszystko naraz" przy skończonych zasobach, decyzje w każdym okresie, doradca
+
+Pytanie właściciela (13.10.2026): jak „wszystko naraz" mogło mieć 780 punktów, skoro zasoby są
+skończone, a decyzje przychodzą w każdym okresie (odnowienia certyfikatów, rozwój i kurczenie się
+firmy, oddanie czegoś na zewnątrz, zatrudnienie pod proces)? Odpowiedź i poprawki: `18-…`, 18.12;
+doradztwo: 18.13.
+
+**Absurdy, które wyszły po drodze, i poprawki:**
+1. **Zamówienie całego katalogu kosztowało 2 h na pozycję i nic więcej.** Teraz każdy projekt
+   w toku zjada 2 h gracza co miesiąc, a ponad 3 równoległe obniżają wydajność zespołu.
+2. **Odejście osoby z IT nic nie kosztowało** (+1 w cenniku): utracone godziny odejmowałem
+   zespołowi, który miał zapas. Teraz to obciążenie GRACZA (helpdesk zjada jego godziny na
+   początku miesiąca), a zastępstwo ma koszt stały z budżetu.
+3. **Cięcie budżetu nic nie kosztowało** (0): cięło tylko luz, którego mądry i tak nie wydawał.
+   Teraz tnie budżet roku (nie niżej niż to, co już zakontraktowane), a kolejny rok startuje
+   od nowej kwoty.
+4. **Pierwsze wyceny doradcy były szumem Monte Carlo** (pentest „odradzał" moduł ekspozycji, bo
+   przy 24 przebiegach wyszło −24 tys. zł). Teraz 150 przebiegów na wspólnych ziarnach;
+   pozostały szum to świadomy błąd taniej firmy (±40%).
+5. **Doradca znał intruza w oczyszczalni, zanim ktokolwiek mówił o przejęciu.** Fakt ma
+   `widoczny_od_sprawy` — do znalezienia dopiero, gdy sprawa się pojawi.
+
+**Cennik nowych odstępstw** (mądry 921, 20 ziaren, `proto/wyniki-cennik-2026-10-13.txt`):
+
+| Odstępstwo | ΔWynik | Komentarz |
+|---|---|---|
+| cały katalog zamówiony w 1. miesiącu | **−309** | więcej niż kłamstwo w ankiecie (−194) |
+| odejście z IT: „przejmę sam" | −10 | −20 h co miesiąc na zawsze, nadgodziny |
+| koniec wsparcia: „zostawić jak jest" | −10 | głównie praktyka; ryzyko podatności przy działających łatkach i segmentacji jest małe |
+| cięcie budżetu bez argumentów | −3 | mądry ma już większość kontroli — boli tych, którzy dopiero budują |
+| rozbudowa „po swojemu" wykonawcy | −1 | segmentacja mądrego chroni; praktyka −0,8 pp |
+| certyfikaty odnawiane ręcznie co rok | −1 | **poprawnie ≈ 0**: ręczne odnawianie to dobra praktyka, automatyzacja tylko oszczędza godziny |
+| umowy przedłużane bez negocjacji | ≈ 0 | kosztuje złotówki, nie wynik — dopóki budżet nie jest napięty |
+| SZBI z pudełka | +13 | wcześniej −5…−8: tańszy i szybszy SZBI zostawia budżet na inne decyzje; zasada „na miarę" dalej go ocenia, audyt — „drobna" |
+
+**Decyzje przyjęte świadomie:**
+- Mądry spadł z 943 do 921, a jego morale z 63 do 43 — decyzje cykliczne i odejście z IT
+  realnie zjadają czas. Gra nie ma „stanu ustalonego", w którym dobry gracz tylko czeka.
+- Laik z doradcą (624) jest lepszy od laika samego (547), ale daleko za mądrym: raport mówi,
+  co i w jakiej kolejności, nie prowadzi spraw, testów i incydentów.

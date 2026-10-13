@@ -108,7 +108,8 @@ function kosztMiesieczny(st, id) {
   const u = kontrola[id].utrzymanie;
   let pln = (u.pln || 0) + (u.pln_na_stanowisko || 0) * st.zasobyZnane + (u.pln_na_uzytkownika || 0) * st.uzytkownicy;
   if (u.pln_min) pln = Math.max(pln, u.pln_min);
-  return pln;
+  // Cena z umowy (kampania: indeksacja przy odnowieniu, wynik negocjacji). Brak wpisu = cennik.
+  return pln * (st.ceny?.[id] ?? 1);
 }
 
 // Symuluje miesiąc st.m i przesuwa licznik. Zwraca zdarzenia, które kampania zamienia
@@ -160,6 +161,8 @@ function zakonczMiesiac(st) {
     const nowe = m - st.aktywne[k.id] < STROJENIE_MIES ? 2 : 1;
     alerty += k.alerty * (st.zasobyZnane / 100) * nowe;
   }
+  // Strojenie reguł w kampanii (mniej szumu). Domyślnie 1 — Monte Carlo liczy jak wcześniej.
+  alerty *= st.mod.alerty ?? 1;
   const zdjete = 1 - czynne.filter(k => k.triage).reduce((a, k) => a * (1 - k.triage * skut[k.id]), 1);
   const triageH = alerty * H_NA_ALERT * (1 - zdjete);
   let jakoscOps = 1;

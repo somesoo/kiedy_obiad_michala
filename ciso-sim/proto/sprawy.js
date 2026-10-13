@@ -73,11 +73,13 @@ function dodajSygnal(k, s) {
   return otworz(k, { rodzaj: 'sygnal', dzial: s.dzial, intruz: s.intruz, tytul: `Sygnał: ${d.nazwa}`, od: d.szef, tresc: s.tekst,
     termin: k.st.m + 1, cele: ['E5'] });
 }
-function dodajScenariuszowa(k, sid) {
+// `dane` — której umowy / którego certyfikatu dotyczy sprawa cykliczna (data/cykliczne.js).
+function dodajScenariuszowa(k, sid, dane = {}) {
   const def = k.def.sprawy[sid];
   if (!def) throw new Error(`brak sprawy ${sid} w kampanii`);
-  return otworz(k, { rodzaj: 'scenariusz', sid, tytul: def.tytul, od: def.od, tresc: typeof def.tresc === 'function' ? def.tresc(k) : def.tresc,
-    termin: k.st.m + (def.termin || 0), cele: def.cele || [], problemy: def.problemy || [], dane: {} });
+  const tekst = x => (typeof x === 'function' ? x(k, dane) : x);
+  return otworz(k, { rodzaj: 'scenariusz', sid, tytul: tekst(def.tytul), od: tekst(def.od), tresc: tekst(def.tresc),
+    termin: k.st.m + (def.termin || 0), cele: def.cele || [], problemy: def.problemy || [], dane: { ...dane } });
 }
 
 // ── CZASOWNIKI ──
@@ -159,7 +161,7 @@ function odpowiedz(k, sprawaId, v, p = {}) {
   k.akcje.push({ t: 'sprawa', id: sprawaId, v, p });
   Z.pobierz(k, c);
   const wynik = wykonajCzasownik(k, s, v, p);
-  k.historia.push({ m: k.st.m, t: 'sprawa', id: s.id, rodzaj: s.rodzaj, sid: s.sid, dzial: s.dzial, ini: s.ini, v, p, intruz: !!s.intruz });
+  k.historia.push({ m: k.st.m, t: 'sprawa', id: s.id, rodzaj: s.rodzaj, sid: s.sid, klucz: s.dane?.klucz, dzial: s.dzial, ini: s.ini, v, p, intruz: !!s.intruz });
   if (wynik.zamyka !== false) zamknij(k, s, v);
   k.log('gracz', `${s.tytul}: ${v}${Object.keys(p).length ? ` [${Object.entries(p).map(([n, x]) => `${n}=${x}`).join(', ')}]` : ''} → ${wynik.tekst}`);
   return wynik.tekst;
@@ -223,7 +225,7 @@ function terminy(k) {
     else if (s.rodzaj === 'odkrycie') tekst = 'brak decyzji → zostaje bez właściciela';
     else if (s.rodzaj === 'sygnal') tekst = 'nikt nie sprawdził';
     else tekst = k.def.sprawy[s.sid].domyslnie(k, a, s);
-    k.historia.push({ m: k.st.m, t: 'sprawa_domyslnie', id: s.id, rodzaj: s.rodzaj, sid: s.sid, dzial: s.dzial, ini: s.ini, intruz: !!s.intruz });
+    k.historia.push({ m: k.st.m, t: 'sprawa_domyslnie', id: s.id, rodzaj: s.rodzaj, sid: s.sid, klucz: s.dane?.klucz, dzial: s.dzial, ini: s.ini, intruz: !!s.intruz });
     k.log('swiat', `${s.tytul}: ${tekst}`);
     zamknij(k, s, null, true);
   }

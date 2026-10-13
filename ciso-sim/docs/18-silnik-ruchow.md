@@ -176,31 +176,35 @@ kolejności; miesiąc zamyka sam (`n`).
 | `m [kategoria\|szukaj]` | wszystkie ruchy — także niedostępne, z powodem („brak godzin…", „najpierw wdrożenie") |
 | `x <ruch> k=v …` | ruch: `x wdroz:edr zakres=biuro_serwery tryb=wykrywaj`, `x test:backup`, `x zmien:edr tryb=blokuj`, `x wycofaj:edr`, `x rozmowa dzial=produkcja` |
 | `o` | moje wdrożenia: stan, parametry, przedział skuteczności (zawęża go przegląd/test), znane usterki |
+| `p` | doradztwo (18.13): cennik tematów dla tej firmy, zlecenia w toku, raporty z rekomendacjami; zlecenie: `x zlec_doradcy temat=ot firma=renomowana tryb=zwykly` |
 | `s`, `a <nr> <czasownik> k=v …` | skrzynka spraw i odpowiedź: `a 1 warunki warunki=brama,konta` |
 | `i` | incydent: numer/id akcji w dowolnej kolejności, `c <h>` czekaj, `k` koniec fazy ostrej |
 | `d`, `q` | dziennik (prowadzący), zapisz i wyjdź |
 
 ## 18.10. Wyniki na nowym silniku (20 ziaren, `proto/wyniki-*-2026-10-13.txt`)
 
-| Strategia | Straty | Audyt /60 | Praktyka | Indeks | **Wynik** | Uwagi |
-|---|---|---|---|---|---|---|
-| mądry (rozpoznanie, „tanie i ważne", pilotaże, testy, przeglądy, warunki) | 230 tys. | 59 | 95% | 933 | **941** | |
-| wszystko naraz (cały katalog w m. 1, domyślne parametry) | 390 tys. | 29 | 82% | 744 | 780 | kolejka projektów, budżet, brak dowodów |
-| pracoholik (przeglądy co miesiąc, polowanie, szkolenia) | 226 tys. | 55 | 73% | 808 | 771 | morale 17 → wypalenie |
-| odmawiający (mądre ruchy, odmowa każdej prośbie) | 315 tys. | 58 | 72% | 824 | 774 | zaufanie działów 0,01 |
-| skąpiec (tylko to, co nie kosztuje złotówek) | 323 tys. | 23 | 72% | 718 | 721 | |
-| rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 557 tys. | 39 | 52% | 622 | 573 | 16 ukrytych obejść, awarie OT |
-| paranoik (tylko polowanie i sygnały) | 482 tys. | 10 | 58% | 397 | 488 | |
-| potakiwacz (wyjątki dla zarządu, zgoda na wszystko, dokumenty wstecz) | 240 tys. | 38 | 58% | 325 | 325 | sufit w 20/20 |
-| losowy (fuzzer) | 959 tys. | 17 | 24% | 330 | 297 | niezmienniki OK |
-| kłamca (mądry + upiększone raporty, ankieta, dokumenty wstecz) | 229 tys. | 47 | 42% | 250 | **250** | odwołany w 18/20 |
-| bierny / odkładacz | 1,77 mln | 10 | 0% | 129 | 65 | odwołany w 20/20 |
+Stan po 18.12–18.13 (koordynacja projektów, decyzje cykliczne, doradztwo).
 
-Cennik pojedynczych odstępstw w grze mądrego: `17-…`, 17.8.
+| Strategia | Straty | Audyt /60 | Morale | Praktyka | Indeks | **Wynik** | Uwagi |
+|---|---|---|---|---|---|---|---|
+| mądry (rozpoznanie, „tanie i ważne", ≤ 3 projekty naraz, pilotaże, testy, decyzje cykliczne) | 204 tys. | 58 | 43 | 94% | 905 | **921** | |
+| odmawiający (mądre ruchy, odmowa każdej prośbie) | 209 tys. | 57 | — | 75% | 824 | 786 | zaufanie działów 0,01 |
+| pracoholik (przeglądy co miesiąc, polowanie, szkolenia) | 331 tys. | 53 | 16 | 68% | 740 | 709 | wypalenie |
+| **laik z doradcą** (robi tylko to, co mówi raport doradcy) | 448 tys. | 43 | 52 | 54% | 706 | **624** | 18.13 |
+| wszystko naraz (cały katalog w m. 1) | 952 tys. | 19 | 23 | 76% | 447 | 591 | 18.12 — z 16 zamówień działają 2–4 |
+| skąpiec (tylko to, co nie kosztuje złotówek) | 665 tys. | 25 | 75 | 62% | 535 | 578 | |
+| rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 455 tys. | 38 | 75 | 50% | 592 | 547 | 17 ukrytych obejść, awarie OT, certyfikaty wygasają |
+| paranoik | 494 tys. | 10 | 65 | 48% | 348 | 416 | |
+| potakiwacz | 179 tys. | 37 | 49 | 64% | 340 | 340 | sufit w 20/20 |
+| losowy (fuzzer) | 804 tys. | 21 | 47 | 28% | 362 | 322 | niezmienniki OK |
+| kłamca | 254 tys. | 42 | 35 | 50% | 250 | **250** | odwołany w 18/20 |
+| bierny / odkładacz | 1,70 mln | 10 | 72 | 0% | 131 | 66 | odwołany w 20/20 |
+
+Cennik pojedynczych odstępstw w grze mądrego: `17-…`, 17.8–17.9.
 
 ## 18.11. Decyzje i świadome uproszczenia
 
-- **Skąpiec wygrywa z rozsądnym laikiem** (721 vs 573). To nie błąd: procesy bez narzędzi
+- **Skąpiec wygrywa z rozsądnym laikiem** (578 vs 547). To nie błąd: procesy bez narzędzi
   (inwentaryzacja, procedura płatności, rozmowy, szkolenie kierownika) wygrywają z narzędziami
   bez procesu (EDR na OT bez pilotażu, kopie bez testów, „tak, ale" z każdym warunkiem). To jest
   lekcja, której gra ma uczyć.
@@ -213,3 +217,97 @@ Cennik pojedynczych odstępstw w grze mądrego: `17-…`, 17.8.
 - **Wypalenie** (morale < 25): limit godzin ×0,7 i słabsze wdrożenia (×0,85) — pracoholizm nie
   może być strategią dominującą.
 - **Automaty widzą tylko to, co gracz** (`apiAuto`): fakty znane, wiedza o obiektach — nie prawdę.
+
+## 18.12. Skończone zasoby: dlaczego „wszystko naraz" nie działa
+
+Pytanie właściciela (13.10.2026): jak strategia „wszystko naraz" mogła mieć 780 punktów, skoro
+zasoby są skończone, a decyzje przychodzą w każdym okresie?
+
+**Co robiła.** W 1. miesiącu zamawiała cały katalog. Przechodziło to, na co starczyło budżetu
+roku: 16 tanich kontroli za 61 tys. zł z 90 tys. Każde zamówienie kosztowało gracza tylko 2 h
+planowania, a zespół wdrażał projekty po kolei przez 14 miesięcy. Model nie znał trzech rzeczy,
+które w życiu zabijają taki plan — dlatego wynik był za dobry.
+
+**Co doszło** (`proto/zasoby.js`):
+
+1. **Koordynacja projektów w toku**: każdy projekt co miesiąc zjada **2 h gracza** (dostawca,
+   harmonogram, odbiory, zmiany zakresu), zanim gracz zrobi cokolwiek nowego. 16 projektów to
+   32 z 40 godzin — nie zostaje czasu na nic innego, a nadgodziny palą morale.
+2. **Przełączanie kontekstu**: zespół, który ciągnie naraz więcej niż 3 wdrożenia, traci 8%
+   godzin za każde ponad trzy (najwyżej 40%) — 🔵 uproszczenie reguły znanej z zarządzania
+   projektami: równoległa praca nie skraca kolejki, tylko ją rozmywa. Nagłówek miesiąca pokazuje,
+   ile czasu zespół traci.
+3. **Decyzje w każdym okresie** (`data/cykliczne.js`, `proto/cykl.js`) — skrzynka spraw dostaje
+   sprawy ze STANU firmy, nie ze skryptu:
+   - **odnowienia umów** w rocznicę: przedłużyć (+8% indeksacji), negocjować (z wynikami
+     przeglądów/testów −10% i naprawa znanej usterki w ramach umowy; bez dowodów +5%), przetarg na
+     innego dostawcę (−20%, ale wdrożenie od nowa: nowa jakość, nowe usterki, zero historii),
+     wypowiedzieć; brak decyzji = automatyczne przedłużenie z podwyżką,
+   - **certyfikaty i domeny** (e-BOK, VPN, domena, podpis kwalifikowany prezesa): odnowić,
+     zautomatyzować TLS raz na zawsze, oddać MSP; **bez inwentaryzacji ok. 35% z nich wygasa
+     „po cichu"** — nikt nie wiedział, że istnieją, aż przestały działać,
+   - **koniec wsparcia producenta** (stacje inżynierskie SCADA, serwer księgowości, routery
+     w przepompowniach): wymiana (na stacjach z pilotażem albo „od razu" z ryzykiem awarii),
+     izolacja (wymaga segmentacji), płatne łatki na rok (sprawa wraca), akceptacja zarządu
+     albo „zostaw" (ryzyko w rejestrze),
+   - **proces bez właściciela**: alerty leżą od dwóch miesięcy → zatrudnić, zlecić MDR, stroić
+     reguły; zespół nie nadąża (4+ projekty albo projekt od pół roku) → MSP, rekrutacja,
+     priorytety z zarządem (wstrzymanie ostatniego projektu), nadgodziny zespołu,
+   - **zmiany firmy** (kampania): rozbudowa o nowe osiedle (włączyć w procesy od pierwszego dnia
+     albo wykonawca „po swojemu" = urządzenia poza ewidencją), cięcie budżetu o 20% (przyjąć,
+     bronić rejestrem ryzyk, samemu zaproponować cięcia), odejście osoby z IT (rekrutacja
+     z kosztem stałym, przeniesienie do MSP, „przejmę sam" = −20 h co miesiąc na zawsze).
+
+   Mądry ma decyzję w skrzynce w ok. 21 z 24 miesięcy (test pilnuje ≥ 18).
+4. **Zasady**: najwyżej 5 wdrożeń w toku naraz; koniec wsparcia ma decyzję; certyfikaty na czas;
+   odnowienie to decyzja, nie automat; alerty mają właściciela; zmiany firmy z bezpieczeństwem
+   przy stole.
+
+**Wynik**: „wszystko naraz" spada z 780 do **591** (Indeks z 744 do 447). Z 16 zamówionych
+kontroli do końca kampanii działają 2–4, morale spada do 23. Odstępstwo „cały katalog w 1.
+miesiącu" w grze mądrego kosztuje **−309** punktów — więcej niż kłamstwo w ankiecie
+ubezpieczyciela. Lekcja: **szybciej kończy ten, kto zaczyna mniej naraz**.
+
+## 18.13. Doradztwo: kup czyjś czas i oczy
+
+Każdy CISO może zlecić temat firmie zewnętrznej (`x zlec_doradcy temat=… firma=… tryb=…`,
+cennik i raporty: `p`; dane: `data/doradztwo.js`, silnik: `proto/doradztwo.js`).
+
+| Temat | Czas (zwykły / pilny) | Cena lokalna / renomowana* | Co robi |
+|---|---|---|---|
+| `ogolny` — ocena dojrzałości i luk | 3 / 1 mies. | 27 / 68 tys. zł | wszystko płycej (60% głębokości) + obowiązki prawne |
+| `ekspozycja` — pentest z internetu, dostęp zdalny | 1 / 0 mies. | 13 / 33 tys. zł | fakty widoczne z internetu, dostępy zdalne |
+| `ot` — audyt OT/SCADA | 2 / 1 mies. | 23 / 57 tys. zł | stacja, PIN-y, integrator + zgodność wariantów OT z producentem (jak pilotaż) |
+| `ciaglosc` — kopie, odtwarzanie, praca ręczna | 2 / 1 mies. | 16 / 39 tys. zł | **testuje** kopie, BCP i plan (liczy się jako test — dowód dla audytu) |
+| `dostep`, `dostawcy`, `zgodnosc`, `ludzie`, `platnosci` | 1–2 / 0–1 mies. | 7–42 tys. zł | konta i MFA; integrator i umowy; KSC/NIS2; obejścia działów (wywiady); BEC |
+
+\* dla Wodnika (64 osoby); cena skaluje się z pierwiastkiem liczby pracowników, tryb pilny ×1,5.
+🔵 Rzędy wielkości z polskiego rynku MŚP 2026, nie cennik konkretnej firmy (`02-…`).
+
+**Wykonawca to decyzja**: lokalna firma znajduje ok. 55% tego, co jest do znalezienia, a jej
+szacunki mają błąd ±40% (kolejność rekomendacji bywa zła); renomowana — 90% i ±10%, za 2,5×
+cenę. Zlecenie kosztuje budżet roku — w 2026 r. pełna ocena od renomowanej firmy się nie mieści.
+
+**Raport** przychodzi pod koniec miesiąca realizacji i:
+1. **odkrywa** ukryte rzeczy z prawdy silnika (fakty świata, usterki, rozjechaną konfigurację,
+   obejścia działów — te trafiają do skrzynki jako odkrycia),
+2. **wycenia** każdą możliwą poprawę na modelu: ekspozycja (oczekiwane straty w roku, 150
+   przebiegów na wspólnych ziarnach) przed i po zmianie, zakłócenie dostaw wody liczone jak
+   dzień przychodu. Wycena idzie na kopiach stanu (`coJesli`) — nie rusza kampanii ani losowości,
+3. **układa rekomendacje od największej poprawy obecnej sytuacji** — pierwsza oznaczona
+   „★ NAJWIĘKSZA POPRAWA", każda z kosztem i **gotowym poleceniem** (`x odetnij_hmi`,
+   `x wdroz:edr zakres=biuro_serwery tryb=wykrywaj`, „skrzynka → legalizuj warunki=…"),
+4. osobno wypisuje **obowiązki prawne** z terminami (nie zmniejszają strat, ale mają karę).
+
+Przykład (ocena luk, renomowana firma, m. 4): ★ zamknąć panel HMI (−89 tys. zł/rok, 4 h) →
+EDR (−83 tys.) → kopia SCADA u nas (−61 tys.) → segmentacja OT (−59 tys.) → BCP → MFA; obowiązki:
+wpis do wykazu (m. 6), SZBI, rejestr ryzyk, zgłaszanie incydentów, szkolenie kierownika.
+
+**Zasada**: najważniejsza rekomendacja wykonana w ciągu 3 miesięcy („raport nie do szuflady" —
+zapłacony raport, którego nikt nie wdrożył, to też dowód dla audytora, że o ryzyku wiedziano).
+Zlecenie pentestu albo audytu OT w miesiącu ostrzeżenia CERT liczy się jako reakcja.
+
+**Ile to daje**: laik, który robi WYŁĄCZNIE to, co mówi raport (pentest lokalnej firmy w m. 1,
+ocena luk w m. 2, druga ocena od renomowanej w m. 11), ma **624** pkt wobec **547** laika
+działającego sam — ale daleko za mądrym (921). Doradca odpowiada „co" i „w jakiej kolejności";
+nie prowadzi za gracza spraw działów, incydentów, testów i przeglądów.

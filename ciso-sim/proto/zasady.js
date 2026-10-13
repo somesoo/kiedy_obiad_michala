@@ -60,7 +60,8 @@ const ZASADY = [
     const m0 = k.flagi.ostrzezenie_cert;
     if (m0 === undefined) return [];
     const reakcja = h.H.find(e => e.t === 'ruch' && e.m >= m0 && e.m <= m0 + 1 &&
-      ['skan_ekspozycji', 'odetnij_hmi', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm'].includes(e.id));
+      (['skan_ekspozycji', 'odetnij_hmi', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm'].includes(e.id) ||
+        (e.id === 'zlec_doradcy' && ['ekspozycja', 'ot', 'ogolny'].includes(e.p?.temat))));
     return doMiesiaca(k, 'reakcja_na_ostrzezenie', 'E4', 3, 'Reakcja na ostrzeżenie dla sektora w ciągu miesiąca',
       'Ostrzeżenie z nazwą Twojego sektora to sygnał do działania od razu — panel HMI w internecie to dokładnie ten wzorzec.', m0 + 1, reakcja?.m);
   },
@@ -77,6 +78,8 @@ const ZASADY = [
   },
 
   // ── OT: najpierw bezpieczeństwo procesu ──
+  (k, h) => h.H.filter(e => e.t === 'ot_zmiana_eol').map(e => ({ id: `pilotaz_eol:${e.id}:${e.m}`, wynik: e.pilot ? 'spelniona' : 'naruszona', waga: 2, cel: 'E12', m: e.m,
+    opis: 'Wymiana systemu na stacji z pilotażem', dlaczego: 'Nowa wersja systemu albo routera na stacji to zmiana w OT jak każda inna — najpierw jedna stacja, potem reszta.' })),
   (k, h) => h.H.filter(e => e.t === 'ot_zmiana').map(e => {
     const kon = S.kontrola[e.id];
     const ok = kon.pilot && e.pilot;
@@ -215,6 +218,50 @@ const ZASADY = [
     return [{ id: 'plan_naprawczy', wynik: k.flagi.plan_naprawczy ? 'spelniona' : 'naruszona', waga: 1, cel: 'E7', m: k.st.m,
       opis: 'Przed audytem: lista luk z planem, właścicielami i terminami', dlaczego: 'Audytor widział setki firm z lukami. Plan z właścicielami to dowód, że system zarządzania działa.' }];
   },
+
+  // ── DECYZJE CYKLICZNE (data/cykliczne.js): rzeczy, które wracają co roku ──
+  (k) => [...k.cykl.wygasle.map(w => ({ id: `cert:${w.id}:${w.m}`, wynik: 'naruszona', waga: 1, cel: 'E12', m: w.m,
+    opis: `Certyfikat / domena odnowione na czas (${w.id})`,
+    dlaczego: w.zapomniany ? 'Bez ewidencji certyfikatów i domen nikt nie wie, co i kiedy wygasa — dowiadujesz się od klientów.'
+      : 'Wygasły certyfikat to przestój z własnej winy; odnowienie to dwie godziny, automatyzacja — raz na zawsze.' })),
+  ...k.cykl.odnowione.map(w => ({ id: `cert:${w.id}:${w.m}`, wynik: 'spelniona', waga: 1, cel: 'E12', m: w.m,
+    opis: `Certyfikat / domena odnowione na czas (${w.id})`, dlaczego: w.auto ? 'Automatyzacja zamieniła coroczne ryzyko w brak problemu.' : 'Odnowione przed terminem.' }))],
+  (k, h) => h.sprawy(e => e.sid === 'C_eol' && e.t !== 'sprawa_otwarta').map(e => {
+    const ok = ['modernizuj', 'izoluj', 'wsparcie', 'akceptuj'].includes(e.v);
+    return { id: `eol:${e.klucz}:${e.m}`, wynik: ok ? 'spelniona' : 'naruszona', waga: 2, cel: 'E4', m: e.m,
+      opis: `Koniec wsparcia ma decyzję (${e.klucz})`,
+      dlaczego: ok ? 'Wymiana, izolacja, płatne łatki albo świadoma akceptacja ryzyka przez zarząd — każda z nich to decyzja z właścicielem.'
+        : 'System bez łatek „bo działa" to podatność, która zostaje otwarta na zawsze — i nikt jej nie przyjął na siebie.' };
+  }),
+  (k, h) => h.sprawy(e => e.sid === 'C_alerty' && e.t !== 'sprawa_otwarta').map(e => ({
+    id: `alerty:${e.m}`, wynik: ['zatrudnij', 'mdr', 'strojenie'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: e.m,
+    opis: 'Proces obsługi alertów ma właściciela', dlaczego: 'Narzędzie, którego alertów nikt nie czyta, daje tylko poczucie bezpieczeństwa.' })),
+  (k, h) => h.sprawy(e => e.sid === 'C_odnowienie' && e.t !== 'sprawa_otwarta').map(e => ({
+    id: `odnowienie:${e.klucz}:${e.m}`, wynik: e.t === 'sprawa' ? 'spelniona' : 'naruszona', waga: 0.5, cel: 'E1', m: e.m,
+    opis: `Odnowienie umowy to decyzja, nie automat (${e.klucz})`,
+    dlaczego: 'Moment odnowienia to jedyna chwila, kiedy masz przewagę nad dostawcą: dowody z przeglądów, rabat, zmiana zakresu albo rezygnacja.' })),
+  // Raport doradcy nie do szuflady: najważniejsza rekomendacja zrobiona w ciągu 3 miesięcy.
+  (k, h) => h.H.filter(e => e.t === 'raport_doradcy' && e.top).flatMap(e => {
+    const zrobione = h.H.find(x => x.m >= e.m && x.m <= e.m + 3 && x.t === e.top.t && (x.id === e.top.id || (e.top.t === 'sprawa' && x.id === e.top.id)));
+    return doMiesiaca(k, `doradca:${e.temat}:${e.m}`, 'E1', 1, 'Najważniejsza rekomendacja doradcy wykonana w ciągu 3 miesięcy',
+      'Zapłacony raport w szufladzie to najdroższy dokument w firmie — i dowód dla audytora, że o ryzyku wiedziano.', e.m + 3, zrobione?.m);
+  }),
+  // Zmiany firmy: rozwój, cięcia, odejścia — bezpieczeństwo przy stole, kiedy firma się zmienia.
+  (k, h) => h.sprawy(e => e.sid === 'S_rozbudowa' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
+    id: 'rozbudowa', wynik: ['wlacz', 'przez_msp'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E4', m: e.m,
+    opis: 'Nowe obiekty w ewidencji i procesach od pierwszego dnia',
+    dlaczego: 'Urządzenia podłączone „po swojemu" przez wykonawcę to shadow IT z publicznym adresem — najtaniej włączyć je w procesy na starcie.' })),
+  (k, h) => h.sprawy(e => e.sid === 'S_ciecie' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
+    id: 'ciecie', wynik: ['argumentuj', 'zaproponuj'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E1', m: e.m,
+    opis: 'Cięcie budżetu z pokazaniem skutków',
+    dlaczego: 'Zarząd może ciąć — ale powinien wiedzieć, jakie ryzyko przez to przyjmuje. Cisza oznacza, że przyjmuje je nieświadomie.' })),
+  (k, h) => h.sprawy(e => e.sid === 'S_odejscie' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
+    id: 'odejscie', wynik: ['zatrudnij', 'msp'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: e.m,
+    opis: 'Odejście z IT ma zastępstwo (rekrutacja albo usługa)',
+    dlaczego: 'Gdy cudza praca spada na bezpieczeństwo, bezpieczeństwo przegrywa z drukarką — codziennie, po cichu.' })),
+  // Limit pracy w toku: więcej niż pięć wdrożeń naraz to kolejka, nie program.
+  (k, h) => (k.koniec && h.H.filter(e => e.t === 'ruch').length >= 12 ? [{ id: 'wip', wynik: (k.maxProjekty || 0) <= 5 ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: k.st.m,
+    opis: 'Najwyżej pięć wdrożeń w toku naraz', dlaczego: 'Każdy projekt w toku zjada godziny koordynacji, a zespół traci czas na przełączanie się. Szybciej kończy ten, kto zaczyna mniej naraz.' }] : []),
 
   // ── LUDZIE: zespół nie jedzie na nadgodzinach ──
   // Tylko dla gracza, który w ogóle pracował — brak nadgodzin u bezczynnego to nie zasługa.

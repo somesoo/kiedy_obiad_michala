@@ -29,6 +29,7 @@ tym, jak się skończyło.
 | Działy jako uczące się agenty + reżyser | `docs/15-…`, `proto/dzialy.js`, `proto/rezyser.js` |
 | **Kampania „Wodnik” (wodociągi) — grywalna w terminalu**, własne tempo, zapis/wczytanie | `docs/16-…`, `proto/kampania.js` |
 | **Silnik ruchów — gra bez quizu**: dowolne ruchy z parametrami, cykl życia kontroli, sprawy, incydenty bez drzewa, ocena zasadami | `docs/18-…`, `proto/ruchy.js`, `sprawy.js`, `incydent.js`, `zasady.js` |
+| **Skończone zasoby i decyzje w każdym okresie**: koordynacja projektów, odnowienia, certyfikaty, koniec wsparcia, zmiany firmy; **doradztwo** z raportem „od największej poprawy" | `docs/18-…` (18.12–18.13), `proto/cykl.js`, `proto/doradztwo.js`, `data/cykliczne.js`, `data/doradztwo.js` |
 | Testy automatyczne | `test/` — `node --test ciso-sim/test/*.test.js` |
 | Serwer, logowanie, front w przeglądarce | **nie ma** — patrz roadmapa |
 
@@ -53,7 +54,7 @@ tym, jak się skończyło.
 | [`docs/15-dzialy-i-rezyser.md`](docs/15-dzialy-i-rezyser.md) | działy firmy jako agenci (inicjatywy, pytaj/obejdź, uczenie, raporty) i reżyser (diagnoza, model gracza, rytm, przeciwnik) |
 | [`docs/16-kampania-wodociagi.md`](docs/16-kampania-wodociagi.md) | pierwsza kampania: ludzie, oś 24 miesięcy, wyniki stylów gry |
 | [`docs/17-przypadki-brzegowe.md`](docs/17-przypadki-brzegowe.md) | „test penetracyjny" gry: strategie-prowokacje, fuzzer, znalezione absurdy, poprawki, cennik złych decyzji |
-| [`docs/18-silnik-ruchow.md`](docs/18-silnik-ruchow.md) | silnik bez quizu: obiekty i cykl życia kontroli, ruchy, sprawy, incydent bez drzewa, zasady, komendy gry, wyniki |
+| [`docs/18-silnik-ruchow.md`](docs/18-silnik-ruchow.md) | silnik bez quizu: obiekty i cykl życia kontroli, ruchy, sprawy, incydent bez drzewa, zasady, komendy gry, wyniki, skończone zasoby, decyzje cykliczne, doradztwo |
 | [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 i S03 jako incydenty (`*.incydent.js`) |
 | [`data/`](data/) | liczby: kontrole, zagrożenia, firmy, inicjatywy działów, kampanie (`data/kampanie/`) |
 | [`proto/`](proto/) | silnik miesiąca, Monte Carlo, działy, reżyser, kampania i scenariusze w terminalu |

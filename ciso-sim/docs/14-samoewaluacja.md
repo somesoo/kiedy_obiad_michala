@@ -277,6 +277,30 @@ identyczny stan. Pełna tabela: `18-…`, 18.10; cennik odstępstw: `17-…`, 17
 4. **Szkolenie kierownika prawie nic nie zmienia w wyniku** (odpowiedzialność osobista nie jest
    modelowana, 🔵) — zasada je ocenia, skutki nie.
 
+## 14.8e. Siódma iteracja: skończone zasoby, decyzje w każdym okresie, doradztwo
+
+Pytania właściciela (13.10.2026): (1) każdy CISO może zatrudnić firmę doradczą — dodać usługę
+zlecania tematu z czasem i kosztem zależnym od tematu, z jasną podpowiedzią, co najbardziej
+poprawia obecną sytuację; (2) jak „wszystko naraz" może działać przy skończonych zasobach, skoro
+decyzje przychodzą w każdym okresie? Szczegóły: `18-…`, 18.12–18.13; `17-…`, 17.9.
+
+- **Doradztwo**: 9 tematów, 2 wykonawców, 2 tryby; raport odkrywa ukryte i wycenia każdą poprawę
+  na modelu (ekspozycja przed i po), od największej, z gotowym poleceniem.
+- **Skończone zasoby**: koordynacja 2 h/projekt/mies., kara za ponad 3 projekty naraz; „wszystko
+  naraz" 780 → 591.
+- **Decyzje cykliczne**: odnowienia, certyfikaty (bez ewidencji wygasają po cichu), koniec
+  wsparcia, alerty i kolejka bez właściciela, rozbudowa, cięcie budżetu, odejście z IT.
+- **Migawka Monte Carlo bez zmian**: nowe pola silnika (`st.ceny`, `st.mod.alerty`) mają
+  domyślnie 1 — sprawdzone testem, nie poprawione.
+
+**Ryzyka do oceny przez CISO:**
+1. **Wycena doradcy liczy tylko straty finansowe i zakłócenia wody.** Obowiązki prawne idą osobną
+   listą, a wartość „miękka" (dojrzałość procesu, dowody dla audytu) nie jest w rankingu — stąd
+   np. SZBI i rejestr ryzyk nie są „największą poprawą", choć bywają najpilniejsze.
+2. **Ceny i czasy doradztwa to rzędy wielkości** (🔵), do weryfikacji z praktykiem.
+3. **Doradca widzi prawdę silnika** (z szansą). To uproszczenie: w życiu raport też bywa
+   po prostu błędny, a nie tylko niepełny — modeluje to tylko szum szacunków taniej firmy.
+
 ## 14.9. Następne kroki (propozycja)
 
 1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, sprawy i fakty kampanii w `data/kampanie/wodociagi.js`,

@@ -80,6 +80,27 @@ const STRATEGIE = {
     sprawa: (k, s) => (s.rodzaj === 'sygnal' ? { v: 'zbadaj' } : null),
     incydent: K.madryIncydent,
   },
+  // Laik, który kupuje wiedzę: sam nie wie, od czego zacząć, więc zleca doradcy test z internetu
+  // i ocenę luk, a potem robi WYŁĄCZNIE to, co zaleca raport — od góry (dwie pozycje na miesiąc)
+  // i obowiązki. Sprawy i incydenty prowadzi jak rozsądny laik. Pytanie: ile wart jest doradca
+  // dla kogoś bez doświadczenia? (docs/18-…, 18.13)
+  laik_z_doradca: {
+    ruchy: (k, A) => {
+      const m = k.st.m;
+      if (m === 1) A.ruch('zlec_doradcy', { temat: 'ekspozycja', firma: 'lokalna', tryb: 'pilny' });
+      if (m === 2) A.ruch('zlec_doradcy', { temat: 'ogolny', firma: 'lokalna', tryb: 'zwykly' });
+      if (m === 11) A.ruch('zlec_doradcy', { temat: 'ogolny', firma: 'renomowana', tryb: 'zwykly' });
+      let n = 0;
+      for (const r of [...k.doradztwo.raporty].reverse()) {
+        for (const c of [...r.obowiazki, ...r.rekomendacje]) {
+          if (n >= 2) break;
+          if (c.ruch && A.ruch(c.ruch, c.p || {})) n++;
+        }
+      }
+    },
+    sprawa: K.AUTO.rozsadny.sprawa,
+    incydent: K.AUTO.rozsadny.incydent,
+  },
   // Fuzzer: losowe ruchy, parametry, czasowniki i akcje w incydentach.
   losowy: (() => {
     let r = S.mulberry32(99);

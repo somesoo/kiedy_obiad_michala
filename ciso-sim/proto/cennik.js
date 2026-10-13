@@ -36,6 +36,14 @@ const ODSTEPSTWA = {
   'budżet „bo NIS2 i hakerzy"': { sprawa: (k, s) => (s.sid === 'S_budzet2027' ? { v: 'wniosek', p: { kwota: 400000, uzasadnienie: 'straszenie' } } : undefined) },
   'wodomierze bez udziału bezpieczeństwa': { sprawa: (k, s) => (s.sid === 'S_wodomierze' ? { v: 'bez_udzialu' } : undefined) },
   'emerytura „po swojemu"': { sprawa: (k, s) => (s.sid === 'S_emerytura' ? { v: 'po_swojemu' } : undefined) },
+  // Decyzje cykliczne i zmiany firmy (docs/18-…, 18.12).
+  'koniec wsparcia: „zostawić jak jest"': { sprawa: (k, s) => (s.sid === 'C_eol' ? { v: 'zostaw' } : undefined) },
+  'certyfikaty odnawiane ręcznie co rok': { sprawa: (k, s) => (s.sid === 'C_certyfikat' ? { v: 'odnow' } : undefined) },
+  'umowy przedłużane bez negocjacji': { sprawa: (k, s) => (s.sid === 'C_odnowienie' ? { v: 'przedluz' } : undefined) },
+  'rozbudowa „po swojemu" wykonawcy': { sprawa: (k, s) => (s.sid === 'S_rozbudowa' ? { v: 'nic' } : undefined) },
+  'cięcie budżetu bez argumentów': { sprawa: (k, s) => (s.sid === 'S_ciecie' ? { v: 'przyjmij' } : undefined) },
+  'odejście z IT: „przejmę sam"': { sprawa: (k, s) => (s.sid === 'S_odejscie' ? { v: 'przejmij' } : undefined) },
+  'cały katalog zamówiony w 1. miesiącu': { ruchy: (k, A) => { if (k.st.m === 1) for (const x of require('../data/kontrole')) A.ruch(`wdroz:${x.id}`); } },
 };
 
 // Odstępstwa w incydencie S03 u gracza, który nie zrobił rozpoznania (panel w internecie → atak

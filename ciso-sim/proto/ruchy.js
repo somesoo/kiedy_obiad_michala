@@ -143,14 +143,15 @@ const wskaznik = (k, n, d) => { if (d) k.wskazniki[n] = przytnij(k.wskazniki[n] 
 
 // Awaria procesu po wdrożeniu na OT (agent niezgodny ze SCADA, aktywny skan zawiesił sterownik,
 // łatka bez zatwierdzenia producenta). Koszt idzie w straty, a stacja to zapamięta.
-function awariaOT(k, id, skala = 1) {
+function awariaOT(k, id, skala = 1, opis = null) {
   const st = k.st;
+  const co = opis || S.kontrola[id].nazwa;
   const pln = Math.round((0.75 * st.firma.koszt_dnia + 10000) * skala);
   st.w.straty += pln; st.w.szczegoly.awaria_ot = (st.w.szczegoly.awaria_ot || 0) + pln;
-  k.incydenty.push({ m: st.m, rodzaj: `awaria OT po zmianie (${S.kontrola[id].nazwa})`, pln, ot: true, wlasna: true });
+  k.incydenty.push({ m: st.m, rodzaj: `awaria OT po zmianie (${co})`, pln, ot: true, wlasna: true });
   wskaznik(k, 'reputacja', -3 * skala); wskaznik(k, 'mandat', -3 * skala);
   stosujDzialy(k, { produkcja: { zaufanie: -0.2 * skala } });
-  k.log('swiat', `Awaria procesu na stacji po zmianie: ${S.kontrola[id].nazwa} (${Z.zl(pln)}).`);
+  k.log('swiat', `Awaria procesu na stacji po zmianie: ${co} (${Z.zl(pln)}).`);
   return pln;
 }
 
@@ -268,10 +269,11 @@ function api(k) {
       return k.budzet[rok];
     },
     zaplanujSprawe: (sid, za) => { k.planowaneSprawy.push({ sid, m: k.st.m + za }); },
-    wdrozZeSprawy: id => {
+    // `oplacone`: koszt wdrożenia pobrał już czasownik sprawy (Z.pobierz) — nie płacimy dwa razy.
+    wdrozZeSprawy: (id, oplacone = false) => {
       const kon = S.kontrola[id];
       const { wybor, sk } = rozwiazParam(kon, {});
-      k.st.w.wydatki += kon.wdrozenie.pln; k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + kon.wdrozenie.pln;
+      if (!oplacone) { k.st.w.wydatki += kon.wdrozenie.pln; k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + kon.wdrozenie.pln; }
       k.st.projekty.push({ id, start: k.st.m, h: 0, hMn: 1 });
       k.st.zamowione.add(id); delete k.st.wypowiedzenia[id];
       k.obiekty[id] = nowyObiekt(k, kon, wybor, sk);
@@ -281,6 +283,47 @@ function api(k) {
       if (!o || o.stan !== 'dziala') return;
       o.jakoscBazowa *= mn; o.jakosc *= mn; przeliczKonf(k, id);
     },
+    // ── dla decyzji cyklicznych (data/cykliczne.js) i doradztwa ──
+    cena: (id, mn) => { k.st.ceny = k.st.ceny || {}; k.st.ceny[id] = (k.st.ceny[id] ?? 1) * mn; },
+    odnowiono: id => { const o = k.obiekty[id]; if (o) o.umowaOd = k.st.m; },
+    // Wycofanie z decyzji w sprawie (wypowiedzenie umowy, wstrzymanie projektu) — bez ruchu w zapisie.
+    wycofajObiekt: id => {
+      const o = k.obiekty[id];
+      if (!o || (o.stan !== 'dziala' && o.stan !== 'projekt')) return false;
+      S.wycofaj(k.st, id);
+      o.stan = 'wycofany'; o.wycofanoM = k.st.m;
+      return true;
+    },
+    // Przetarg na nowego dostawcę: nowe wdrożenie, nowa (nieznana) jakość i nowe usterki, zero historii.
+    nowyDostawca: id => {
+      const o = k.obiekty[id], kon = S.kontrola[id], rnd = k.rnd.wdrozenia;
+      o.jakoscBazowa = przytnij(JAKOSC_BAZOWA * o.sk.jakosc * (0.8 + 0.3 * rnd()), 0.15, 1);
+      o.jakosc = o.jakoscBazowa;
+      o.usterki = (kon.usterki ?? DOMYSLNE_USTERKI).filter(u => rnd() < u.szansa).map(u => ({ ...u, odkryta: false, naprawiona: false }));
+      o.ostPrzeglad = null; o.ostTest = null; o.wiedzaPunkt = null;
+      przeliczKonf(k, id);
+    },
+    // Ryzyko z decyzji (koniec wsparcia, rozbudowa): wpis w rejestrze ryzyk, bez dryfu przyrostów.
+    ryzyko: (klucz, wektory, ulamek, zrodlo) => {
+      if (ulamek <= 0) { delete k.ryzyka[klucz]; return; }
+      k.ryzyka[klucz] = { wektory, ulamek, nieznane: 0, zrodlo };
+    },
+    strata: (pln, rodzaj) => { k.st.w.straty += pln; k.st.w.szczegoly[rodzaj] = (k.st.w.szczegoly[rodzaj] || 0) + pln; },
+    // Twoje godziny zjadane co miesiąc (na `mies` miesięcy albo na stałe).
+    hUtrata: (h, mies = 999, opis = '') => { (k.obciazenia = k.obciazenia || []).push({ h, do: k.st.m + mies, opis }); },
+    kosztStaly: (pln, odMies, opis = '') => { (k.kosztyStale = k.kosztyStale || []).push({ pln, od: k.st.m + odMies, opis }); },
+    bonusGodzin: (h, mies) => { (k.bonusH = k.bonusH || []).push({ h, do: k.st.m + mies - 1 }); },
+    alertyMn: x => { k.st.mod.alerty = (k.st.mod.alerty ?? 1) * x; },
+    zasoby: n => { k.st.zasobyZnane += n; },
+    // Cięcie budżetu roku — nie niżej niż to, co już wydane i zakontraktowane do grudnia
+    // (cięcie blokuje nowe zakupy; nie karze za umowy podpisane przed decyzją zarządu).
+    budzetMn: mn => {
+      const b = k.budzet[k.rok] || 0;
+      k.budzet[k.rok] = Math.round(Math.max(b * mn, Math.min(b, Z.zobowiazaniaRoku(k))) / 1000) * 1000;
+      return k.budzet[k.rok];
+    },
+    awaria: (opis, skala = 1) => awariaOT(k, null, skala, opis),
+    rekrutujEtat: (etat, mies) => { k.rekrutacje.push({ etat, od: k.st.m + mies }); },
   };
   return a;
 }
@@ -353,7 +396,7 @@ function nazwaRuchu(k, def) {
 function koszt(k, def, p = {}) {
   if (def.rodzaj === 'ruch') {
     const r = def.r;
-    const c = r.koszt ? r.koszt(p) : { h: r.h || 0, pln: r.pln || 0 };
+    const c = r.koszt ? r.koszt(p, k) : { h: r.h || 0, pln: r.pln || 0 };
     const etat = r.etat ? r.etat(p) : 0;
     return { ...c, etat, etatOd: etat ? 3 : 0 };
   }

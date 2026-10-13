@@ -376,3 +376,120 @@ test('mgła wojny: sygnały bywają fałszywe, a szacunek zasobów nie jest praw
   const bledy = [1, 2, 3, 4].map(s => Math.abs(nowa(s).mglaBlad));
   assert.ok(bledy.some(b => b > 0.02), 'środek przedziału nie może być prawdą');
 });
+
+// ── SKOŃCZONE ZASOBY: koordynacja i praca w toku (docs/18-…, 18.12) ──
+const Z = require('../proto/zasoby');
+const DR = require('../proto/doradztwo');
+
+test('projekty w toku kosztują godziny co miesiąc, a więcej niż trzy naraz spowalnia zespół', () => {
+  const k = nowa();
+  for (const id of ['inwentaryzacja', 'mfa', 'plan_ir', 'bcp', 'ryzyko', 'weryfikacja_platnosci']) RU.wykonaj(k, `wdroz:${id}`);
+  assert.ok(Z.karaWip(k) > 0, 'sześć projektów naraz bez kary za przełączanie');
+  K.zamknijMiesiac(k);
+  assert.strictEqual(k.hKart, Z.KOORDYNACJA_H * k.st.projekty.length, 'nowy miesiąc zaczyna się od godzin koordynacji');
+});
+
+test('„wszystko naraz" przegrywa z „mało naraz, do końca": przy skończonych zasobach kolejka nie dowozi', async () => {
+  let wn = 0, md = 0, dzialaWn = 0;
+  for (const seed of [1, 2]) {
+    const a = await graj('wszystko_naraz', seed), b = await graj('madry', seed);
+    wn += (await K.indeksOdpornosci(a)).kampania; md += (await K.indeksOdpornosci(b)).kampania;
+    dzialaWn += Object.values(a.obiekty).filter(o => o.stan === 'dziala').length;
+  }
+  assert.ok(md - wn > 150, `mądry ${md / 2} vs wszystko naraz ${wn / 2}`);
+  assert.ok(dzialaWn / 2 < 10, `z całego katalogu działa ${dzialaWn / 2} — kolejka powinna nie dowieźć większości`);
+});
+
+// ── DECYZJE CYKLICZNE ──
+
+test('decyzje są w każdym okresie: mądry ma sprawę w skrzynce w co najmniej 18 z 24 miesięcy', async () => {
+  for (const seed of [1, 2]) {
+    const k = await graj('madry', seed);
+    const mies = new Set(k.historia.filter(h => h.t === 'sprawa_otwarta').map(h => h.m)).size;
+    assert.ok(mies >= 18, `ziarno ${seed}: decyzje tylko w ${mies} miesiącach`);
+    assert.ok(k.historia.some(h => h.sid === 'C_odnowienie') && k.historia.some(h => h.sid === 'C_certyfikat') && k.historia.some(h => h.sid === 'C_eol'));
+  }
+});
+
+test('odnowienie umowy: automat podnosi cenę, negocjacje z dowodami ją obniżają, bez dowodów nie', () => {
+  const przygotuj = (dowod) => {
+    const k = nowa();
+    const o = RU.zainstalujGotowe(k, 'backup', { zakres: 'biuro_ot', nosnik: 'offline' });
+    o.od = -12; if (dowod) o.ostTest = 0;
+    k.sprawy = []; require('../proto/cykl').nowyMiesiac(k);
+    return { k, s: k.sprawy.find(x => x.sid === 'C_odnowienie') };
+  };
+  const cena = k => S.kosztMiesieczny(k.st, 'backup');
+  const a = przygotuj(true); const przed = cena(a.k);
+  assert.ok(a.s, 'brak sprawy odnowienia w rocznicę umowy');
+  SP.odpowiedz(a.k, a.s.id, 'negocjuj'); assert.ok(cena(a.k) < przed);
+  const b = przygotuj(false); SP.odpowiedz(b.k, b.s.id, 'negocjuj'); assert.ok(cena(b.k) > przed);
+  const c = przygotuj(true); K.zamknijMiesiac(c.k); assert.ok(cena(c.k) > przed, 'brak decyzji = automatyczne przedłużenie z indeksacją');
+});
+
+test('certyfikat: bez ewidencji część wygasa „po cichu"; z automatyzacją kolejne nie przychodzą', async () => {
+  let ciche = 0;
+  for (const seed of [1, 2, 3, 4]) ciche += (await graj(K.AUTO.bierny, seed)).cykl.wygasle.filter(w => w.zapomniany).length;
+  assert.ok(ciche > 0, 'bez ewidencji nic nie wygasło po cichu');
+  const k = await graj('madry', 1);
+  assert.ok(k.flagi.certy_auto || k.flagi.certy_msp);
+  assert.ok(k.cykl.odnowione.some(o => o.auto), 'po automatyzacji certyfikaty TLS odnawiają się same');
+});
+
+test('koniec wsparcia: „zostaw" zostawia ryzyko w rejestrze, izolacja wymaga segmentacji', () => {
+  const k = nowa();
+  const s = SP.dodajScenariuszowa(k, 'C_eol', { klucz: 'serwer_fk' });
+  assert.match(SP.dostepnyCzasownik(k, s, 'izoluj'), /segmentacji/);
+  SP.odpowiedz(k, s.id, 'zostaw');
+  assert.ok(k.ryzyka['eol:serwer_fk']?.ulamek === 1);
+});
+
+// ── DORADZTWO ──
+
+test('doradztwo: temat zmienia cenę i czas; tryb pilny szybszy i droższy; renomowana firma droższa', () => {
+  const k = nowa();
+  const w = (temat, firma = 'lokalna', tryb = 'zwykly') => DR.wycena(k, { temat, firma, tryb });
+  assert.ok(w('ogolny').pln > w('platnosci').pln && w('ogolny').mies > w('platnosci').mies);
+  assert.ok(w('ot', 'lokalna', 'pilny').mies < w('ot').mies && w('ot', 'lokalna', 'pilny').pln > w('ot').pln);
+  assert.ok(w('ot', 'renomowana').pln > w('ot').pln);
+  RU.wykonaj(k, 'zlec_doradcy', { temat: 'ekspozycja', firma: 'lokalna', tryb: 'zwykly' });
+  assert.match(RU.dostepny(k, 'zlec_doradcy', { temat: 'ekspozycja', firma: 'renomowana', tryb: 'zwykly' }), /już zlecony/);
+});
+
+test('raport doradcy: odkrywa ukryte, układa rekomendacje od największej poprawy, polecenie da się wykonać', () => {
+  const k = nowa(1);
+  RU.wykonaj(k, 'zlec_doradcy', { temat: 'ekspozycja', firma: 'renomowana', tryb: 'pilny' });
+  assert.ok(!k.fakty.hmi_wystawiony.znany);
+  K.zamknijMiesiac(k);
+  const r = k.doradztwo.raporty[0];
+  assert.ok(r && r.rekomendacje.length >= 2);
+  assert.ok(k.fakty.hmi_wystawiony.znany, 'renomowany pentest nie znalazł panelu w internecie');
+  for (let i = 1; i < r.rekomendacje.length; i++) assert.ok(r.rekomendacje[i - 1].szacunek >= r.rekomendacje[i].szacunek, 'kolejność nie jest od największej poprawy');
+  const top = r.rekomendacje[0];
+  assert.strictEqual(RU.dostepny(k, top.ruch, top.p), null, `najważniejszej rekomendacji nie da się wykonać: ${top.polecenie}`);
+  // Wycena jest prawdziwa: zrobienie rekomendacji obniża ekspozycję.
+  const przed = K.coJesli(k, null, 80).pln;
+  RU.wykonaj(k, top.ruch, top.p);
+  assert.ok(K.coJesli(k, null, 80).pln < przed);
+  assert.match(DR.widok(k), /NAJWIĘKSZA POPRAWA/);
+});
+
+test('„co jeśli" nie zmienia stanu kampanii ani losowości', () => {
+  const k = nowa(2);
+  const przed = JSON.stringify([k.st.aktywne, [...k.st.zamowione], k.st.konf, k.fakty, k.ryzyka, Object.keys(k.obiekty)]);
+  const r0 = k.rnd.mgla();
+  const k2 = nowa(2); k2.rnd.mgla();
+  K.coJesli(k2, x => { RU.zainstalujGotowe(x, 'edr'); x.fakty.hmi_wystawiony.naprawiony = true; }, 10);
+  assert.strictEqual(JSON.stringify([k2.st.aktywne, [...k2.st.zamowione], k2.st.konf, k2.fakty, k2.ryzyka, Object.keys(k2.obiekty)]), przed);
+  assert.strictEqual(k.rnd.mgla(), k2.rnd.mgla());
+  assert.ok(r0 >= 0);
+});
+
+test('doradca pomaga laikowi: laik wykonujący rekomendacje wypada lepiej niż laik działający sam', async () => {
+  let sam = 0, zDor = 0;
+  for (const seed of [1, 2, 3]) {
+    sam += (await K.indeksOdpornosci(await graj('rozsadny', seed))).kampania;
+    zDor += (await K.indeksOdpornosci(await graj('laik_z_doradca', seed))).kampania;
+  }
+  assert.ok(zDor > sam, `z doradcą ${zDor / 3} vs sam ${sam / 3}`);
+});

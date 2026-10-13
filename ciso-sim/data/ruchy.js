@@ -98,6 +98,20 @@ module.exports = {
     },
   },
 
+  // ── DORADZTWO (data/doradztwo.js, proto/doradztwo.js) ──
+  zlec_doradcy: {
+    nazwa: 'Zlecić temat firmie doradczej (raport: odkrycia + rekomendacje od największej poprawy)',
+    kategoria: 'doradztwo',
+    param: {
+      temat: { opis: 'Temat', wartosci: Object.keys(require('./doradztwo').TEMATY) },
+      firma: { opis: 'Wykonawca', wartosci: Object.keys(require('./doradztwo').WYKONAWCY) },
+      tryb: { opis: 'Tryb', wartosci: Object.keys(require('./doradztwo').TRYBY) },
+    },
+    koszt: (p, k) => { const c = require('../proto/doradztwo').wycena(k, p); return { h: c.h, pln: c.pln }; },
+    dostepny: (k, p) => require('../proto/doradztwo').dostepny(k, p),
+    wykonaj: (k, p, a) => require('../proto/doradztwo').zlec(k, p, a),
+  },
+
   // ── LUDZIE ──
   rozmowa: {
     nazwa: 'Rozmowa z kierownikiem działu (plany, kłopoty, co obchodzą i dlaczego)',

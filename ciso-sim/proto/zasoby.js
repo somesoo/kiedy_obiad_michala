@@ -12,6 +12,30 @@ const S = require('./silnik');
 
 const LIMIT_NADGODZIN = 1.5;
 const TOLERANCJA_BUDZETU = 1.1;
+// Skończone zasoby to nie tylko budżet: każdy projekt w toku co miesiąc zjada godziny gracza
+// (dostawca, harmonogram, odbiory, zmiany zakresu), a zespół, który ciągnie naraz więcej niż
+// trzy wdrożenia, traci czas na przełączanie się między nimi (🔵 uproszczenie: −8% godzin
+// zespołu za każdy projekt ponad trzy, najwyżej −40%). Bez tego „zamów cały katalog
+// w pierwszym miesiącu" kosztowało 2 h planowania na pozycję i nic więcej (docs/18-…, 18.12).
+const KOORDYNACJA_H = 2;
+const WIP_PROG = 3;
+const WIP_KARA = 0.08;
+const WIP_MAX = 0.4;
+const koordynacja = k => KOORDYNACJA_H * k.st.projekty.length;
+const karaWip = k => Math.min(WIP_MAX, WIP_KARA * Math.max(0, k.st.projekty.length - WIP_PROG));
+// Godziny zespołu w miesiącu (etaty + IT + to, czego gracz nie zużył) — podstawa kary WIP.
+const godzinyZespolu = k => k.st.etaty * S.H_NA_ETAT + k.st.firma.zespol.h_it + (k.def.h_gracza || 0);
+// Godziny zespołu z decyzji (nadgodziny zespołu przez kilka miesięcy).
+function zmianaGodzin(k) {
+  let h = 0;
+  for (const b of k.bonusH || []) if (k.st.m <= b.do) h += b.h;
+  return h;
+}
+// Stałe obciążenia GRACZA z decyzji (np. helpdesk po odejściu osoby z IT): zjadają jego godziny
+// na początku miesiąca, tak jak koordynacja projektów.
+const obciazenieGracza = k => (k.obciazenia || []).filter(o => k.st.m <= o.do).reduce((a, o) => a + o.h, 0);
+// Stałe koszty miesięczne z decyzji (zastępstwo na etacie poza zespołem bezpieczeństwa).
+const kosztyStale = k => (k.kosztyStale || []).filter(o => k.st.m >= o.od).reduce((a, o) => a + o.pln, 0);
 const zl = n => `${Math.round(n).toLocaleString('pl-PL')} zł`;
 
 const doKonca = k => 12 - k.miesiacKal + 1;
@@ -23,7 +47,9 @@ function zobowiazaniaRoku(k) {
   for (const id of k.st.zamowione) if (!(k.st.wypowiedzenia?.[id] < k.st.m + 1)) stale += S.kosztMiesieczny(k.st, id);
   let rekrutacje = 0;
   for (const r of k.rekrutacje || []) rekrutacje += r.etat * S.KOSZT_ETATU * Math.max(0, n - Math.max(0, r.od - k.st.m));
-  return (k.wydaneRok[k.rok] || 0) + stale * n + rekrutacje;
+  let zDecyzji = 0;
+  for (const o of k.kosztyStale || []) zDecyzji += o.pln * Math.max(0, n - Math.max(0, o.od - k.st.m));
+  return (k.wydaneRok[k.rok] || 0) + stale * n + rekrutacje + zDecyzji;
 }
 
 // Koszt w budżecie TEGO roku: jednorazowo + miesięcznie do grudnia (+ pensja od startu etatu).
@@ -62,4 +88,4 @@ function pobierz(k, { h = 0, pln = 0 } = {}) {
   if (pln) { k.st.w.wydatki += pln; k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + pln; }
 }
 
-module.exports = { LIMIT_NADGODZIN, TOLERANCJA_BUDZETU, zl, doKonca, zobowiazaniaRoku, kosztRoku, limitGodzin, godzinyWolne, brakZasobow, pobierz };
+module.exports = { LIMIT_NADGODZIN, TOLERANCJA_BUDZETU, KOORDYNACJA_H, WIP_PROG, koordynacja, karaWip, godzinyZespolu, zmianaGodzin, obciazenieGracza, kosztyStale, zl, doKonca, zobowiazaniaRoku, kosztRoku, limitGodzin, godzinyWolne, brakZasobow, pobierz };

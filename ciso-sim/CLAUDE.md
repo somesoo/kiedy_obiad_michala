@@ -60,6 +60,14 @@ można przejrzeć, przetestować i wycofać (`docs/18-…`).
   wykrywające ma `martwe_pola`; uczciwa opcja ma cenę, inaczej nieuczciwa nie jest pokusą;
   ujawnienie kłamstwa (`ujawnij`) uderza we współpracę. Kampania jest skończona i kończy się
   **audytem zamykającym** z dowodami (przegląd/test w ostatnim roku, próbki usterek).
+- **Skończone zasoby i decyzje w każdym okresie** (`docs/18-…`, 18.12): projekty w toku zjadają
+  godziny gracza (`Z.koordynacja`), ponad 3 naraz — godziny zespołu (`Z.karaWip`); sprawy
+  cykliczne (`data/cykliczne.js`, `proto/cykl.js`) powstają ze STANU firmy, losowanie tylko
+  ze strumienia `k.rnd.cykl`. Skutek decyzji, który trwa (helpdesk po odejściu, zastępstwo),
+  idzie przez `a.hUtrata`/`a.kosztStaly`/`a.bonusGodzin`, nie przez stałe w kodzie.
+- **Doradztwo** (`docs/18-…`, 18.13; `proto/doradztwo.js`): doradca tylko odsłania i wycenia,
+  nie zmienia skuteczności kontroli. Wycena przez `K.coJesli` — na kopiach stanu, bez ruszania
+  kampanii i strumieni losowości (test to pilnuje). Losowanie: `k.rnd.doradztwo`.
 - **Zapis gry = lista akcji** (`k.akcje`: `ruch`, `sprawa`, `inc_start`, `inc`, `inc_czekaj`,
   `inc_koniec`, `zamknij`), wczytanie = odtworzenie z ziarna (`wykonajAkcje`). Nowa akcja gracza
   musi przechodzić przez `RU.wykonaj`/`SP.odpowiedz`/funkcje incydentu w `proto/kampania.js`

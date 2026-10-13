@@ -70,6 +70,13 @@ kiedy chce, z katalogu ruchów (`18-…`). Reżyser dobiera tylko **obserwacje**
 księgowa o rachunkach, kierownik stacji o kopiach u integratora, ostrzeżenie CERT) według
 aktualnego problemu firmy i tego, czego gracz jeszcze nie opanował.
 
+**Decyzje w każdym miesiącu** (`18-…`, 18.12): poza osią skrzynka dostaje sprawy ze stanu firmy —
+odnowienia umów w rocznicę, certyfikaty i domena (e-BOK m. 5, VPN m. 9, domena m. 11, podpis
+prezesa m. 14), koniec wsparcia (stacje inżynierskie SCADA m. 7, serwer księgowości m. 10,
+routery w przepompowniach m. 16), alerty bez właściciela, kolejka projektów — oraz zmiany firmy
+w oknach osi: **nowe osiedle** (m. 10–13), **odejście osoby z IT** (m. 11–16), **cięcie budżetu
+o 20%** (m. 15–18). Doradcę można zlecić w każdej chwili (`p`, 18.13).
+
 **Fakty świata** (prawda losowana na starcie, odkrywana ruchami — `wodociagi.js`, `fakty`):
 panel HMI stacji widoczny z internetu (pilne; odkrywa go skan ekspozycji albo moje.cert.pl),
 narzędzie zdalne integratora ze stałym hasłem, domyślny PIN sterowników (inwentaryzacja,
@@ -102,20 +109,20 @@ roku (komendy: `18-…`, 18.9).
 ## 16.5. Co pokazało 20 przebiegów na styl gry (`proto/wyniki-kampania-wodociagi-2026-10-13.txt`)
 
 Stan po silniku ruchów (`18-…`): pełna dowolność ruchów, ocena praktyki zasadami, audyt
-zamykający z dowodami.
+zamykający z dowodami, koordynacja projektów, decyzje cykliczne i doradztwo (18.12–18.13).
 
 | Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Praktyka | Indeks | **Wynik** |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **mądry** (rozpoznanie, „tanie i ważne", pilotaże, testy, warunki) | **230 tys.** | 493 tys. | **59** | **0,84** | 0,1 | 0,1 | 59 | **67** | 35% | 95% | **933** | **941** |
-| odmawiający (mądre ruchy, odmowa + kara za obejścia) | 315 tys. | 475 tys. | 58 | **0,01** | 2,3 | 0,2 | 58 | 35 | 50% | 72% | 824 | 774 |
-| rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 557 tys. | 356 tys. | 39 | 0,44 | 16,3 | 1,6 | 45 | 27 | 95% | 52% | 622 | 573 |
-| bierny (nic; sprawy same, incydenty bez niego) | **1,77 mln** | 14 tys. | **10** | 0,35 | 13,8 | **3,3** | **17** | **0** | 100% | 0% | 129 | 65 |
+| **mądry** (rozpoznanie, „tanie i ważne", pilotaże, testy, warunki) | **204 tys.** | 521 tys. | **58** | **0,83** | 0,3 | 0,1 | 52 | **64** | 30% | 94% | **905** | **921** |
+| odmawiający (mądre ruchy, odmowa + kara za obejścia) | 209 tys. | 492 tys. | 57 | **0,01** | 2,2 | 0,1 | 57 | 34 | 30% | 75% | 824 | 786 |
+| rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 455 tys. | 367 tys. | 38 | 0,40 | 17,2 | 1,6 | 38 | 20 | 95% | 50% | 592 | 547 |
+| bierny (nic; sprawy same, incydenty bez niego) | **1,70 mln** | 11 tys. | **10** | 0,31 | 11,6 | **2,8** | **15** | **0** | 100% | 0% | 131 | 66 |
 
 Wynik kampanii = ½ Indeks + ½ Jakość praktyki, z sufitami (`11-…`). Pozostałe strategie
 (potakiwacz, kłamca, skąpiec, pracoholik, fuzzer…) — `18-…`, 18.10; ile kosztuje pojedyncze
 odstępstwo — `17-…`, 17.8.
 
-**Co się zmieniło względem kart.** Rozsądny laik spadł z 882 na 573: dawniej dostawał „dobre
+**Co się zmieniło względem kart.** Rozsądny laik spadł z 882 na 547: dawniej dostawał „dobre
 opcje" z kart, teraz sam musi wiedzieć, że trzeba zrobić rozpoznanie, pilotaż i test kopii.
 Wdraża dużo i z dobrymi intencjami, ale EDR na OT bez pilotażu wywołuje awarie, kopie nigdy nie
 są sprawdzone, a „tak, ale" z każdym warunkiem zniechęca działy (16 ukrytych obejść). Między
