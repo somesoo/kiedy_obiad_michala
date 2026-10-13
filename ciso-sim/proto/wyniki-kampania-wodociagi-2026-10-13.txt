@@ -1,0 +1,4 @@
+styl          straty    wydatki   audyt  zaufanie  ukryte  zakłóc.  reput.  mandat  P(poważny)  JD
+rozsadny         89 tys.    758 tys.    60      0.83     0.0      0.1      62      41         20%  100%
+odmawiajacy      87 tys.    661 tys.    60      0.03     0.8      0.0      62      16         10%   57%
+bierny         1618 tys.     46 tys.    10      0.32    21.4      3.7       7      19        100%    9%

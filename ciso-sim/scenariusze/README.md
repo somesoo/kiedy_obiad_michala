@@ -12,9 +12,9 @@ prawdziwych zdarzeń są opisane w debriefie, bez przypisywania winy.
 
 | # | Tytuł | Rodzaj | Firmy | Trudność | Czas gry | Inspiracja |
 |---|---|---|---|---|---|---|
-| [S01](S01-faktura-z-nowym-numerem.md) | Faktura z nowym numerem konta | BEC / przejęta skrzynka | biuro, gmina, fabryka, wodociągi | ★ | 3 dni | powszechny wzorzec; wycieki z SaaS fakturowych 2026 |
+| [S01](S01-faktura-z-nowym-numerem.md) (+ [dane](S01-faktura.dane.js)) | Faktura z nowym numerem konta | BEC / przejęta skrzynka | biuro, gmina, fabryka, wodociągi | ★ | 3 dni | powszechny wzorzec; wycieki z SaaS fakturowych 2026 |
 | [S02](S02-piatek-2347.md) | Piątek, 23:47 | ransomware, ciągłość opieki | szpital | ★★★ | 30 dni | fala ataków na szpitale, marzec 2026 |
-| [S03](S03-pompa-na-maksimum.md) | Pompa na maksimum | OT, haktywiści | wodociągi | ★★ | 10 dni | stacje uzdatniania wody 2025 (raport ABW) |
+| [S03](S03-pompa-na-maksimum.md) (+ [dane](S03-pompa.dane.js)) | Pompa na maksimum | OT, haktywiści | wodociągi | ★★ | 10 dni | stacje uzdatniania wody 2025 (raport ABW) |
 | [S04](S04-dostawca-ktoremu-ufalismy.md) | Dostawca, któremu ufaliśmy | wyciek u dostawcy SaaS | szpital, przychodnia, gmina | ★★ | 30 dni | wyciek z dostawcy EDM, sierpień 2026 |
 | [S05](S05-klucz-w-repozytorium.md) | Klucz w repozytorium | wyciek z chmury, podmiot przetwarzający | software house | ★★★ | 30 dni | wycieki z chmury dostawców 2026 |
 | [S06](S06-czarny-piatek.md) | Czarny piątek | DDoS z wymuszeniem + przejęcia kont | sklep | ★★ | 4 dni | wzorce RDoS i credential stuffing |

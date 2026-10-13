@@ -14,6 +14,8 @@
 //       ocena: 'dobra' | 'dopuszczalna' | 'blad'; pkt — punkty rubryki (suma najlepszej
 //       ścieżki = 100); skutek — zmiana stanu scenariusza; dalej — id fazy albo 'koniec'
 //   zakonczenia: [{ warunek(stan), tytul, opis }] — pierwsze pasujące
+//   skutki_kampanii(stan) → { pln, mandat, reputacja, flagi, zlec, dzial, powrot }
+//                            — co zostaje w kampanii po scenariuszu (proto/kampania.js)
 //   debrief: [zdania]
 
 module.exports = {
@@ -127,6 +129,19 @@ module.exports = {
       tytul: 'Odzyskane częściowo', opis: 'Bank zablokował część środków u odbiorcy.' },
     { warunek: () => true, tytul: 'Strata', opis: 'Środki wyprowadzone, zanim bank zdążył zareagować.' },
   ],
+
+  // Co zostaje w kampanii po scenariuszu (proto/kampania.js). Kwota z wariantu firmy.
+  skutki_kampanii: (s, kwota = 92300) => {
+    if (s.udaremnione) return { pln: 0, mandat: 2, flagi: { bec_udaremniony: true }, dzial: { finanse: { zaufanie: 0.1, swiadomosc: 0.15 } } };
+    const odzysk = s.bank_po_h !== undefined && s.bank_po_h <= 0.5 && !s.sprawca_ostrzezony ? 0.5 : 0;
+    return {
+      pln: Math.round(kwota * (1 - odzysk)),
+      mandat: s.procedura ? 1 : -4,
+      reputacja: -2,
+      zlec: s.procedura ? ['weryfikacja_platnosci'] : [],
+      dzial: { finanse: { swiadomosc: 0.3, zaufanie: s.procedura ? 0.1 : -0.1 } },
+    };
+  },
 
   debrief: [
     'Mail przyszedł z prawdziwego adresu kontrahenta, w prawdziwym wątku — żaden filtr tego nie zatrzyma.',

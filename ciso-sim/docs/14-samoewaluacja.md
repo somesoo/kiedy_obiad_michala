@@ -133,7 +133,20 @@ Pełne wyniki: `proto/wyniki-2026-10-13.txt`. Wycinek dla firmy referencyjnej (M
 6. **Prototyp jako narzędzie projektowe** — już wyłapał nierealistyczną kalibrację (pierwsza
    wersja: 19 poważnych incydentów na 2 lata) i pokazał strategię dominującą.
 
-## 14.7. Pytania do właściciela (decyzje, które zmieniają dalszą pracę)
+## 14.7. Pytania do właściciela — odpowiedzi z 13.10.2026
+
+| Pytanie | Decyzja |
+|---|---|
+| Dla kogo najpierw | **biuro** |
+| Pierwsza kampania | **wodociągi** (`16-…`) |
+| Weryfikacja merytoryczna | **ocenę zrobi CISO** |
+| Rytm | **własne tempo gracza**, bez limitu „jeden ruch dziennie”; gracz sam zamyka okres |
+| Nowe wymaganie | na koniec okresu **raporty innych działów**; algorytmy „półinteligentne”, które uczą się na aktualnym problemie firmy (`15-…`) |
+
+Pozostałe pytania (nazwa, multiplayer od początku, hosting, nazwy produktów, realne incydenty
+w debriefie, szkolenie kierownika) są nadal otwarte — poniżej w pierwotnym brzmieniu.
+
+### Pierwotne pytania
 
 1. **Dla kogo przede wszystkim?** Biuro (15 osób, krótkie sesje, multiplayer) czy szkolenia
    zarządów (tryb prowadzący, 60–90 min)? Rekomendacja: **biuro najpierw** (macie graczy
@@ -152,11 +165,31 @@ Pełne wyniki: `proto/wyniki-2026-10-13.txt`. Wycinek dla firmy referencyjnej (M
    Microsoft Defender, CrowdStrike), czy tylko kategorie?
 10. **Realne incydenty w debriefie** z nazwami instytucji (jak w `02-…`) — zgoda?
 
-## 14.8. Następne kroki (propozycja)
+## 14.8. Wnioski z drugiej iteracji (działy, reżyser, kampania „Wodnik”)
 
-1. Decyzje z 14.7.
-2. Weryfikacja 🟡 (lista w `02-…`).
-3. Gra papierowa S01 + S03 z 3–5 osobami (`proto/rozegraj.js` — S01 działa w terminalu;
-   S03 do przepisania na dane).
-4. Poprawki modelu z 14.2 (próg względny, kalibracja małych firm, przeciwwagi dla „małej firmy").
-5. Szkielet aplikacji z logowaniem (`13-…`, etap C).
+1. **Poprawka faktograficzna**: wodociągi z 64 osobami to wg reguł NIS2 podmiot **ważny**, nie
+   kluczowy (w v0.1 było źle). Wyszło dopiero przy rozpisywaniu kampanii — dobry argument, żeby
+   CISO przejrzał statusy wszystkich firm z `09-…` (szpital i elektrociepłownia jako duże —
+   kluczowe; gmina — do ustalenia).
+2. **Działy dają emergentną dynamikę bez skryptu** (`16-…`, 16.5): gracz odmawiający traci zaufanie
+   działów do zera w rok; gracz bierny ma ~21 obejść i przeciwnika, który sam znajduje słabe
+   miejsca. To lekcja E9, której nie dało się pokazać statyczną firmą.
+3. **Pierwszy model nagradzał „odmawiaj i karz”** (najniższe straty). Brakowało dwóch realnych
+   kosztów: politycznego (kierownik działu idzie do prezesa) i ukrywania się działów, które boją
+   się kary. Po dodaniu „odmawiający” ma podobne straty, ale mandat 16 (blisko odwołania).
+4. **Przeciwnik adaptacyjny rozbraja strategię dominującą** z 14.2: przy bierności próby
+   przesuwają się na usługi wystawione (×2) i dostawców (×1,9).
+5. **Uczciwość reżysera wymaga pilnowania kolejności**: S03 mógł wypaść w miesiącu ostrzeżenia,
+   bez szansy na reakcję — okno przesunięte. Zasada do walidatora kampanii: test obciążeniowy
+   nie może wypaść przed swoim sygnałem.
+6. **W małym podmiocie komunalnym pieniądze nie uzasadniają bezpieczeństwa** (Monte Carlo „nic”
+   jest najtańsze w złotówkach). Gra musi pokazywać stawkę niefinansową — i to też jest realny
+   powód niedoinwestowania małych wodociągów.
+7. **Automat „rozsądny” przekracza budżet** — potrzebna podpowiedź priorytetów i twardszy budżet.
+
+## 14.9. Następne kroki (propozycja)
+
+1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, karty kampanii w `data/kampanie/wodociagi.js`.
+2. Rozgrywka kampanii „Wodnik” w terminalu z 3–5 osobami z biura (`proto/kampania.js --zapis=…`).
+3. Poprawki z 14.8 (budżet, podpowiedź priorytetów, walidator kampanii: sygnał przed testem).
+4. Szkielet aplikacji z logowaniem (`13-…`, etap C), z `proto/` przeniesionym do `lib/engine/`.

@@ -8,8 +8,8 @@
 | **Operacyjny (incydent)** | 1 decyzja = 15 min – 12 h gry | gdy „dzwoni telefon" | triage, izolacja, eskalacja, zgłoszenia, komunikacja, odtwarzanie |
 
 Kampania: **24 tury** (kwiecień 2026 – marzec 2028). Tura strategiczna to ok. 10–20 minut
-realnego czasu; w trybie biurowym — jedna tura dziennie (jak rzuty w Snakes), czyli
-kampania na ~5 tygodni pracy.
+realnego czasu. **Tempo wybiera gracz** — miesiąc kończy się przyciskiem „Zamknij miesiąc",
+bez limitu dziennego (decyzja właściciela; szczegóły i skutki: `15-…`, 15.7).
 
 ## 3.2. Pętla miesiąca
 
@@ -17,6 +17,7 @@ kampania na ~5 tygodni pracy.
  ┌─ 1. BRIEFING ────────────────────────────────────────────────────────┐
  │ wiadomości (świat), ostrzeżenia CERT/CSIRT, prośby biznesu, kalendarz│
  │ regulacyjny, stan projektów, „co wiemy o sobie" (mgła wojny)         │
+ │ RAPORTY DZIAŁÓW z poprzedniego okresu (agenci, 15-…)                 │
  ├─ 2. DECYZJE ─────────────────────────────────────────────────────────┤
  │ budżet (PLN) → zakupy, umowy, rekrutacje                             │
  │ godziny → kolejka: utrzymanie / alerty / projekty / IT (priorytety)  │
@@ -31,8 +32,13 @@ kampania na ~5 tygodni pracy.
  ├─ 4. RAPORT DLA ZARZĄDU (co kwartał; co miesiąc — notatka) ──────────┤
  │ gracz wybiera, CO pokazuje i JAK (metryki, ryzyka, prośby)           │
  │ → mandat, budżet na kolejny okres                                    │
- └─ 5. PODSUMOWANIE: rejestr zdarzeń miesiąca, zmiany wskaźników ─────────┘
+ ├─ 5. PODSUMOWANIE: rejestr zdarzeń miesiąca, zmiany wskaźników ───────┤
+ └─ 6. DZIAŁY I REŻYSER: działy uczą się z odpowiedzi gracza i planują   ┘
+      kolejny okres; reżyser diagnozuje „aktualny problem", aktualizuje
+      model gracza, przeciwnika i rytm, dobiera karty na następny miesiąc
 ```
+
+Pętla jest **grywalna w prototypie**: `proto/kampania.js` (kampania „Wodnik", `16-…`).
 
 ## 3.3. Zasoby i waluty
 

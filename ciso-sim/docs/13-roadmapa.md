@@ -9,7 +9,13 @@ w co da się zagrać albo co da się pokazać ludziom z biura.
 - [x] Dane liczbowe v1 (`data/`)
 - [x] Prototyp Monte Carlo i pierwsza kalibracja (`proto/`)
 - [x] 12 pełnych scenariuszy + zalążki (`scenariusze/`)
-- [ ] **Przegląd przez właściciela** — decyzje z `14-samoewaluacja.md` (pytania otwarte)
+- [x] **Decyzje właściciela** (13.10.2026): odbiorcy — biuro; pierwsza kampania — wodociągi;
+      tempo — gracza (bez limitu dziennego); raporty działów co okres; algorytmy uczące się;
+      ocenę merytoryczną zrobi CISO
+- [x] Działy jako agenci + reżyser (`docs/15-…`, `proto/dzialy.js`, `proto/rezyser.js`)
+- [x] Kampania „Wodnik” grywalna w terminalu (`docs/16-…`, `proto/kampania.js`), zapis/wczytanie
+- [x] Pierwsze testy automatyczne (`node --test ciso-sim/test/*.test.js`)
+- [ ] **Ocena przez CISO**: realia (`02-…`), rubryki scenariuszy, karty kampanii „Wodnik”
 - [ ] Weryfikacja 🟡 w tekstach aktów (`02-…`, punkt 8)
 
 ## Etap B — „Gra papierowa" (1–2 tygodnie)
@@ -17,8 +23,8 @@ w co da się zagrać albo co da się pokazać ludziom z biura.
 Przed kodem UI — sprawdzić, czy to jest **zabawne**:
 - [ ] Rozegrać S01 i S02 jako grę fabularną przy stole (prowadzący czyta z pliku scenariusza,
       grupa decyduje). Zmierzyć: czas, zrozumiałość, emocje, gdzie ludzie się nudzą.
-- [ ] Rozegrać 6 miesięcy kampanii wodociągów na arkuszu (decyzje miesięczne + proto liczący
-      miesiąc). Czy decyzje są ciekawe? Czy gracz ma za mało/za dużo kart?
+- [ ] Rozegrać kampanię wodociągów w terminalu (`proto/kampania.js`) z 3–5 osobami z biura —
+      zamiast arkusza (prototyp już liczy miesiąc, działy i reżysera). Czy decyzje są ciekawe? Czy gracz ma za mało/za dużo kart?
 - [ ] Poprawki w mechanice i scenariuszach.
 
 ## Etap C — Szkielet aplikacji (2–3 tygodnie)
@@ -32,7 +38,8 @@ Przed kodem UI — sprawdzić, czy to jest **zabawne**:
 
 ## Etap D — Pierwsza grywalna kampania (3–4 tygodnie)
 
-- [ ] Samouczek „Biuro Rachunkowe Saldo" (6 miesięcy) od początku do końca
+- [ ] Kampania „Wodnik” w przeglądarce (z `proto/kampania.js`) z krótkim wprowadzeniem;
+      samouczek „Saldo” — później
 - [ ] Ekrany: Pulpit, Decyzje, Budżet i godziny, Kontrole, Dziennik
 - [ ] Tryb incydentu dla S01 (BEC) — zegar, wiedza, decyzje, komunikacja, debrief
 - [ ] Rejestr + debrief + raport końcowy (wersja minimalna)
@@ -40,7 +47,7 @@ Przed kodem UI — sprawdzić, czy to jest **zabawne**:
 
 ## Etap E — Pełna kampania i zarząd (4–6 tygodni)
 
-- [ ] Kampania wodociągów (24 mies.) z testami obciążeniowymi S03, S11, S12
+- [ ] Kampania wodociągów: raport kwartalny, budżet jako twarde ograniczenie, S11/S12 jako dane
 - [ ] Zarząd: raport kwartalny, osobowości, mandat, akceptacja ryzyka
 - [ ] Polityki z adopcją i wyjątkami; ludzie z rekrutacją i morale; dostawcy z oceną
 - [ ] Jakość Decyzji (rubryki + Monte Carlo w tle)

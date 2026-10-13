@@ -37,7 +37,11 @@ jest firma z zewnątrz na godziny.
 **Rola gracza:** informatyk na pół etatu, któremu prezes po raporcie ABW (2025) powierza
 „wdrożenie tego NIS2".
 
-- **Status KSC:** **kluczowy** (woda pitna). CSIRT: **INFRASTRUKTURA** (od 30.06.2026).
+> **Pierwsza kampania gry** — rozpisana szczegółowo i grywalna w terminalu: `16-kampania-wodociagi.md`.
+> Tabela poniżej to skrót; aktualna oś jest w `data/kampanie/wodociagi.js`.
+
+- **Status KSC:** **ważny** (woda pitna; 64 osoby = średnie przedsiębiorstwo — poprawka
+  z 13.10.2026, wcześniej błędnie „kluczowy"; 🟡 do potwierdzenia). CSIRT: **INFRASTRUKTURA** (od 30.06.2026).
 - **Budżet:** 120 tys. zł/rok + możliwy nabór na program dla wodociągów (🟡 kwoty nieznane).
 - **Ludzie:** prezes (inżynier sanitarny, pragmatyk, boi się „kompromitacji w gazecie"),
   główna księgowa (CFO-de-facto, liczy każdą złotówkę), kierownik stacji uzdatniania (zna
@@ -48,12 +52,14 @@ jest firma z zewnątrz na godziny.
 - **Oś kampanii:**
   | Okno | Test | Co sprawdza |
   |---|---|---|
-  | m. 2–4 | **S03 „Pompa na maksimum"** (haktywiści na HMI) | ekspozycja, OT, tryb ręczny, CSIRT sektorowy |
-  | m. 5–7 | Termin samorejestracji (3.10.2026) — **S11 „Wykaz"** | samoidentyfikacja, S46 |
-  | m. 8–12 | Awaria zasilania przepompowni + próba phishingu „od integratora" | BCP, weryfikacja dostawcy |
-  | m. 12–14 | Termin SZBI (3.04.2027) | zgodność |
+  | m. 1 / m. 2 | Samoidentyfikacja / ostrzeżenie CERT o haktywistach | status, sygnał → działanie |
+  | m. 3–5 | **S03 „Pompa na maksimum"** (haktywiści na HMI) | ekspozycja, OT, tryb ręczny, CSIRT sektorowy |
+  | m. 3–6 | **S01** — dostawca chemii „zmienia rachunek" | procedura płatności |
+  | m. 7 | **„Wykaz"** (jeśli brak wpisu) | samoidentyfikacja, S46 |
+  | m. 8 / 9 / 12 | Budżet 2027 / przejęcie oczyszczalni / umowa z integratorem | ryzyko w zł, M&A, klauzule |
+  | m. 13 | Termin SZBI (3.04.2027) | zgodność |
   | m. 15–20 | Druga fala haktywistów (DDoS na BOK + próba na przepompownię) | segmentacja, monitoring OT |
-  | m. 24 | **S12 „Audyt"** | dowody |
+  | m. 23–24 | **Kontrola / audyt na żądanie** (podmiot ważny po incydencie) | dowody |
 - **Rozwój biznesu:** przejęcie oczyszczalni z sąsiedniej gminy (m. ~10) — nowa sieć OT do
   zintegrowania („przejęcie" — zalążek Z15); inteligentne wodomierze (m. ~16) — nowa
   powierzchnia ataku i dane osobowe.

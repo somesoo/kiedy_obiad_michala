@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Firmy** | wodociągi (PWiK „Wodnik") — pierwszy test kampanii |
+| **Firmy** | wodociągi (PWiK „Wodnik") — pierwszy test kampanii (okno m. 3–5); dane: `S03-pompa.dane.js` |
 | **Rodzaj** | OT: zmiana parametrów procesu przez wystawiony do internetu panel HMI; haktywiści |
 | **Trudność** | ★★ |
 | **Czas gry / realny** | 10 dni (pierwsze 12 h gęsto) / 25 min |
@@ -82,7 +82,7 @@ w rogu, 14 tys. wyświetleń. Wójt dzwoni do prezesa: „Mamy zatrutą wodę?".
 
 | Opcja | Ocena |
 |---|---|
-| **Wczesne ostrzeżenie do CSIRT INFRASTRUKTURA** (podmiot kluczowy, zakłócenie usługi kluczowej) | ✅ |
+| **Wczesne ostrzeżenie do CSIRT INFRASTRUKTURA** (podmiot objęty KSC — ważny; zakłócenie dostaw wody) | ✅ |
 | Zawiadomienie policji (i — przy podejrzeniu działania obcego państwa — informacja dla ABW przez kanał CSIRT) | ✅ |
 | Zabezpieczenie dowodów: zrzut konfiguracji HMI/PLC, logi routera, film z Telegrama (zapis, link, data), zdjęcia ekranów | ✅ |
 | Przywrócenie panelu do internetu „bo integrator musi mieć dostęp" | ❌ |
@@ -108,7 +108,7 @@ zrobi: segmentacja OT, monitoring OT, BCP, umowa z integratorem. Debrief pokazuj
 
 ## Zegary i obowiązki
 
-- CSIRT INFRASTRUKTURA: 24 h / 72 h / miesiąc (podmiot kluczowy, sektor woda).
+- CSIRT INFRASTRUKTURA: 24 h / 72 h / miesiąc (podmiot ważny, sektor woda — obowiązek zgłaszania taki sam jak dla kluczowych).
 - Sanepid: przy podejrzeniu pogorszenia jakości wody — niezwłocznie (procedury sanitarne;
   szczegóły poza zakresem gry 🔵).
 - RODO: nie dotyczy (brak danych osobowych w HMI) — gra pyta, gracz ma odpowiedzieć „nie" z

@@ -53,7 +53,8 @@ function wczytaj(id) {
   return require(path.join(dir, plik));
 }
 
-async function graj(s, stan, wybierz) {
+async function graj(s, stan, wybierz, wypisz = console.log) {
+  const log = wypisz;
   let faza = s.start(stan);
   let zegar = 0;
   const decyzje = [];
@@ -62,16 +63,16 @@ async function graj(s, stan, wybierz) {
     const f = s.fazy[faza];
     zegar = Math.max(zegar, f.czas_h);
     for (const z of s.zegary || []) if (z.start === faza && zegaryStart[z.id] === undefined) zegaryStart[z.id] = zegar;
-    console.log(`\n── T+${zegar.toFixed(1)} h ─────────────────────────────`);
-    console.log(f.opis);
-    for (const [fakt, p] of f.wiedza || []) console.log(`  • ${fakt} [${p}]`);
+    log(`\n── T+${zegar.toFixed(1)} h ─────────────────────────────`);
+    log(f.opis);
+    for (const [fakt, p] of f.wiedza || []) log(`  • ${fakt} [${p}]`);
     for (const z of s.zegary || []) {
       if (zegaryStart[z.id] === undefined) continue;
-      console.log(`  ⏱ ${z.nazwa}: zostało ${(z.godzin - (zegar - zegaryStart[z.id])).toFixed(1)} h`);
+      log(`  ⏱ ${z.nazwa}: zostało ${(z.godzin - (zegar - zegaryStart[z.id])).toFixed(1)} h`);
     }
-    f.opcje.forEach((o, i) => console.log(`  ${i + 1}) ${o.tekst}`));
+    f.opcje.forEach((o, i) => log(`  ${i + 1}) ${o.tekst}`));
     const o = f.opcje[await wybierz(f.opcje)];
-    console.log(`  → ${o.tekst}`);
+    log(`  → ${o.tekst}`);
     zegar += o.czas_h || 0;
     Object.assign(stan, o.skutek || {});
     decyzje.push({ faza, o });
@@ -79,12 +80,12 @@ async function graj(s, stan, wybierz) {
   }
   const kon = s.zakonczenia.find(z => z.warunek(stan));
   const pkt = decyzje.reduce((a, d) => a + (d.o.pkt || 0), 0);
-  console.log(`\n══ ${kon.tytul} ══\n${kon.opis}`);
-  console.log(`\nJakość decyzji: ${pkt}/100\n`);
-  for (const d of decyzje) console.log(`${OCENY[d.o.ocena]} ${d.o.tekst}\n   ${d.o.dlaczego}`);
-  console.log('\nDebrief:');
-  for (const z of s.debrief) console.log(`  – ${z}`);
-  return { pkt, zakonczenie: kon.tytul };
+  log(`\n══ ${kon.tytul} ══\n${kon.opis}`);
+  log(`\nJakość decyzji: ${pkt}/100\n`);
+  for (const d of decyzje) log(`${OCENY[d.o.ocena]} ${d.o.tekst}\n   ${d.o.dlaczego}`);
+  log('\nDebrief:');
+  for (const z of s.debrief) log(`  – ${z}`);
+  return { pkt, zakonczenie: kon.tytul, decyzje: decyzje.map(d => ({ faza: d.faza, tekst: d.o.tekst, ocena: d.o.ocena, dlaczego: d.o.dlaczego })) };
 }
 
 async function main() {

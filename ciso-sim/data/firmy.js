@@ -35,7 +35,9 @@ module.exports = {
   },
   wodociagi: {
     nazwa: 'Przedsiębiorstwo Wodociągów i Kanalizacji „Wodnik" sp. z o.o.', rola: 'kampania',
-    sektor: 'woda pitna i ścieki', status_ksc: 'kluczowy', csirt: 'CSIRT INFRASTRUKTURA',
+    // 64 osoby = średnie przedsiębiorstwo w sektorze z załącznika → co do zasady podmiot WAŻNY
+    // (kluczowy byłby jako duży albo dawny operator usługi kluczowej — 🟡 docs/02-…).
+    sektor: 'woda pitna i ścieki', status_ksc: 'wazny', csirt: 'CSIRT INFRASTRUKTURA',
     regulacje: ['KSC', 'RODO', 'prawo wodne / sanepid'],
     pracownicy: 64, zasoby: { stacje: 45, serwery: 6, znane: 0.7 },
     koszt_dnia: 60000, przychod_rok: 28000000, rekordy: 22000,

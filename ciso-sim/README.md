@@ -26,7 +26,10 @@ tym, jak się skończyło.
 | Scenariusze incydentów | 12 pełnych + 32 zalążki (`scenariusze/`); S01 także jako plik danych, grywalny w terminalu |
 | Dane liczbowe (kontrole, zagrożenia, firmy) | `data/*.js`, pierwsza kalibracja |
 | Prototyp symulacji (Monte Carlo) | `proto/symulacja.js` — działa, wyniki w `proto/wyniki-*.txt` |
-| Silnik gry, serwer, front | **nie ma** — patrz roadmapa |
+| Działy jako uczące się agenty + reżyser | `docs/15-…`, `proto/dzialy.js`, `proto/rezyser.js` |
+| **Kampania „Wodnik” (wodociągi) — grywalna w terminalu**, własne tempo, zapis/wczytanie | `docs/16-…`, `proto/kampania.js` |
+| Testy automatyczne | `test/` — `node --test ciso-sim/test/*.test.js` |
+| Serwer, logowanie, front w przeglądarce | **nie ma** — patrz roadmapa |
 
 ## Mapa dokumentów
 
@@ -45,12 +48,23 @@ tym, jak się skończyło.
 | [`docs/11-ocena-i-debrief.md`](docs/11-ocena-i-debrief.md) | punktacja: jakość decyzji vs wynik, indeks odporności, raport końcowy |
 | [`docs/12-architektura-i-reuzycie.md`](docs/12-architektura-i-reuzycie.md) | stos, moduły, logowanie hasłem, co bierzemy z repo, czego NIE bierzemy |
 | [`docs/13-roadmapa.md`](docs/13-roadmapa.md) | etapy budowy: od prototypu tekstowego do pełnej gry |
-| [`docs/14-samoewaluacja.md`](docs/14-samoewaluacja.md) | krytyczna ocena projektu, wyniki symulacji, ryzyka, pytania do właściciela |
+| [`docs/14-samoewaluacja.md`](docs/14-samoewaluacja.md) | krytyczna ocena projektu, wyniki symulacji, ryzyka, decyzje właściciela |
+| [`docs/15-dzialy-i-rezyser.md`](docs/15-dzialy-i-rezyser.md) | działy firmy jako agenci (inicjatywy, pytaj/obejdź, uczenie, raporty) i reżyser (diagnoza, model gracza, rytm, przeciwnik) |
+| [`docs/16-kampania-wodociagi.md`](docs/16-kampania-wodociagi.md) | pierwsza kampania: ludzie, oś 24 miesięcy, wyniki trzech stylów gry |
 | [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 jako dane |
-| [`data/`](data/) | liczby: kontrole, zagrożenia, firmy |
-| [`proto/`](proto/) | prototyp symulacji Monte Carlo + rozgrywacz scenariuszy w terminalu |
+| [`data/`](data/) | liczby: kontrole, zagrożenia, firmy, inicjatywy działów, kampanie (`data/kampanie/`) |
+| [`proto/`](proto/) | silnik miesiąca, Monte Carlo, działy, reżyser, kampania i scenariusze w terminalu |
+| [`test/`](test/) | testy `node --test`: determinizm, zapis/odtworzenie, walidacja scenariuszy, kierunek uczenia się działów |
 
-## Szybki start dla prototypu
+## Szybki start
+
+```bash
+node ciso-sim/proto/kampania.js --zapis=moja-gra.json    # zagraj kampanię „Wodnik” we własnym tempie
+node ciso-sim/proto/kampania.js --auto=bierny --szczegoly # zobacz, co robią działy i reżyser
+node --test ciso-sim/test/*.test.js                       # testy
+```
+
+### Narzędzia projektowe
 
 ```bash
 node ciso-sim/proto/symulacja.js produkcja 2000   # firma: produkcja, szpital, wodociagi, gmina,

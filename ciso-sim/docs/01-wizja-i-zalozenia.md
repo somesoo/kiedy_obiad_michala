@@ -75,12 +75,16 @@ Każdy cel ma mechanikę, która go uczy — gra nie mówi tego w tekście, grac
 
 ## Doświadczenie gracza — jak to wygląda w praktyce
 
-**Dzień w biurze (tryb asynchroniczny, jak Snakes).** Rano gracz otwiera grę i dostaje
-miesiąc gry: briefing (wiadomości, ostrzeżenia CERT, prośby biznesu), skrzynkę decyzji i
-kalendarz projektów. Rozdziela budżet i godziny, zatwierdza albo odrzuca wnioski, pisze
-krótki raport dla zarządu. Kilka razy w kampanii **dzwoni telefon**: incydent przełącza grę
+**Własne tempo (decyzja właściciela, 13.10.2026).** Nie ma limitu „jeden ruch dziennie"
+jak w Snakes: gracz sam zamyka miesiąc, kiedy jest gotowy, i może przejść kampanię w jeden
+wieczór albo rozłożyć ją na tygodnie (stan zapisuje się po każdej decyzji). Miesiąc gry to: briefing (wiadomości, ostrzeżenia CERT, prośby biznesu), skrzynkę decyzji i
+kalendarz projektów, a na koniec poprzedniego okresu — **raporty innych działów** (co
+zrobiły, co planują, jak widzą bezpieczeństwo; `15-…`). Gracz rozdziela budżet i godziny,
+odpowiada działom, zatwierdza albo odrzuca wnioski, pisze krótki raport dla zarządu. Kilka razy w kampanii **dzwoni telefon**: incydent przełącza grę
 na zegar godzinowy — każda decyzja przesuwa czas, a zegary CSIRT/UODO tykają. Jeden miesiąc
 gry ≈ jedna sesja 10–20 minut; incydent ≈ 15–30 minut.
+
+**Odbiorcy na start: biuro** (decyzja właściciela) — kampania pierwsza: wodociągi (`16-…`).
 
 **Multiplayer biurowy (opcjonalny).** Wszyscy gracze żyją w tym samym „krajobrazie
 zagrożeń": ta sama fala phishingu, ta sama podatność w VPN-ie, ten sam dostawca SaaS

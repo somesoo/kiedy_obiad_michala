@@ -25,7 +25,7 @@
 | **Wersjonowanie frontu** `?v=<hash>` z listy plików | `SNAKES_SCRIPTS`, `VERSIONED_ASSETS` w `server.js` | to samo — przeglądarki nie zostają przy starym JS po wdrożeniu |
 | **Migracje przy starcie** z flagą w tabeli meta, flaga w tej samej transakcji | `slMetaGet/Set`, IIFE migracji | to samo, od pierwszego dnia (gra będzie zmieniać schemat) |
 | **Czas Warszawy, dni robocze** (czyste funkcje) | `lib/time.js` | kalendarz realny (terminy KSC, okno gry w biurze) — kopia 1:1 |
-| **Okno gry** (godziny pracy, weekendy) z panelu | `slPlayHours()` | tryb biurowy: tura dzienna tylko w godzinach pracy |
+| ~~Okno gry~~ (godziny pracy) | `slPlayHours()` | **nie bierzemy** — gra idzie we własnym tempie gracza (decyzja 13.10.2026) |
 | **Panel admina** z kartami | `routes/snakes-admin.js`, `snakes-admin.html` | prowadzący: lista graczy, podgląd kampanii, reset, przełączenie fali, tryb szkolenia |
 | **Odświeżanie co 10 s z zachowaniem tego, co użytkownik wpisuje** | pole wpłaty bossa | skrzynka decyzji i raport dla zarządu (gracz pisze — nie kasować) |
 | **Tekst po polsku, komentarze „dlaczego"** | cały repo | to samo |
@@ -89,7 +89,7 @@ ciso-sim/
     time.js               — kopia z repo (czas Warszawy)
     backups.js            — kopia z repo (nowe nazwy plików)
     rng.js                — deterministyczny generator (mulberry32) + ziarno kampanii
-    engine/
+    engine/               — dziś w proto/: silnik.js, dzialy.js, rezyser.js (+ testy test/)
       threats.js          — silnik zagrożeń (z proto/symulacja.js)       [czysty, bez bazy]
       controls.js         — skuteczność, godziny, alerty                  [czysty]
       month.js            — symulacja miesiąca: łączy powyższe            [czysty]
@@ -106,7 +106,10 @@ ciso-sim/
 
 **Silnik jest czysty** (bez bazy, bez Express): wejście = stan + decyzje + ziarno, wyjście =
 nowy stan + wpisy rejestru. Dzięki temu:
-- ten sam kod liczy grę i Monte Carlo do oceny decyzji (`11-…`),
+- ten sam kod liczy grę i Monte Carlo do oceny decyzji (`11-…`) — **już tak jest w prototypie**:
+  `proto/silnik.js` liczy i `symulacja.js`, i `kampania.js`; test migawki pilnuje zgodności,
+- zapis gry to **lista decyzji**, a wczytanie to odtworzenie z ziarna (prototyp to robi i test
+  to sprawdza) — tani zapis, pełna historia do debriefu i darmowa kontrola determinizmu,
 - da się go testować bez serwera (w tym repo nie ma testów — **ta gra powinna je mieć od
   początku**, choćby `node --test` na silniku; CLAUDE.md repo mówi, że brak testów to główny
   powód, dla którego duże zmiany są tu ryzykowne).
