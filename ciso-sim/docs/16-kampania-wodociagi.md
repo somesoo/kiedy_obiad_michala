@@ -87,11 +87,15 @@ przesunięte na m. 3–5.
 
 ## 16.5. Co pokazało 20 przebiegów na styl gry (`proto/wyniki-kampania-wodociagi-2026-10-13.txt`)
 
-| Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Jakość decyzji |
-|---|---|---|---|---|---|---|---|---|---|---|
-| **rozsądny** („tak, ale bezpiecznie", dobre opcje) | 89 tys. | 758 tys. | 60 | **0,83** | 0,0 | 0,1 | 62 | 41 | 20% | 100% |
-| **odmawiający** (odmowa + kara za obejścia) | 87 tys. | 661 tys. | 60 | **0,03** | 0,8 | 0,0 | 62 | **16** | 10% | 57% |
-| **bierny** (tylko obowiązkowe, najgorsze opcje) | **1,62 mln** | 46 tys. | **10** | 0,32 | **21,4** | **3,7** | **7** | 19 | 100% | 9% |
+Stan po poprawkach z przypadków brzegowych (`17-…`): twardy budżet, limit nadgodzin, tasowane
+opcje, oceniana bezczynność, Indeks Odporności (`11-…`).
+
+| Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Jakość decyzji | **Indeks** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **mądry** (dobre odpowiedzi + podstawy „tanie i ważne najpierw") | **91 tys.** | 469 tys. | **54** | 0,56 | 0,3 | 0,1 | 62 | **58** | 25% | 81% | **923** |
+| rozsądny („tak, ale bezpiecznie", dobre opcje) | 216 tys. | 315 tys. | 41 | **0,64** | 0,1 | 0,0 | 59 | 55 | 30% | 87% | 864 |
+| odmawiający (odmowa + kara za obejścia) | 140 tys. | 269 tys. | 44 | **0,02** | 0,8 | 0,0 | 61 | 29 | 10% | 59% | 807 |
+| bierny (tylko obowiązkowe, najgorsze opcje) | **1,25 mln** | 30 tys. | **13** | 0,34 | **16,6** | **2,7** | **20** | **1** | 100% | 18% | 203 |
 
 Wnioski:
 1. **Bierność to katastrofa, ale nie z powodu „hakerów z filmów".** Ponad 21 obejść działów
@@ -100,13 +104,16 @@ Wnioski:
    (waga ×2) i dostawców (×1,9). Sama „tło-statystyka" silnika tego nie pokazywała — dopiero
    działy i reżyser.
 2. **Odmawianie wszystkiego daje podobne bezpieczeństwo krótkoterminowo, ale kosztuje
-   politycznie**: zaufanie działów spada do zera w ~rok, mandat do 16 (blisko odwołania).
+   politycznie**: zaufanie działów spada do zera w ~rok, mandat do ok. 30 (z 50 na starcie).
    Pierwsza wersja modelu tego nie widziała — „odmawiający" wychodził *lepiej* niż „rozsądny".
    Poprawka: blokowanie biznesu kosztuje mandat (kierownik idzie do prezesa), a dział, który
    boi się kary, ukrywa się lepiej. To jest realna dynamika i lekcja E9.
-3. **„Rozsądny" przekracza budżet** (758 tys. zł przy ok. 530 tys. przyznanych w 3 latach
-   budżetowych) — automat nie umie priorytetyzować. Żywy gracz musi wybierać; to jest
-   najważniejsza umiejętność, której gra ma uczyć, i wymaga lepszej podpowiedzi „co najpierw".
+3. **Budżet jest twardy, więc wygrywa kolejność zakupów.** Pierwsza wersja pozwalała
+   „rozsądnemu" wydać 758 tys. zł przy ok. 530 tys. przyznanych. Teraz zakup przechodzi tylko
+   w ramach budżetu roku (+10%, z abonamentem do grudnia), a „mądry" — ta sama ocena kart, ale
+   podstawy kupowane w kolejności „tanie i ważne najpierw" — ma ponad dwa razy mniejsze straty
+   i lepszy audyt. Bierny traci mandat do zera (odwołanie). To jest umiejętność, której gra ma
+   uczyć: priorytety przy ograniczonym budżecie.
 4. **W małej spółce wodnej rachunek w złotówkach nie przemawia za bezpieczeństwem.**
    Monte Carlo samego tła daje dla strategii „nic" ok. 275 tys. zł kosztów, mniej niż jakikolwiek
    program ochrony. To prawdziwy problem małych przedsiębiorstw komunalnych (i powód, dla
@@ -118,8 +125,7 @@ Wnioski:
 ## 16.6. Co dalej w tej kampanii (kolejka)
 
 - Podpowiedź priorytetów („trzy najtańsze ruchy na Twój największy problem") — tryb łatwy.
-- Budżet jako twarde ograniczenie zakupów (dziś: tylko kara mandatowa za przekroczenie).
-- Raport kwartalny dla zarządu (`03-…`, 3.8) — dziś tylko karta budżetowa.
+- Raport kwartalny dla zarządu (`03-…`, 3.8) — dziś kwartalna ocena liczona automatycznie, bez karty dla gracza.
 - S11 i S12 jako pełne scenariusze danych (dziś: karta „Wykaz" i kontrola liczona z rejestru).
 - Oczyszczalnia Lipno jako druga sieć OT z własnym działem po przejęciu.
 - Debrief miesiąca: „co reżyser wybrał i dlaczego" w języku gracza (dziś tylko `d` — dziennik).

@@ -178,8 +178,9 @@ module.exports = {
         { tekst: 'MFA dla wszystkich, z aplikacją (dopasowanie numeru) i krótką instrukcją dla terenowców; zarząd też.',
           zlec: ['mfa'], mandat: -2, dzial: { siec: { zmeczenie: 0.1 } }, ocena: 'dobra',
           dlaczego: 'Najtańsza z dużych kontroli. Bez wyjątków dla zarządu — to ich konta są najcenniejsze.' },
+        // Wyjątek nie jest darmowy: konta zarządu to najcenniejszy cel (przejęcie, „na prezesa").
         { tekst: 'MFA dla wszystkich oprócz zarządu.',
-          zlec: ['mfa'], mandat: 1, flagi: { wyjatek_mfa_zarzad: true }, ocena: 'dopuszczalna',
+          zlec: ['mfa'], mandat: 1, flagi: { wyjatek_mfa_zarzad: true }, wektory: { poswiadczenia: 1.15, bec: 1.25 }, ocena: 'dopuszczalna',
           dlaczego: 'Wyjątek dla zarządu zostawia otwarte najcenniejsze konta (wraca w scenariuszach „na prezesa").' },
         { tekst: 'Najpierw szkolenia, MFA za rok.', ocena: 'blad',
           dlaczego: 'Szkolenie nie zastąpi drugiego składnika — przejęte hasło to wciąż otwarte drzwi.' },
@@ -284,7 +285,7 @@ module.exports = {
       problemy: ['zgodnosc'], cele: ['E7'],
       opcje: [
         { tekst: 'Krótkie szkolenie dla zarządu z ćwiczeniem na przykładzie z sektora (2 h) + zaświadczenie.',
-          h: 6, pln: 2500, mandat: 3, flagi: { szkolenie_kierownika: true }, dzial: { zarzad: { swiadomosc: 0.2 } }, ocena: 'dobra',
+          h: 6, pln: 2500, mandat: 3, szkolenie_kierownika: true, dzial: { zarzad: { swiadomosc: 0.2 } }, ocena: 'dobra',
           dlaczego: 'Obowiązek ustawowy z osobistą odpowiedzialnością kierownika. Ćwiczenie na przykładzie z własnego sektora przekonuje lepiej niż slajdy.' },
         { tekst: 'Przesunąć na koniec roku.', pozniej: { karta: 'K_szkolenie_kierownika', za: 3 }, ocena: 'dopuszczalna',
           dlaczego: 'Można, ale obowiązek jest w roku kalendarzowym — i zwykle przesuwa się w nieskończoność.' },
@@ -292,7 +293,7 @@ module.exports = {
     },
     K_szbi: {
       tytul: 'SZBI do 3 kwietnia 2027', od: 'Zarząd', okno: [5, 12],
-      tresc: 'Do 3.04.2027 trzeba wdrożyć system zarządzania bezpieczeństwem informacji: ryzyko, polityki, ciągłość, dostawcy, przeglądy.',
+      tresc: 'Do 3.04.2027 trzeba wdrożyć system zarządzania bezpieczeństwem informacji: ryzyko, polityki, ciągłość, dostawcy, przeglądy. Wdrożenie trwa realnie ok. pół roku.',
       problemy: ['zgodnosc'], cele: ['E11', 'E1'],
       opcje: [
         { tekst: 'SZBI na miarę firmy: szacowanie ryzyka z kierownikami działów, krótkie polityki, rejestr dostawców; doradca na 10 dni.',
@@ -338,6 +339,10 @@ module.exports = {
         { tekst: 'Przed połączeniem: przegląd bezpieczeństwa oczyszczalni (zasoby, dostępy, ślady włamań), połączenie przez zaporę dopiero po porządkach.',
           h: 40, pln: 20000, flagi: { oczyszczalnia_sprawdzona: true }, ocena: 'dobra',
           dlaczego: 'Przejmując firmę, przejmujesz też jej intruzów. Najpierw ocena i izolacja, potem połączenie.' },
+        // Uczciwe wyjście bez budżetu: obowiązkowa karta musi je mieć (docs/17-…).
+        { tekst: 'Nie łączymy sieci, dopóki nie zrobimy przeglądu — oczyszczalnia pracuje osobno, integracja później.',
+          h: 4, mandat: -2, flagi: { oczyszczalnia_odlozona: true }, ocena: 'dopuszczalna',
+          dlaczego: 'Bezpieczne, ale zarząd czeka na efekty przejęcia, a dwie osobne sieci to podwójna obsługa.' },
         { tekst: 'Łączymy od razu, sprawdzimy po drodze.',
           nieznane: 12, wektory: { uslugi: 1.2 }, intruz: { kto: 'broker', etap: 'dostep', wektor: 'uslugi' }, ocena: 'blad',
           dlaczego: 'W przejętej sieci od miesięcy siedział broker dostępu — połączenie wpuściło go do Waszej.' },
@@ -372,6 +377,9 @@ module.exports = {
         { tekst: 'Ocena skutków dla ochrony danych (dane godzinowe zdradzają, kiedy ktoś jest w domu), ocena dostawcy, umowa powierzenia, minimalizacja danych.',
           h: 24, dzial: { bok: { zaufanie: 0.1 } }, wektory: { dostawca: 1.05 }, ocena: 'dobra',
           dlaczego: 'Nowy projekt cyfrowy to nowe dane osobowe i nowy dostawca — taniej ocenić przed podpisaniem niż po.' },
+        { tekst: 'Minimum: umowa powierzenia z terminem zgłaszania naruszeń i MFA dla kont dostawcy — bez pełnej oceny.',
+          h: 8, wektory: { dostawca: 1.15 }, ocena: 'dopuszczalna',
+          dlaczego: 'Najważniejsze zabezpieczenia prawne i dostępu są, ale ryzyka danych godzinowych nikt nie ocenił.' },
         { tekst: 'Projekt biznesowy — nie mieszam się.', wektory: { dostawca: 1.3, poswiadczenia: 1.1 }, ocena: 'blad',
           dlaczego: 'Bezpieczeństwo w projektowaniu kosztuje mało; dorabiane po wdrożeniu — dużo.' },
       ],

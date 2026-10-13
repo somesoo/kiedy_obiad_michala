@@ -2,7 +2,7 @@
 
 Osobna gra w tym repo: symulator osoby odpowiedzialnej za cyberbezpieczeństwo w polskiej
 organizacji. **Nie jest częścią Snakes** — nie importuje niczego z `../server.js` ani `../lib/`
-(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…16`.
+(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…17`.
 
 Stan: projekt + dane + silnik miesiąca + działy-agenci + reżyser + **grywalna kampania „Wodnik”
 w terminalu** + 12 scenariuszy (S01, S03 jako dane) + testy. Serwera, logowania i frontu w
@@ -35,6 +35,10 @@ raporty innych działów; algorytmy uczące się na aktualnym problemie firmy; m
   „pogody" w innym. Każdy wybór loguje powód (`k.log`). Reżyser **nie zmienia skuteczności
   kontroli gracza**, wybiera tylko spośród prawdopodobnych zdarzeń i moment w oknie.
 - **Test obciążeniowy nie wypada przed swoim sygnałem** (S03 po ostrzeżeniu CERT) — „żadnych gotcha".
+- **Reguły z przypadków brzegowych** (`docs/17-…`, 17.5): obowiązkowa karta ma tanie uczciwe
+  wyjście (walidator); kolejność opcji zawsze tasowana; brak decyzji jest oceniany; żaden mnożnik
+  nie rośnie przyrostowo bez sufitu (rejestr `k.ryzyka`); wynik to Indeks Odporności, nie mandat;
+  koszty reagowania nie idą z budżetu; sygnały bywają fałszywe, szacunki mają błąd.
 - **Zapis gry = lista decyzji**, wczytanie = odtworzenie z ziarna. Nowa akcja gracza musi
   przechodzić przez `rozstrzygnij`/`zlecRecznie`/`zagrajZdarzenie`/`zamknijMiesiac`
   (`proto/kampania.js`) i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan.
@@ -46,7 +50,8 @@ node ciso-sim/proto/symulacja.js <firma> [N]      # porównanie strategii (Monte
 node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--auto=najlepsza|najgorsza]
                                                  # scenariusz w terminalu + walidacja pliku
 node ciso-sim/proto/kampania.js [--zapis=plik.json] | --auto=rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
-node ciso-sim/proto/porownaj-style.js            # 3 style gry × 20 ziaren (wyniki → docs/16-…)
+node ciso-sim/proto/porownaj-style.js            # 4 style gry × 20 ziaren (wyniki → docs/16-…)
+node ciso-sim/proto/brzegowe.js [N]              # strategie-prowokacje + niezmienniki (→ docs/17-…)
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 

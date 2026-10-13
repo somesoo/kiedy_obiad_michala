@@ -25,12 +25,18 @@ IO = 1000 × Σ wagi × składowe (każda 0–1)
 | Składowa | Waga | 1,0 gdy | 0 gdy |
 |---|---|---|---|
 | Straty finansowe vs wartość referencyjna (strategia „nic" dla tej firmy w tej samej „pogodzie") | 0,25 | straty ≤ 10% referencji | ≥ referencja |
-| Koszt bezpieczeństwa vs budżet (efektywność) | 0,10 | wydane ≤ budżet i dobrze ulokowane | przekroczenie albo „shelfware" |
+| Koszt bezpieczeństwa vs budżet (efektywność) | 0,05 | wydane ≤ budżet i dobrze ulokowane | przekroczenie albo „shelfware" |
 | Skutki niefinansowe (zdrowie, woda, ciepło, usługi publiczne) | 0,20 | zero | poważne |
 | Zgodność (wynik audytu S12) | 0,15 | audyt bez niezgodności głównych | brak SZBI / brak wpisu |
 | Reputacja (koniec kampanii) | 0,10 | ≥ startowa | „wskazanie palcem", wyciek w mediach bez rzetelnej komunikacji |
 | Dojrzałość (etap firmy na koniec) | 0,10 | etap ≥ cel kampanii | etap 0 |
-| Ludzie (morale, rotacja) | 0,10 | zespół cały i zdrowy | wypalenie, odejścia |
+| Ludzie (morale, rotacja) | 0,05 | zespół cały i zdrowy | wypalenie, odejścia |
+| Biznes (część próśb działów, która doszła do skutku) | 0,10 | działy dostają „tak, ale bezpiecznie" | wszystko blokowane albo odkładane |
+
+Wagi po przypadkach brzegowych (`17-…`): koszt vs budżet 0,05 (był 0,10), ludzie 0,05
+(było 0,10), nowa składowa „biznes" 0,10 — bez niej gracz odmawiający wszystkiego wychodził
+lepiej niż rozsądny. Implementacja: `indeksOdpornosci` w `proto/kampania.js`; straty porównuje
+z graczem biernym na tym samym ziarnie.
 
 „Ta sama pogoda": silnik przechowuje ziarno losowości kampanii i liczy na nim strategię
 referencyjną. Gracz porównuje się z „jak by było, gdybyś nic nie robił" w tym samym świecie

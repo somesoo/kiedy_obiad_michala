@@ -178,7 +178,8 @@ function zakonczMiesiac(st) {
   };
   const reakcja = Math.min(0.8, czynne.reduce((a, k) => a + (k.reakcja || 0) * skut[k.id], 0));
   const przestojMn = czynne.reduce((a, k) => a * (k.odtwarzanie?.przestoj ? 1 - (1 - k.odtwarzanie.przestoj) * skut[k.id] : 1), 1);
-  const ubezp = czynne.find(k => k.ubezpieczenie);
+  // Kłamstwo w ankiecie = odmowa wypłaty (kampania ustawia mod.bez_ubezpieczenia).
+  const ubezp = st.mod.bez_ubezpieczenia ? null : czynne.find(k => k.ubezpieczenie);
 
   const skutek = (rodzaj) => {
     const S = Z.SKUTKI;
@@ -246,6 +247,9 @@ function zakonczMiesiac(st) {
       if (rnd() < wykryj(x.etap, 1 / sp.skrytosc > 1 ? 1 : sp.skrytosc)) {
         const op = Z.OPANOWANIE[x.etap];
         w.wydatki += op.pln * (1 - 0.5 * reakcja);
+        // Osobno: koszty reagowania idą z rezerwy firmy, nie z budżetu bezpieczeństwa
+        // (inaczej gracz, który więcej wykrywa, płaciłby mandatem za skuteczność).
+        w.reagowanie = (w.reagowanie || 0) + op.pln * (1 - 0.5 * reakcja);
         w.nadgodziny += op.h;
         if (x.etap === 'dostep' || x.etap === 'eskalacja') w.wykryte_wczesnie++;
         const opanowane = rnd() >= Z.NIEUDANE_OPANOWANIE * (1 - reakcja);
@@ -295,7 +299,24 @@ function presjaWektorow(st) {
   return wynik;
 }
 
+// Walidacja profilu firmy (jak lib/seasons.js waliduje plansze): zły profil nie wchodzi do gry.
+// Przypadek brzegowy: firma z 0 osób i 0 komputerów „traciła" 195 tys. zł przez wektor dostawcy.
+function walidujFirme(f) {
+  const b = [];
+  if (!(f.pracownicy >= 1)) b.push('pracownicy < 1');
+  const z = f.zasoby || {};
+  if (!((z.stacje || 0) + (z.serwery || 0) >= 1)) b.push('brak zasobów (stacje + serwery < 1)');
+  if (!(z.znane > 0 && z.znane <= 1)) b.push('zasoby.znane poza (0, 1]');
+  for (const n of ['koszt_dnia', 'przychod_rok', 'rekordy', 'budzet_rok']) if (!(f[n] >= 0)) b.push(`${n} < 0 albo brak`);
+  if (!(f.zespol?.fte >= 0 && f.zespol?.h_it >= 0)) b.push('zespol.fte / zespol.h_it');
+  for (const id of f.na_starcie || []) if (!kontrola[id]) b.push(`na_starcie: nieznana kontrola ${id}`);
+  for (const [w, v] of Object.entries(f.wektory || {})) { if (!Z.WEKTORY[w]) b.push(`wektory: nieznany ${w}`); if (!(v >= 0)) b.push(`wektory.${w} < 0`); }
+  for (const s of Object.keys(f.sprawcy || {})) if (!Z.SPRAWCY[s]) b.push(`sprawcy: nieznany ${s}`);
+  return b;
+}
+
 module.exports = {
+  walidujFirme,
   TYGODNIE, H_NA_ETAT, KOSZT_ETATU, PROG_POWAZNY,
   mulberry32, poisson, pick, kontrola,
   nowyStan, zlec, dodajEtat, zakonczMiesiac, dziala, kosztMiesieczny, presjaWektorow,

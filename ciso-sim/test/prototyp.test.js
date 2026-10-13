@@ -69,3 +69,63 @@ test('mgła wojny: raporty działów nie zdradzają, kto jest w sieci', async ()
     assert.ok(!new RegExp(`(^|[^\\p{L}])${slowo}`, 'iu').test(tekst), slowo);   // całe słowo, nie „adaptacja"
   }
 });
+
+// ── PRZYPADKI BRZEGOWE (docs/17-przypadki-brzegowe.md) ──
+// Każdy test tu odpowiada absurdowi, który naprawdę wyszedł w laboratorium (proto/brzegowe.js).
+const B = require('../proto/brzegowe');
+const S = require('../proto/silnik');
+
+test('dane: kampania i wszystkie firmy przechodzą walidację; firma bez ludzi i zasobów — nie', () => {
+  assert.deepStrictEqual(K.walidujKampanie(require('../data/kampanie/wodociagi')), []);
+  for (const [id, f] of Object.entries(FIRMY)) assert.deepStrictEqual(S.walidujFirme(f), [], id);
+  assert.ok(S.walidujFirme({ ...FIRMY.biuro, pracownicy: 0, zasoby: { stacje: 0, serwery: 0, znane: 0.5 } }).length >= 2);
+});
+
+test('niezmienniki trzymają się dla każdej głupiej i cwanej strategii', async () => {
+  for (const [nazwa, strat] of Object.entries(B.STRATEGIE)) {
+    for (const seed of [1, 2]) {
+      strat.reset?.(seed);
+      const k = await K.grajAuto(strat, seed, false, cicho, false);
+      assert.deepStrictEqual(B.sprawdz(k, nazwa, seed), []);
+    }
+  }
+});
+
+test('„zawsze pierwsza odpowiedź" nie wygrywa (kolejność opcji jest tasowana)', async () => {
+  let jd = 0;
+  for (const seed of [1, 2, 3]) {
+    const k = await K.grajAuto({ karta: () => 0, scen: () => 0 }, seed, false, cicho, false);
+    jd += k.decyzje.reduce((a, d) => a + ({ dobra: 1, dopuszczalna: 0.5, blad: 0 })[d.ocena], 0) / k.decyzje.length;
+  }
+  assert.ok(jd / 3 < 0.7, `jakość decyzji „zawsze a)" = ${(jd / 3).toFixed(2)}`);
+});
+
+test('Indeks Odporności porządkuje style sensownie: mądry > potakiwacz > odkładacz', async () => {
+  const io = {};
+  for (const n of ['madry', 'potakiwacz', 'odkladacz']) {
+    io[n] = 0;
+    for (const seed of [1, 2, 3]) io[n] += (await K.indeksOdpornosci(await K.grajAuto(B.STRATEGIE[n], seed, false, cicho, false))).wynik;
+  }
+  assert.ok(io.madry > io.potakiwacz && io.potakiwacz > io.odkladacz, JSON.stringify(io));
+});
+
+test('limity: opcja ponad godziny albo budżet jest niedostępna i nic nie zmienia', () => {
+  const k = K.nowaKampania('wodociagi', 1);
+  k.karty.push({ id: 'test', zrodlo: 'katalog', tytul: 't', cele: [], opcje: [
+    { tekst: 'za dużo godzin', h: 1000, ocena: 'dobra', dlaczego: '-' },
+    { tekst: 'za drogo', pln: 10000000, ocena: 'dobra', dlaczego: '-' }] });
+  const przed = JSON.stringify([k.hKart, k.wydaneRok, k.akcje.length]);
+  assert.throws(() => K.rozstrzygnij(k, 'test', 0), /brak godzin/);
+  assert.throws(() => K.rozstrzygnij(k, 'test', 1), /brak budżetu/);
+  assert.strictEqual(JSON.stringify([k.hKart, k.wydaneRok, k.akcje.length]), przed);
+});
+
+test('mgła wojny: sygnały bywają fałszywe, a szacunek zasobów nie jest prawdą', async () => {
+  let falszywe = 0;
+  for (const seed of [1, 2, 3]) {
+    await K.grajAuto({ karta: (c, k) => { if (c.zrodlo === 'sygnal' && !c.intruz) falszywe++; return c.obowiazkowa ? 0 : null; }, scen: () => 0 }, seed, false, cicho, false);
+  }
+  assert.ok(falszywe > 0, 'karta „sygnał" nie może oznaczać pewnego intruza');
+  const bledy = [1, 2, 3, 4].map(s => Math.abs(K.nowaKampania('wodociagi', s).mglaBlad));
+  assert.ok(bledy.some(b => b > 0.02), 'środek przedziału nie może być prawdą');
+});

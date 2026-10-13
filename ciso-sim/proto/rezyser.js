@@ -146,8 +146,12 @@ function poMiesiacu(k, intensywnosc) {
   r.spokojneMiesiace = intensywnosc < 0.3 ? r.spokojneMiesiace + 1 : 0;
 
   // Przeciwnik: wektory, które działały, dostają więcej prób (wagi mnożnikowe, sufit 0,5–2).
+  // Skuteczność wygładzona (a priori ~1% przy 10 pseudo-próbach): przy 1 udanej na 2 próby
+  // waga skakała od razu do maksimum — przeciwnik reagował na szum, nie na słabość.
   const proby = k.st.ostatni?.proby || {};
-  const skut = Object.entries(proby).filter(([, [n]]) => n > 0).map(([w, [n, u]]) => [w, u / n]);
+  const skut = Object.entries(proby).filter(([, [n]]) => n > 0).map(([w, [n, u]]) => [w, (u + 0.1) / (n + 10)]);
+  // Zapominanie: bez nowych dowodów wagi wracają w stronę 1 (napastnicy też zmieniają cele).
+  for (const w of Object.keys(r.wagi)) r.wagi[w] = Math.pow(r.wagi[w], 0.9);
   if (skut.length) {
     const sr = skut.reduce((a, [, s]) => a + s, 0) / skut.length;
     for (const [w, s] of skut) r.wagi[w] = Math.min(2, Math.max(0.5, (r.wagi[w] ?? 1) * Math.exp(ETA_PRZECIWNIKA * (s - sr))));
@@ -159,7 +163,8 @@ function poMiesiacu(k, intensywnosc) {
   const ws = Object.keys(r.wagi);
   if (ws.length) {
     const sr = ws.reduce((a, w) => a + r.wagi[w], 0) / ws.length;
-    for (const w of ws) r.wagi[w] /= sr;
+    // Po normalizacji jeszcze raz sufit — inaczej dzielenie przez średnią < 1 wypychało wagę ponad 2.
+    for (const w of ws) r.wagi[w] = Math.min(2, Math.max(0.5, r.wagi[w] / sr));
   }
   const opis = ws.filter(w => Math.abs(r.wagi[w] - 1) > 0.1).map(w => `${w} ×${r.wagi[w].toFixed(2)}`).join(', ');
   if (opis) k.log('rezyser', `Przeciwnik przesuwa próby: ${opis}`);

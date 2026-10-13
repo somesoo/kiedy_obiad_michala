@@ -87,19 +87,47 @@ function wykonajPlan(k, d) {
   const powod = `P(pytaj)=${pPytaj.toFixed(2)} [Q pytaj ${d.Q.pytaj.toFixed(2)} / obejdź ${d.Q.obejdz.toFixed(2)}, ` +
     `zaufanie ${d.zaufanie.toFixed(2)}, świadomość ${d.swiadomosc.toFixed(2)}, pilność ${pilnosc.toFixed(2)}]`;
   if (pyta) return { typ: 'pytanie', dzial: d.id, ini: id, powod };
-  // Obejście: ryzyko wchodzi do silnika od razu, gracz nic nie wie.
-  zastosujRyzyko(k, ini.ryzyko, 1);
+  // Obejście: ryzyko wchodzi do silnika od razu, gracz nic nie wie. Tylko obejście dokłada
+  // urządzenia POZA ewidencją — przy zgodzie bezpieczeństwo wie, co powstało.
+  zastosujRyzyko(k, ini.ryzyko, 1, `${d.id}:${id}`, 'obejscie', true);
   d.ukryte.push({ ini: id, m: k.st.m });
   d.zdarzeniaOkresu.push({ rodzaj: 'obejscie', ini: id });
   return { typ: 'obejscie', dzial: d.id, ini: id, powod };
 }
 
-function zastosujRyzyko(k, ryzyko, ulamek) {
-  if (!ryzyko || ulamek <= 0) return;
-  for (const [w, mn] of Object.entries(ryzyko.wektory || {})) {
-    k.modStale[w] = (k.modStale[w] ?? 1) * (1 + (mn - 1) * ulamek);
+// ── REJESTR RYZYK DZIAŁÓW ──
+// Klucz „dział:inicjatywa" → { wektory, ulamek, zrodlo, nieznane }. Mnożniki wektorów liczy się
+// z rejestru OD NOWA przy każdej zmianie (mnozniki()), zamiast mnożyć je przyrostowo.
+// Dlaczego: przypadki brzegowe z 13.10.2026 — ten sam dział trzeci raz „wprowadzał czat AI"
+// i ryzyko insidera rosło ×23; a cofanie dzieleniem (legalizacja, kara) rozjeżdżało się
+// z sufitami. Teraz powtórka tej samej inicjatywy przez ten sam dział nie mnoży ryzyka
+// (to dalej jeden czat w jednym dziale), a legalizacja/kara tylko zmieniają ułamek.
+function zastosujRyzyko(k, ryzyko, ulamek, klucz, zrodlo, nieznane = false) {
+  if (!ryzyko) return;
+  const r = k.ryzyka[klucz] || (k.ryzyka[klucz] = { wektory: ryzyko.wektory || {}, ulamek: 0, nieznane: 0, zrodlo });
+  r.ulamek = Math.max(r.ulamek, ulamek);
+  r.zrodlo = zrodlo;
+  if (nieznane && ryzyko.nieznane) { const n = ryzyko.nieznane * ulamek; dodajNieznane(k, n); r.nieznane += n; }
+}
+
+// Ustawia ułamek wprost (legalizacja = resztka, kara = 0). Urządzenia wracają do ewidencji.
+function ustawRyzyko(k, klucz, ulamek, zrodlo) {
+  const r = k.ryzyka[klucz];
+  if (!r) return;
+  if (r.nieznane) { dodajNieznane(k, -r.nieznane); r.nieznane = 0; }
+  if (ulamek <= 0) { delete k.ryzyka[klucz]; return; }
+  r.ulamek = ulamek;
+  r.zrodlo = zrodlo;
+}
+
+const SUFIT_RYZYKA = 3;      // działy razem nie potroją żadnego wektora — dalej to już absurd modelu
+function mnozniki(k) {
+  const out = {};
+  for (const r of Object.values(k.ryzyka)) {
+    for (const [w, mn] of Object.entries(r.wektory)) out[w] = (out[w] ?? 1) * (1 + (mn - 1) * r.ulamek);
   }
-  if (ryzyko.nieznane) dodajNieznane(k, ryzyko.nieznane * ulamek);
+  for (const w of Object.keys(out)) out[w] = Math.min(SUFIT_RYZYKA, out[w]);
+  return out;
 }
 
 // Nowe urządzenia poza ewidencją obniżają „znane" (silnik chroni tylko znane zasoby).
@@ -130,8 +158,12 @@ function kartaPytania(k, p) {
         dlaczego: 'Odmowa z alternatywą jest uczciwa, choć dział nie dostaje tego, czego chciał.' },
       { tekst: 'Nie.', odpowiedz: 'odmowa', ocena: 'blad',
         dlaczego: 'Odmowa bez alternatywy uczy działy, że pytanie się nie opłaca — następnym razem zrobią po swojemu.' },
-      { tekst: 'Odłóżmy to na przyszły miesiąc.', odpowiedz: 'odloz', ocena: 'dopuszczalna',
-        dlaczego: 'Czekanie zwiększa presję — dział częściej obejdzie zasady przy kolejnej okazji.' },
+      // Pierwsze „odłóż" bywa rozsądne; drugie z rzędu to już unikanie decyzji.
+      (d.odlozenia?.[p.ini] || 0) >= 1
+        ? { tekst: 'Odłóżmy to jeszcze raz.', odpowiedz: 'odloz', ocena: 'blad',
+          dlaczego: 'Drugi raz odkładasz tę samą sprawę. Dział przestaje czekać — zrobi to po swojemu.' }
+        : { tekst: 'Odłóżmy to na przyszły miesiąc.', odpowiedz: 'odloz', ocena: 'dopuszczalna',
+          dlaczego: 'Czekanie zwiększa presję — dział częściej obejdzie zasady przy kolejnej okazji.' },
     ],
   };
 }
@@ -149,21 +181,35 @@ function odpowiedz(k, karta, odpowiedzId) {
   const d = k.dzialy[karta.dzial];
   const ini = INICJATYWY[karta.ini];
   let r = NAGRODY[odpowiedzId];
-  if (odpowiedzId === 'zgoda') zastosujRyzyko(k, ini.ryzyko, 1);
+  const klucz = `${d.id}:${karta.ini}`;
+  if (odpowiedzId === 'zgoda') zastosujRyzyko(k, ini.ryzyko, 1, klucz, 'zgoda');
   if (odpowiedzId === 'warunki') {
-    zastosujRyzyko(k, ini.ryzyko, ini.bezpiecznie.resztka);
+    zastosujRyzyko(k, ini.ryzyko, ini.bezpiecznie.resztka, klucz, 'warunki');
     if ((ini.bezpiecznie.opoznienie || 0) > 1) r = NAGRODY.warunki_wolno;
   }
+  const odlozenia = d.odlozenia?.[karta.ini] || 0;
   if (odpowiedzId === 'odloz') {
+    d.odlozenia = d.odlozenia || {};
+    d.odlozenia[karta.ini] = odlozenia + 1;
     d.pilnoscExtra[karta.ini] = (d.pilnoscExtra[karta.ini] || 0) + 0.3;
     d.karencja[karta.ini] = k.st.m + 1;           // wróci szybko
     k.zrobione.delete(`${d.id}:${karta.ini}`);
     d.plan = karta.ini;
   }
   if (odpowiedzId === 'odmowa') d.zmeczenie = przytnij(d.zmeczenie + 0.15);
+  // Statystyka dla Indeksu Odporności (składowa „biznes"): ile próśb zablokowano.
+  const sd = k.statDzialow || (k.statDzialow = { pytania: 0, zablokowane: 0 });
+  if (odpowiedzId !== 'odloz' || !odlozenia) sd.pytania++;
+  sd.zablokowane += { odmowa: 1, alternatywa: 0.5, odloz: 0.5 }[odpowiedzId] || 0;
   // Blokowanie biznesu ma cenę polityczną: kierownik działu idzie z tym do prezesa,
   // a wskaźnik działu się pogarsza. Zgoda — odwrotnie (małe plusy).
-  const polityka = { zgoda: 0.5, warunki: 0, alternatywa: -0.5, odmowa: -1.5, odloz: -0.5 }[odpowiedzId] || 0;
+  let polityka = { zgoda: 0.25, warunki: 0, alternatywa: -0.5, odmowa: -1.5, odloz: odlozenia ? -1.5 : -0.5 }[odpowiedzId] || 0;
+  // Zgody nie „farmią" mandatu: najwyżej +0,5 na miesiąc z wszystkich działów razem
+  // (przypadek brzegowy: potakiwacz miał najwyższy mandat w grze, mimo 2× większych strat).
+  if (polityka > 0) {
+    polityka = Math.min(polityka, Math.max(0, 0.5 - (k.mandatZDzialow || 0)));
+    k.mandatZDzialow = (k.mandatZDzialow || 0) + polityka;
+  }
   if (k.wskazniki) k.wskazniki.mandat = Math.max(0, Math.min(100, k.wskazniki.mandat + polityka));
   if (odpowiedzId === 'odmowa' || odpowiedzId === 'odloz') d.kpiDodatek = (d.kpiDodatek || 0) + 1;
   ucz(d, 'pytaj', r);
@@ -195,24 +241,18 @@ function odpowiedzOdkrycie(k, karta, odpowiedzId) {
   const d = k.dzialy[karta.dzial];
   const ini = INICJATYWY[karta.ini];
   d.ukryte = d.ukryte.filter(u => u !== karta.obej && !(u.ini === karta.obej.ini && u.m === karta.obej.m));
+  const klucz = `${d.id}:${karta.ini}`;
   if (odpowiedzId === 'legalizacja') {
-    // Cofnięcie ryzyka do resztki wersji bezpiecznej.
-    zastosujRyzyko(k, odwrocRyzyko(ini.ryzyko), 1);
-    zastosujRyzyko(k, ini.ryzyko, ini.bezpiecznie.resztka);
+    // Ryzyko spada do resztki wersji bezpiecznej, urządzenia wchodzą do ewidencji.
+    ustawRyzyko(k, klucz, ini.bezpiecznie.resztka, 'legalizacja');
     ucz(d, 'obejdz', NAGRODY.legalizacja);
     d.zaufanie = przytnij(d.zaufanie + 0.05);
   } else if (odpowiedzId === 'kara') {
-    zastosujRyzyko(k, odwrocRyzyko(ini.ryzyko), 1);
+    ustawRyzyko(k, klucz, 0);
     ucz(d, 'obejdz', NAGRODY.kara);
     d.zaufanie = przytnij(d.zaufanie - 0.2);
     for (const inny of Object.values(k.dzialy)) if (inny !== d) inny.zaufanie = przytnij(inny.zaufanie - 0.05);
   }
-}
-
-function odwrocRyzyko(r) {
-  const w = {};
-  for (const [k, v] of Object.entries(r?.wektory || {})) w[k] = 1 / v;
-  return { wektory: w, nieznane: -(r?.nieznane || 0) };
 }
 
 // Co okres: obejścia, których nikt nie zauważył, „opłacają się" działowi; świadomość wietrzeje.
@@ -232,7 +272,14 @@ function incydentPrzezDzial(k, wektor) {
       ucz(d, 'obejdz', NAGRODY.incydent);
       d.swiadomosc = przytnij(d.swiadomosc + 0.3);
       d.pamiec.push({ m: k.st.m, tekst: `incydent przyszedł przez ${INICJATYWY[winne.ini].nazwa}` });
-      return { dzial: d.id, ini: winne.ini };
+      return { dzial: d.id, ini: winne.ini, zrodlo: 'obejscie' };
+    }
+  }
+  // Wejście przez ryzyko, na które GRACZ się zgodził bez warunków — to też trzeba nazwać.
+  for (const [klucz, r] of Object.entries(k.ryzyka)) {
+    if (r.zrodlo === 'zgoda' && r.wektory[wektor]) {
+      const [dzial, ini] = klucz.split(':');
+      return { dzial, ini, zrodlo: 'zgoda' };
     }
   }
   return null;
@@ -317,5 +364,5 @@ const SYGNALY = {
 module.exports = {
   INICJATYWY, noweDzialy, zaplanuj, wykonajPlan, kartaPytania, odpowiedz, kartaOdkrycia,
   odpowiedzOdkrycie, koniecOkresu, incydentPrzezDzial, ustawObciazenie, raport, sygnaly,
-  zastosujRyzyko, dodajNieznane, ciezarRyzyka, przytnij,
+  SYGNALY, zastosujRyzyko, ustawRyzyko, mnozniki, dodajNieznane, ciezarRyzyka, przytnij,
 };

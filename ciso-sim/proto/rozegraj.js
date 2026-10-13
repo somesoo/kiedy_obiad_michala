@@ -53,7 +53,9 @@ function wczytaj(id) {
   return require(path.join(dir, plik));
 }
 
-async function graj(s, stan, wybierz, wypisz = console.log) {
+// `tasuj` (opcjonalnie) zmienia kolejność opcji — w danych dobra odpowiedź zwykle stoi
+// pierwsza, a gracz nie może się tego nauczyć zamiast decydować.
+async function graj(s, stan, wybierz, wypisz = console.log, tasuj = null) {
   const log = wypisz;
   let faza = s.start(stan);
   let zegar = 0;
@@ -70,8 +72,9 @@ async function graj(s, stan, wybierz, wypisz = console.log) {
       if (zegaryStart[z.id] === undefined) continue;
       log(`  ⏱ ${z.nazwa}: zostało ${(z.godzin - (zegar - zegaryStart[z.id])).toFixed(1)} h`);
     }
-    f.opcje.forEach((o, i) => log(`  ${i + 1}) ${o.tekst}`));
-    const o = f.opcje[await wybierz(f.opcje)];
+    const opcje = tasuj ? tasuj(f.opcje) : f.opcje;
+    opcje.forEach((o, i) => log(`  ${i + 1}) ${o.tekst}`));
+    const o = opcje[await wybierz(opcje)];
     log(`  → ${o.tekst}`);
     zegar += o.czas_h || 0;
     Object.assign(stan, o.skutek || {});
@@ -85,7 +88,7 @@ async function graj(s, stan, wybierz, wypisz = console.log) {
   for (const d of decyzje) log(`${OCENY[d.o.ocena]} ${d.o.tekst}\n   ${d.o.dlaczego}`);
   log('\nDebrief:');
   for (const z of s.debrief) log(`  – ${z}`);
-  return { pkt, zakonczenie: kon.tytul, decyzje: decyzje.map(d => ({ faza: d.faza, tekst: d.o.tekst, ocena: d.o.ocena, dlaczego: d.o.dlaczego })) };
+  return { pkt, zakonczenie: kon.tytul, decyzje: decyzje.map(d => ({ faza: d.faza, tekst: d.o.tekst, ocena: d.o.ocena, dlaczego: d.o.dlaczego, h: d.o.h || 0 })) };
 }
 
 async function main() {
@@ -107,12 +110,14 @@ async function main() {
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const pytaj = q => new Promise(r => rl.question(q, r));
+  // Gra przy stole: kolejność odpowiedzi losowa, żeby nikt nie wygrał „zawsze pierwszą".
+  const tasujLos = opcje => [...opcje].map(o => [Math.random(), o]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
   await graj(s, stan, async opcje => {
     for (;;) {
       const n = Number(await pytaj('Twoja decyzja: '));
       if (n >= 1 && n <= opcje.length) return n - 1;
     }
-  });
+  }, console.log, tasujLos);
   rl.close();
 }
 

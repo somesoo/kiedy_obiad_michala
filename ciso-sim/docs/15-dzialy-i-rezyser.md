@@ -117,6 +117,15 @@ co okres:         świadomość ← świadomość_bazowa + (świadomość − ba
 do pytania. To wprost realizuje znaną prawidłowość: jednorazowe szkolenie wietrzeje,
 a gotowość do zmian jest największa tuż po incydencie.
 
+### Rejestr ryzyk (po przypadkach brzegowych)
+
+Skutki inicjatyw nie mnożą się przyrostowo: każda para „dział:inicjatywa" ma wpis w rejestrze
+(`k.ryzyka`: wektory, ułamek, źródło — obejście / zgoda / warunki / legalizacja). Powtórka tej
+samej inicjatywy przez ten sam dział nie mnoży ryzyka, legalizacja i kara tylko zmieniają
+ułamek, a mnożniki liczy się od nowa z sufitem ×3 (działy) i ×4 (łącznie z przeciwnikiem).
+Zgoda daje mandat najwyżej +0,5/mies., poważny incydent zabiera 8, a wejście przez ryzyko
+„za Twoją zgodą" — dodatkowe 4. Szczegóły i powody: `17-…`.
+
 ## 15.4. Katalog inicjatyw
 
 Inicjatywa = to, co dział może zrobić z własnej woli. Dane: `data/dzialy.js`.

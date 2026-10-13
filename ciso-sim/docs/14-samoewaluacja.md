@@ -186,10 +186,32 @@ w debriefie, szkolenie kierownika) są nadal otwarte — poniżej w pierwotnym b
    jest najtańsze w złotówkach). Gra musi pokazywać stawkę niefinansową — i to też jest realny
    powód niedoinwestowania małych wodociągów.
 7. **Automat „rozsądny” przekracza budżet** — potrzebna podpowiedź priorytetów i twardszy budżet.
+   (Zrobione w trzeciej iteracji — 14.8a.)
+
+## 14.8a. Wnioski z trzeciej iteracji (przypadki brzegowe)
+
+Szczegóły: `17-przypadki-brzegowe.md`. Dziesięć automatów z celowo głupimi albo cwanymi
+strategiami znalazło 20 absurdów; najważniejsze:
+1. **Gra była do oszukania bez wiedzy o cyberbezpieczeństwie**: „zawsze odpowiedź a)" dawało
+   82% jakości decyzji (dobra opcja stała pierwsza), a bezczynność — 100% (oceniano tylko podjęte
+   decyzje). Teraz opcje są tasowane, a brak decyzji jest oceniany.
+2. **Liczby nie miały sufitów**: ryzyko insidera ×23 z powtórek tych samych próśb działów,
+   80 h pracy w miesiącu mającym 40 h, wydatki 7× budżet. Teraz rejestr ryzyk, limit nadgodzin,
+   twardy budżet.
+3. **Wynik nagradzał złe zachowania**: potakiwacz miał najwyższy mandat, odmawiający wszystkiego
+   — lepszy wynik niż rozsądny, kłamstwa w ankiecie ubezpieczyciela były darmowe, a im więcej
+   gracz wykrywał, tym więcej płacił z budżetu. Teraz wynik to Indeks Odporności (z kosztem
+   blokowania biznesu), kłamstwo ma skutki, reagowanie idzie z rezerwy firmy.
+4. **Mgła przeciekała**: karta „sygnał" była zawsze prawdziwa, a środek przedziału szacunku był
+   prawdą. Teraz są fałszywe alarmy i stały błąd szacunku.
+5. Po poprawkach ranking strategii jest sensowny: mądry 923 > rozsądny 864 > odmawiający 807 >
+   … > odkładacz 479 > skąpiec 336 (odwołany w 18/20) > bierny 203. Uwaga na przesterowanie:
+   pierwsza wersja twardego budżetu odwoływała „rozsądnego" w połowie przebiegów — dopiero
+   wyłączenie kosztów reagowania z budżetu i liczenie abonamentów przy zakupie to naprawiło.
 
 ## 14.9. Następne kroki (propozycja)
 
 1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, karty kampanii w `data/kampanie/wodociagi.js`.
 2. Rozgrywka kampanii „Wodnik” w terminalu z 3–5 osobami z biura (`proto/kampania.js --zapis=…`).
-3. Poprawki z 14.8 (budżet, podpowiedź priorytetów, walidator kampanii: sygnał przed testem).
+3. Podpowiedź priorytetów dla żywego gracza (tryb łatwy) — reszta poprawek z 14.8 zrobiona (14.8a).
 4. Szkielet aplikacji z logowaniem (`13-…`, etap C), z `proto/` przeniesionym do `lib/engine/`.

@@ -1,0 +1,13 @@
+strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  h/mies(maks)  karty/mies(maks)  JD   odwołany  INDEKS
+rozsadny           216k    315k    41     55  59     78  0.64    0.1     2.28            58                 7   87%     0/20     864
+madry               91k    469k    54     58  62     78  0.56    0.3     2.24            60                 6   81%     0/20     923
+potakiwacz         375k    258k    32     54  50     82  0.75    2.1     4.00            50                 7   46%     0/20     759
+wszystko_naraz     275k    295k    43     65  56     76  0.56    0.1     1.90            60                 8   82%     0/20     839
+odkladacz          882k     25k    17     25  36     84  0.35   15.7     4.00            40                 8   29%     1/20     479
+skapiec            949k    199k    25      2  18     75  0.26    6.5     4.00             4                 7   24%    18/20     336
+klamca             177k    281k    39     52  58     78  0.63    0.1     2.29            58                 7   85%     0/20     867
+pracoholik         215k    278k    36     46  56     76  0.56    0.3     2.29            58                 8   82%     0/20     831
+paranoik           372k     39k    23     47  59     84  0.38    6.7     4.00            48                 6   47%     0/20     677
+losowy             587k    284k    32     24  37     81  0.31    5.6     4.00            48                 8   44%     4/20     548
+
+Niezmienniki: OK
