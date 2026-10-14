@@ -29,6 +29,7 @@ const I = require('./incydent');
 const ZA = require('./zasady');
 const CY = require('./cykl');
 const DR = require('./doradztwo');
+const DORADZTWO = require('../data/doradztwo');
 const CYKLICZNE = require('../data/cykliczne');
 const FIRMY = require('../data/firmy');
 const KONTROLE = require('../data/kontrole');
@@ -111,7 +112,7 @@ function nowaKampania(defId, seed) {
   const firma = FIRMY[def.firma];
   const st = S.nowyStan(firma, seed);
   const k = {
-    def, st, seed, flagi: {}, wskazniki: { ...def.wskazniki }, budzet: { ...def.budzet }, wydaneRok: {},
+    def, defId, st, seed, flagi: {}, wskazniki: { ...def.wskazniki }, budzet: { ...def.budzet }, wydaneRok: {},
     dzialy: D.noweDzialy(def), rezyser: R.nowyRezyser(), modStale: {}, ryzyka: {}, zrobione: new Set(), odlozone: {},
     // Osobne strumienie: każdy podsystem losuje ze swojego — dołożenie losowania w jednym nie
     // przesuwa „pogody" w innym (silnik, działy, reżyser, mgła, wdrożenia, incydenty).
@@ -125,6 +126,12 @@ function nowaKampania(defId, seed) {
     hKart: 0, koniec: false, akcje: [], kontrola: null, klamstwa: [], incydent: null, miesiaceNadgodzin: 0,
   };
   k.log = (kto, tekst) => k.rejestr.push({ m: k.st.m, kto, tekst });
+  // Kontrole działające od startu (profil firmy) dostają obiekt jak każde wdrożenie — inaczej
+  // gracz nie mógłby ich przejrzeć, przetestować ani wycofać. Parametry z pliku kampanii
+  // (gmina: szkolenie „odhaczane" e-learningiem).
+  for (const id of Object.keys(st.aktywne)) if (!k.obiekty[id]) RU.zainstalujGotowe(k, id, def.na_starcie?.[id] || {});
+  // Sprzęt z grantu: subskrypcje opłacone z grantu do `licencja_mies` (potem sprawa o przedłużenie).
+  for (const [id, x] of Object.entries(def.kupione || {})) if (x.licencja_mies) { st.ceny = st.ceny || {}; st.ceny[id] = 0; }
   k.fakty = RU.noweFakty(k);
   k.otNiezgodne = RU.noweNiezgodnosci(k);
   // Stały błąd szacunku „ile naprawdę mamy zasobów" (±25%), żeby środek przedziału nie był prawdą.
@@ -228,7 +235,8 @@ function zastosujWynikIncydentu(k, w) {
   const st = k.st, sk = w.skutki || {}, a = RU.api(k);
   if (sk.pln) {
     st.w.straty += sk.pln; st.w.szczegoly.scenariusze = (st.w.szczegoly.scenariusze || 0) + sk.pln;
-    k.incydenty.push({ m: st.m, rodzaj: `${w.def.id} ${w.def.tytul}`, pln: sk.pln, ot: !!sk.ot });
+    // `zaklocenie`: incydent zatrzymał usługę dla ludzi (woda, obsługa mieszkańców) — liczy się w Indeksie jak OT.
+    k.incydenty.push({ m: st.m, rodzaj: `${w.def.id} ${w.def.tytul}`, pln: sk.pln, ot: !!sk.ot, zakl: !!(sk.ot || sk.zaklocenie) });
   }
   for (const n of ['mandat', 'reputacja', 'morale']) if (sk[n]) k.wskazniki[n] = przytnij(k.wskazniki[n] + sk[n]);
   Object.assign(k.flagi, sk.flagi || {});
@@ -287,7 +295,8 @@ function zamknijMiesiac(k) {
   for (const z of k.zdarzenia) {
     intensywnosc += z.ciezar || 0;
     if (z.typ === 'termin') terminSzbi(k);
-    if (z.typ === 'fala') falaHaktywistow(k);
+    // Fala ze skutkiem opisanym w pliku kampanii (np. wybory w gminie) albo domyślna — haktywiści na OT.
+    if (z.typ === 'fala') (z.skutek ? z.skutek(k, RU.api(k)) : falaHaktywistow(k));
     if (z.typ === 'final') k.log('zarzad', 'Rada nadzorcza: audyt zamykający na koniec kampanii.');
   }
   k.tarcie = RU.tarcie(k);
@@ -468,7 +477,7 @@ function ocenaKontroli(k) {
     ['SZBI i ład', d('szbi') ? (o('szbi').param.sposob === 'z_pudelka' ? 'drobna' : 'zgodny') : 'glowna'],
     ['Szacowanie ryzyka', d('ryzyko') ? (dowod('ryzyko') || st.m - o('ryzyko').dzialaOd <= 12 ? 'zgodny' : 'drobna') : 'glowna'],
     ['Incydenty i zgłoszenia', d('plan_ir') ? (o('plan_ir').ostTest !== null && !(f.incydent_powazny && !f.zgloszone_w_terminie) ? 'zgodny' : 'drobna') : 'glowna'],
-    ['Ciągłość działania', d('backup') ? (o('backup').ostTest !== null && d('bcp') ? (f.kopie_ot || f.kopie_ot_umowa ? 'zgodny' : 'drobna') : 'drobna') : 'glowna'],
+    ['Ciągłość działania', d('backup') ? (o('backup').ostTest !== null && d('bcp') ? (f.kopie_ot || f.kopie_ot_umowa || !st.firma.ot ? 'zgodny' : 'drobna') : 'drobna') : 'glowna'],
     ['Łańcuch dostaw', d('dostawcy') || f.umowa_integratora ? 'zgodny' : d('brama_dostepu') ? 'drobna' : 'glowna'],
     ['Dostęp i tożsamość', d('mfa') ? (o('mfa').sk.wyjatki.every(w => k.akceptacje[`wyjatek:${w}`] !== undefined) ? 'zgodny' : 'drobna') : 'glowna'],
     ['Podatności', d('patch') || d('skaner_podatnosci') ? 'zgodny' : d('ekspozycja') ? 'drobna' : 'glowna'],
@@ -564,9 +573,9 @@ const BRAMKI = [
 
 const REF_BIERNY = {};
 async function indeksOdpornosci(k) {
-  const kluczRef = `${k.def.firma}:${k.seed}`;
+  const kluczRef = `${k.defId}:${k.seed}`;
   if (!k.refBierny && !REF_BIERNY[kluczRef]) {
-    const b = await grajAuto('bierny', k.seed, false, () => {}, false);
+    const b = await grajAuto('bierny', k.seed, false, () => {}, false, k.defId);
     REF_BIERNY[kluczRef] = { straty: b.st.w.straty, ekspozycja: ekspozycja(b).pln };
   }
   k.refBierny = k.refBierny || REF_BIERNY[kluczRef];
@@ -574,7 +583,7 @@ async function indeksOdpornosci(k) {
   const ek = ekspozycja(k);
   const c = x => Math.max(0, Math.min(1, x));
   // Zakłócenie procesu = zdarzenie OT od 50 tys. zł (także własna awaria po wdrożeniu na OT).
-  const zakl = k.incydenty.filter(i => (/sabota|S03|fala/.test(i.rodzaj) || i.ot) && i.pln >= 50000).length;
+  const zakl = k.incydenty.filter(i => (/sabota|S03|fala/.test(i.rodzaj) || i.ot || i.zakl) && i.pln >= 50000).length;
   const sd = k.statDzialow || { pytania: 0, zablokowane: 0 };
   const sk = {
     straty: c((1 - k.st.w.straty / Math.max(1, ref.straty)) / 0.9),
@@ -781,6 +790,9 @@ const PLAYBOOK = {
     : ['bank', 'telefon_kontrahent', 'zawiadomienie', 'przeglad_skrzynek', 'zabezpiecz_skrzynki', 'zgloszenie_uodo', 'zgloszenie_cert', 'procedura']),
   S03: s => (s.proba ? ['przeglad_ekspozycji', 'usun_furtke', 'csirt']
     : ['proces_reczny', 'odetnij', 'probki', 'komunikat_prawda', 'csirt', 'dowody', 'zmien_pin', 'odtworz_konfiguracje', 'przeglad_ekspozycji', 'usun_furtke']),
+  S07: s => (s.proba ? ['zabezpiecz_logi', 'przeglad_kont_wszystkich', 'zgloszenie_csirt']
+    : ['odbierz_dostep', 'tryb_papierowy', 'komunikat_mieszkancy', 'zabezpiecz_logi', 'rozmowa_z_wojtem', 'odblokuj_konta', 'przywroc_dane',
+      'zgloszenie_csirt', 'ocena_rodo', 'zawiadomienie', 'przeglad_kont_wszystkich']),
 };
 
 // Pierwsza dostępna odpowiedź z listy (budżet, godziny, wymagania) — jak człowiek, który ma
@@ -809,6 +821,8 @@ function madraCykliczna(k, s, A) {
 function madraSprawa(k, s, A) {
   const cyk = madraCykliczna(k, s, A);
   if (cyk !== undefined) return cyk;
+  const zKampanii = k.def.automaty?.madry?.sprawy?.[s.sid];
+  if (zKampanii) return pierwszaDostepna(k, s, zKampanii(k, s, A));
   if (s.rodzaj === 'prosba') {
     if (D.ciezarRyzyka(INICJATYWY[s.ini]) < 0.1) return { v: 'zgoda' };
     const w = najlepszeWarunki(k, s, A);
@@ -838,14 +852,15 @@ function madryIncydent(k, A) {
   for (const a of PLAYBOOK[inc.id](inc.s)) { if (!k.incydent) return; A.inc(a); }
 }
 
-const DZIALY_ROTACJA = ['produkcja', 'siec', 'finanse', 'bok', 'kadry', 'zarzad'];
+// Rozmowy po kolei ze wszystkimi działami kampanii.
+const rotacja = k => Object.keys(k.dzialy);
 // Kolejność „tanie i ważne najpierw" — a zaraz po MFA godziny z zewnątrz (MSP z wymaganiami):
 // pół etatu nie udźwignie kilkunastu wdrożeń, projekty stoją w kolejce (docs/18-…).
 const PRIORYTETY_MADRY = [
   ['wdroz:inwentaryzacja', { metoda_ot: 'pasywna' }], ['wdroz:moje_cert'], ['wdroz:mfa', { zakres: 'wszyscy', metoda: 'numer' }],
   ['wdroz:msp', { umowa: 'z_wymaganiami' }],
   ['wdroz:weryfikacja_platnosci', { sposob: 'uzgodniona' }], ['wdroz:backup', { zakres: 'biuro_ot', nosnik: 'offline' }], ['wdroz:plan_ir'],
-  ['wdroz:bcp'], ['wdroz:ekspozycja'], ['wdroz:ryzyko'], ['wdroz:szbi', { sposob: 'doradca' }], ['wdroz:patch', { zakres_ot: 'z_producentem' }],
+  ['wdroz:bcp'], ['wdroz:ekspozycja'], ['wdroz:ryzyko'], ['wdroz:szbi', [{ sposob: 'doradca' }, { sposob: 'sam' }]], ['wdroz:patch', { zakres_ot: 'z_producentem' }],
   ['wdroz:szkolenia', { forma: 'program' }], ['wdroz:edr', { zakres: 'biuro_serwery', tryb: 'wykrywaj' }], ['wdroz:brama_dostepu'],
   ['wdroz:dostawcy'], ['wdroz:segmentacja', { zakres: 'tylko_ot' }],
 ];
@@ -855,10 +870,12 @@ function madreRuchy(k, A) {
   if (m === 2 || m % 6 === 0) A.ruch('skan_ekspozycji');
   if (m === 2) A.ruch('przeglad_ot');
   if (m === 3) A.ruch('przeglad_dostepow');
-  // Znane drzwi zamykamy od razu.
-  if (A.znany('hmi_wystawiony')) A.ruch('odetnij_hmi');
-  if (A.znany('pin_domyslny')) A.ruch('zmien_pin');
-  if (A.znany('narzedzie_zdalne_integratora') && A.dziala('brama_dostepu')) A.ruch('usun_narzedzie_zdalne');
+  if (m === 4) A.ruch('przeglad_kont');
+  // Znane drzwi zamykamy od razu — ruchem, który podaje fakt (`naprawa`), a jeśli naprawa
+  // ma sens dopiero z inną kontrolą (`po`: narzędzie zdalne dopiero z bramą) — wtedy.
+  for (const f of Object.values(k.fakty)) {
+    if (A.znany(f.id) && f.naprawa && (!f.naprawa.po || A.dziala(f.naprawa.po))) A.ruch(f.naprawa.ruch, f.naprawa.p || {});
+  }
   // Podstawy: najwyżej dwa nowe wdrożenia na miesiąc i najwyżej trzy projekty naraz (limit pracy
   // w toku — inaczej wszystko stoi w kolejce do godzin zespołu), w kolejności „tanie i ważne".
   let n = 0;
@@ -866,7 +883,8 @@ function madreRuchy(k, A) {
     if (n >= 2 || k.st.projekty.length >= 3) break;
     const o = A.obiekt(id.split(':')[1]);
     if (o && o.stan !== 'wycofany') continue;
-    if (A.ruch(id, p || {})) n++;
+    // Kilka wariantów = plan B (SZBI z doradcą, a jeśli budżet nie pozwala — samemu).
+    if ((Array.isArray(p) ? p : [p || {}]).some(x => A.ruch(id, RU.dopasujParam(k, id, x)))) n++;
   }
   // Cykl życia: testy, przeglądy, naprawy, EDR na blokowanie po strojeniu.
   for (const o of Object.values(k.obiekty)) {
@@ -876,13 +894,19 @@ function madreRuchy(k, A) {
     if (['backup', 'plan_ir', 'bcp', 'weryfikacja_platnosci'].includes(o.id) && ost < m - 6) A.ruch(`test:${o.id}`);
     else if (ZA.KLUCZOWE.includes(o.id) && ost < m - 9 && m - o.dzialaOd >= 2) A.ruch(`przeglad:${o.id}`);
   }
-  const edr = A.obiekt('edr');
-  if (edr?.stan === 'dziala' && edr.param.tryb === 'wykrywaj' && m - edr.dzialaOd >= 2) A.ruch('zmien:edr', { tryb: 'blokuj' });
+  // Ustawienia, które dobra praktyka poprawia (EDR na blokowanie po strojeniu, MFA dla wszystkich,
+  // szkolenie jako program zamiast e-learningu „odhaczanego" — także w kontrolach zastanych).
+  for (const [id, n, v, war] of DORADZTWO.POPRAWKI_USTAWIEN) {
+    const o = A.obiekt(id);
+    if (o?.stan === 'dziala' && war(o, k)) A.ruch(`zmien:${id}`, { [n]: v });
+  }
   if (!k.flagi[`szkolenie_kierownika_${k.rok}`] && m >= 3) A.ruch('szkolenie_kierownika');
   if (m % 3 === 0) A.ruch('raport_zarzadowi', { styl: 'rzetelny' });
-  if (m % 2 === 0) A.ruch('rozmowa', { dzial: DZIALY_ROTACJA[(m / 2) % DZIALY_ROTACJA.length] });
+  if (m % 2 === 0) A.ruch('rozmowa', { dzial: rotacja(k)[(m / 2) % rotacja(k).length] });
   if (m >= 20 && !k.flagi.plan_naprawczy) A.ruch('plan_naprawczy');
   for (const l of RU.luki(k).filter(x => x.id.startsWith('brak:') && k.akceptacje[x.id] === undefined && m >= 18)) A.ruch('akceptacja_ryzyka', { luka: l.id });
+  // Ruchy, które mają sens tylko w tej kampanii (plik kampanii, `automaty.madry.ruchy`).
+  k.def.automaty?.madry?.ruchy?.(k, A);
 }
 
 // Rozsądny laik: dobre intencje, wdraża to, o czym słyszy, z domyślnymi ustawieniami; nie robi
@@ -894,14 +918,23 @@ const OBSERWACJA_NA_RUCH = {
   O_kierownik_szkolenie: [['szkolenie_kierownika']], O_pol_etatu: [['wdroz:msp', { umowa: 'standardowa' }]], O_audyt: [['plan_naprawczy']],
 };
 
+// Jak incydent prowadzi laik: z dobrymi intencjami, w złej kolejności.
+const PLAN_LAIKA = {
+  S01: () => ['zebranie', 'bank', 'przeglad_skrzynek', 'procedura'],
+  S03: s => (s.proba ? ['csirt'] : ['integrator_zdalnie', 'proces_reczny', 'odetnij', 'komunikat_prawda', 'csirt']),
+  S07: s => (s.proba ? ['przeglad_kont_wszystkich'] : ['telefon_do_zleceniobiorcy', 'odblokuj_konta', 'odbierz_dostep', 'komunikat_mieszkancy']),
+};
+
 const AUTO = {
   madry: { ruchy: madreRuchy, sprawa: madraSprawa, incydent: madryIncydent },
   rozsadny: {
     ruchy: (k, A) => {
       k.zaleglosci = k.zaleglosci || [];
-      for (const o of k.obserwacje) k.zaleglosci.push(...(OBSERWACJA_NA_RUCH[o.id] || []));
+      const reakcje = { ...OBSERWACJA_NA_RUCH, ...(k.def.automaty?.laik?.obserwacje || {}) };
+      for (const o of k.obserwacje) k.zaleglosci.push(...(reakcje[o.id] || []));
       k.zaleglosci = k.zaleglosci.filter(([id, p]) => !A.ruch(id, p || {}) && !String(RU.dostepny(k, id, p || {})).startsWith('już'));
-      if (A.znany('hmi_wystawiony')) A.ruch('odetnij_hmi');
+      // Laik zamyka drzwi, o których się dowiedział — ale tylko te „oczywiste" (bez czekania na bramę).
+      for (const f of Object.values(k.fakty)) if (A.znany(f.id) && f.naprawa && !f.naprawa.po && !f.naprawa.ruch.includes(':')) A.ruch(f.naprawa.ruch, f.naprawa.p || {});
     },
     sprawa: (k, s, A) => {
       if (s.rodzaj === 'prosba') return { v: 'warunki', p: { warunki: INICJATYWY[s.ini].warunki.filter(w => !w.wymaga || A.dziala(w.wymaga)).map(w => w.id).join(',') } };
@@ -912,13 +945,15 @@ const AUTO = {
         C_alerty: [{ v: 'zatrudnij' }, { v: 'zostaw' }], C_kolejka: [{ v: 'nadgodziny' }], S_rozbudowa: [{ v: 'nic' }], S_ciecie: [{ v: 'przyjmij' }],
         S_odejscie: [{ v: 'przejmij' }] }[s.sid];
       if (cyk) return pierwszaDostepna(k, s, cyk);
+      const zKampanii = k.def.automaty?.laik?.sprawy?.[s.sid];
+      if (zKampanii) return pierwszaDostepna(k, s, typeof zKampanii === 'function' ? zKampanii(k, s, A) : zKampanii);
       return ({ S_budzet2027: { v: 'wniosek', p: { kwota: 180000, uzasadnienie: 'potrzeby' } }, S_przejecie: { v: 'polacz' }, S_umowa_integratora: { v: 'przedluz' },
         S_ubezpieczenie: { v: 'odrzuc' }, S_dwr: s.dane.lista ? null : { v: 'lista' }, S_wodomierze: { v: 'srodki', p: { srodki: 'umowa_powierzenia' } },
         S_emerytura: { v: 'srodki', p: { srodki: 'zmiana_hasel' } }, S_falszywy_komunikat: { v: 'dementi', p: { kanaly: 'strona' } }, S_noc_integrator: { v: 'odmow' } })[s.sid] || null;
     },
     incydent: (k, A) => {
       const inc = k.incydent;
-      const plan = inc.id === 'S01' ? ['zebranie', 'bank', 'przeglad_skrzynek', 'procedura'] : inc.s.proba ? ['csirt'] : ['integrator_zdalnie', 'proces_reczny', 'odetnij', 'komunikat_prawda', 'csirt'];
+      const plan = PLAN_LAIKA[inc.id](inc.s);
       for (const a of plan) { if (!k.incydent) return; A.inc(a); }
     },
   },
@@ -932,10 +967,10 @@ const AUTO = {
 };
 
 // `nazwa` = klucz z AUTO albo gotowy obiekt strategii (laboratoria podają własne).
-async function grajAuto(nazwa, seed, szczegoly, wypisz = console.log, podsumuj = true) {
+async function grajAuto(nazwa, seed, szczegoly, wypisz = console.log, podsumuj = true, defId = 'wodociagi') {
   const strat = typeof nazwa === 'string' ? AUTO[nazwa] : nazwa;
   strat.reset?.(seed);
-  const k = nowaKampania('wodociagi', seed);
+  const k = nowaKampania(defId, seed);
   const A = apiAuto(k);
   while (!k.koniec) {
     strat.ruchy?.(k, A);
@@ -1016,16 +1051,16 @@ Komendy (wszystko w dowolnej kolejności, ile chcesz w miesiącu):
   n                     zamknij miesiąc
   q                     zapisz i wyjdź`;
 
-async function grajInteraktywnie(plikZapisu) {
+async function grajInteraktywnie(plikZapisu, defId = 'wodociagi') {
   let seed = Math.floor(Math.random() * 1e9);
   let zapisane = [];
   if (plikZapisu && fs.existsSync(plikZapisu)) {
     const z = JSON.parse(fs.readFileSync(plikZapisu, 'utf8'));
-    seed = z.seed; zapisane = z.akcje;
+    seed = z.seed; zapisane = z.akcje; defId = z.kampania || 'wodociagi';   // stare zapisy: Wodnik
   }
-  const k = await odtworz('wodociagi', seed, zapisane);
+  const k = await odtworz(defId, seed, zapisane);
   const { pytaj, zamknij } = wejscie();
-  const zapisz = () => { if (plikZapisu) fs.writeFileSync(plikZapisu, JSON.stringify({ seed, akcje: k.akcje })); };
+  const zapisz = () => { if (plikZapisu) fs.writeFileSync(plikZapisu, JSON.stringify({ kampania: defId, seed, akcje: k.akcje })); };
   const sprobuj = fn => { try { const t = fn(); if (t) console.log(typeof t === 'string' ? t : t.tekst || ''); zapisz(); } catch (e) { if (!e.niedostepny) throw e; console.log(`Nie da się: ${e.message}.`); } };
   console.log(naglowek(k)); console.log(briefing(k)); console.log(POMOC);
 
@@ -1083,8 +1118,8 @@ async function main() {
   const auto = arg('auto');
   if (auto) {
     if (!AUTO[auto]) { console.error(`Strategie: ${Object.keys(AUTO).join(', ')}`); process.exit(1); }
-    await grajAuto(auto, Number(arg('seed') || 7), process.argv.includes('--szczegoly'));
-  } else await grajInteraktywnie(arg('zapis'));
+    await grajAuto(auto, Number(arg('seed') || 7), process.argv.includes('--szczegoly'), console.log, true, arg('kampania') || 'wodociagi');
+  } else await grajInteraktywnie(arg('zapis'), arg('kampania') || 'wodociagi');
 }
 
 module.exports = {

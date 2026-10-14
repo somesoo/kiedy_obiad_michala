@@ -86,7 +86,8 @@ const ZALECANE_PARAMETRY = {
 const POPRAWKI_USTAWIEN = [
   ['mfa', 'zakres', 'wszyscy', o => o.param.zakres !== 'wszyscy'],
   ['backup', 'nosnik', 'offline', o => o.param.nosnik !== 'offline'],
-  ['backup', 'zakres', 'biuro_ot', o => o.param.zakres !== 'biuro_ot'],
+  ['backup', 'zakres', 'biuro_ot', (o, k) => k.st.firma.ot && o.param.zakres !== 'biuro_ot'],
+  ['szkolenia', 'forma', 'program', o => o.param.forma !== 'program'],
   ['edr', 'tryb', 'blokuj', (o, k) => o.param.tryb === 'wykrywaj' && k.st.m - (o.dzialaOd ?? k.st.m) >= 2],
 ];
 

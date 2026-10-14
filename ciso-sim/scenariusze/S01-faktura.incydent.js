@@ -7,6 +7,7 @@
 // wykładniczo z czasem od wykrycia (połowa w ~2 h) — w praktyce liczy się pierwsza godzina;
 // mail do przejętej skrzynki ostrzega sprawcę (szybciej wyprowadza środki).
 
+// Kwota i opis kontrahenta przychodzą z pliku kampanii (`warianty.S01`); domyślnie Wodnik.
 const KWOTA = 92300;
 
 module.exports = {
@@ -17,11 +18,15 @@ module.exports = {
 
   start: ctx => {
     // Procedura płatności działa — chyba że ma ukrytą usterkę „wyjątek przy pilnych płatnościach".
-    const procedura = ctx.dziala('weryfikacja_platnosci');
+    // Procedura płatności działa — kontrolą z katalogu albo uzgodnionym w kampanii zwyczajem
+    // (gmina: kontrasygnata skarbnika rozszerzona o sprawdzenie rachunku).
+    const procedura = ctx.dziala('weryfikacja_platnosci') || !!ctx.flaga('weryfikacja_rachunku');
     const zawiodla = procedura && ctx.usterka('weryfikacja_platnosci', 'wyjatek_pilne') && ctx.rnd() < 0.5;
     // Nasza skrzynka też bywa przejęta (dług „brak MFA" w co trzeciej kampanii).
     const naszaPrzejeta = ctx.rnd() < (ctx.dziala('mfa') ? 0.08 : 0.35);
+    const w = ctx.wariant;
     return {
+      kwota: w.kwota ?? KWOTA, kontrahent: w.kontrahent ?? 'kontrahent', placi: w.placi ?? 'Księgowa',
       udaremnione: procedura && !zawiodla, procedura_zawiodla: zawiodla,
       odzysk: 0, bank_h: null, sprawca_ostrzezony: false, dowody: true, zawiadomienie: false,
       kontrahent_ostrzezony: false, nasza_przejeta: naszaPrzejeta, nasza_sprawdzona: false, nasza_zabezpieczona: false,
@@ -32,12 +37,12 @@ module.exports = {
   widok: s => {
     const l = [];
     if (s.udaremnione) {
-      l.push('Księgowa oddzwoniła na numer z kartoteki — kontrahent zaprzeczył zmianie rachunku. Przelew NIE wyszedł.');
+      l.push(`${s.placi} oddzwoniła na numer z kartoteki — ${s.kontrahent} zaprzeczył zmianie rachunku. Przelew NIE wyszedł.`);
       l.push('• Skrzynka kontrahenta jest prawdopodobnie przejęta [prawdopodobne]');
     } else {
-      l.push('Poniedziałek 9:10. Kontrahent: płatność nie wpłynęła. Księgowa zapłaciła w środę „na nowy rachunek, który przysłaliście". Kontrahent: „Nie zmienialiśmy rachunku".');
+      l.push(`Poniedziałek 9:10. Dzwoni ${s.kontrahent}: płatność nie wpłynęła. ${s.placi} zapłaciła w środę „na nowy rachunek, który przysłaliście". Odpowiedź: „Nie zmienialiśmy rachunku".`);
       if (s.procedura_zawiodla) l.push('• Procedura oddzwaniania istnieje, ale „przelew był pilny" — nikt nie oddzwonił [pewne]');
-      l.push(`• Przelew ${(92300).toLocaleString('pl-PL')} zł wyszedł 5 dni temu na rachunek w innym banku [pewne]`);
+      l.push(`• Przelew ${s.kwota.toLocaleString('pl-PL')} zł wyszedł 5 dni temu na rachunek w innym banku [pewne]`);
       l.push(s.bank_h !== null ? `• Bank przyjął zgłoszenie (T+${s.bank_h.toFixed(1)} h) i prosi o zawiadomienie o przestępstwie [pewne]` : '• Szansa zablokowania środków u odbiorcy maleje z każdą godziną [pewne]');
       l.push('• Skrzynka kontrahenta jest przejęta [prawdopodobne]');
     }
@@ -79,8 +84,8 @@ module.exports = {
       efekt: s => { s.dowody = false; return 'Mail usunięty.'; },
     },
     zebranie: {
-      nazwa: 'Zebranie z księgową i prezesem: ustalmy, czyja to wina', czas_h: 2, h: 4,
-      efekt: s => { s.szukanie_winnych_h = s.t; return 'Dwie godziny rozmowy. Księgowa płacze, prezes szuka winnego.'; },
+      nazwa: 'Zebranie z księgową i kierownictwem: ustalmy, czyja to wina', czas_h: 2, h: 4,
+      efekt: s => { s.szukanie_winnych_h = s.t; return 'Dwie godziny rozmowy. Księgowa płacze, kierownictwo szuka winnego.'; },
     },
     przeglad_skrzynek: {
       nazwa: 'Przegląd naszych skrzynek: logowania, reguły przekazywania, aplikacje z dostępem', czas_h: 3, h: 5,
@@ -101,8 +106,8 @@ module.exports = {
       efekt: s => { s.cert = true; return 'Zgłoszone; rachunek trafi na listy ostrzeżeń.'; },
     },
     procedura: {
-      nazwa: 'Rozmowa z prezesem: to błąd organizacji — procedura płatności i szkolenie finansów, bez szukania winnych', czas_h: 1, h: 2,
-      efekt: s => { s.procedura_obiecana = true; return 'Prezes się zgadza. Księgowa sama zgłasza się do pomocy przy procedurze.'; },
+      nazwa: 'Rozmowa z kierownictwem: to błąd organizacji — procedura płatności i szkolenie finansów, bez szukania winnych', czas_h: 1, h: 2,
+      efekt: s => { s.procedura_obiecana = true; return 'Kierownictwo się zgadza. Księgowa sama zgłasza się do pomocy przy procedurze.'; },
     },
     zwolnienie: {
       nazwa: 'Zgodzić się na zwolnienie dyscyplinarne księgowej', czas_h: 0.5, h: 0.5,
@@ -119,7 +124,7 @@ module.exports = {
   koniec: () => false,
 
   wynik: s => {
-    const strata = s.udaremnione ? 0 : Math.round(KWOTA * (1 - s.odzysk));
+    const strata = s.udaremnione ? 0 : Math.round(s.kwota * (1 - s.odzysk));
     const tytul = s.udaremnione ? 'Udaremnione' : s.odzysk > 0.3 ? 'Odzyskane częściowo' : 'Strata';
     const skutki = {
       pln: strata,

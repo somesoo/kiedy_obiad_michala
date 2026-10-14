@@ -92,14 +92,15 @@ module.exports = {
   // po_naprawie: mnożniki po naprawie (gdy profil firmy już zawiera ekspozycję, np. usługi ×3)
   // jak się odkrywa: widoczne_z_internetu (przegląd ekspozycji), dostep_zdalny (przegląd dostępów),
   //   na_obiekcie (obchód stacji), zna: id działu (rozmowa, gdy dział Ci ufa), odkrywa_wdrozenie
-  // naprawa: ruch, który to zamyka — doradca poleca go w raporcie (proto/doradztwo.js)
+  // naprawa: ruch, który to zamyka — doradca poleca go w raporcie (proto/doradztwo.js);
+  //   `po`: kontrola, bez której naprawa robi więcej szkody niż pożytku (narzędzie zdalne bez bramy)
   // widoczny_od_sprawy: doradca może to znaleźć dopiero, gdy sprawa się pojawiła (przejęcie)
   fakty: {
     hmi_wystawiony: { opis: 'panel HMI stacji uzdatniania dostępny z internetu (przekierowanie portu u integratora)',
       prawda: true, widoczne_z_internetu: true, pilne: true, po_naprawie: { uslugi: 0.45 }, odkrywa_wdrozenie: ['moje_cert', 'ekspozycja', 'asm'],
       naprawa: { ruch: 'odetnij_hmi' } },
     narzedzie_zdalne_integratora: { opis: 'narzędzie zdalnej pomocy integratora na stacji inżynierskiej, ze stałym hasłem',
-      prawda: true, dostep_zdalny: true, pilne: true, wektory: { dostawca: 1.3, uslugi: 1.15 }, naprawa: { ruch: 'usun_narzedzie_zdalne' } },
+      prawda: true, dostep_zdalny: true, pilne: true, wektory: { dostawca: 1.3, uslugi: 1.15 }, naprawa: { ruch: 'usun_narzedzie_zdalne', po: 'brama_dostepu' } },
     pin_domyslny: { opis: 'PIN-y sterowników i paneli niezmienione od montażu (zna je pół powiatu)',
       prawda: true, na_obiekcie: true, zna: 'produkcja', wektory: { uslugi: 1.1 }, odkrywa_wdrozenie: ['inwentaryzacja'], naprawa: { ruch: 'zmien_pin' } },
     kopia_scada_u_integratora: { opis: 'projekty SCADA i programy sterowników są tylko na laptopie integratora',

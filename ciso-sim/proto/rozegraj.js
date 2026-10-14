@@ -2,7 +2,7 @@
 // Etap B roadmapy: zanim powstanie UI, sprawdzamy na ludziach, czy incydent jest ciekawy
 // i zrozumiały. Prowadzący odpala to przy stole, grupa decyduje, CO robi i w JAKIEJ kolejności
 // (silnik incydentu bez drzewa decyzji: proto/incydent.js).
-//   node ciso-sim/proto/rozegraj.js S03 [--kontrole=bcp,backup] [--naprawione=hmi_wystawiony] [--seed=7]
+//   node ciso-sim/proto/rozegraj.js S03 [--kontrole=bcp,backup] [--naprawione=hmi_wystawiony] [--seed=7] [--kampania=gmina]
 // Bez interakcji: --auto=wzorcowo | --auto=bezczynnie (sprawdzenie pliku i zasad)
 //
 // Przy okazji WALIDUJE plik incydentu: zły plik nie zagra, a powód jest wypisany.
@@ -12,8 +12,10 @@ const I = require('./incydent');
 const K = require('./kampania');
 const RU = require('./ruchy');
 
-function przygotuj(id, { seed = 7, kontrole = [], naprawione = [] } = {}) {
-  const k = K.nowaKampania('wodociagi', seed);
+// Kampania domyślna dla incydentu: S07 to wariant gminny, reszta — Wodnik (można nadpisać --kampania=).
+const KAMPANIA_INCYDENTU = { S07: 'gmina' };
+function przygotuj(id, { seed = 7, kontrole = [], naprawione = [], kampania = KAMPANIA_INCYDENTU[id] || 'wodociagi' } = {}) {
+  const k = K.nowaKampania(kampania, seed);
   // Przygotowanie z „poprzednich miesięcy": działające kontrole (wdrożone porządnie) i naprawione fakty.
   for (const kid of kontrole) RU.zainstalujGotowe(k, kid);
   for (const f of naprawione) if (k.fakty[f]) { k.fakty[f].znany = true; k.fakty[f].naprawiony = true; }
@@ -36,7 +38,8 @@ async function main() {
   const def = I.wczytaj(id);
   const bledy = I.waliduj(def);
   if (bledy.length) { console.error(`Incydent ${id} ma błędy:\n - ${bledy.join('\n - ')}`); process.exit(1); }
-  const k = przygotuj(id, { seed: Number(arg('seed') || 7), kontrole: (arg('kontrole') || '').split(',').filter(Boolean), naprawione: (arg('naprawione') || '').split(',').filter(Boolean) });
+  const k = przygotuj(id, { seed: Number(arg('seed') || 7), kontrole: (arg('kontrole') || '').split(',').filter(Boolean), naprawione: (arg('naprawione') || '').split(',').filter(Boolean),
+    ...(arg('kampania') ? { kampania: arg('kampania') } : {}) });
   const widok = () => { const inc = k.incydent; console.log(`\n── T+${inc.s.t.toFixed(1)} h ──`); for (const x of inc.def.widok(inc.s)) console.log(x); for (const z of I.zegary(inc)) console.log(`  ⏱ ${z.nazwa}: ${z.zostalo.toFixed(1)} h`); };
   let wynik = null;
   const auto = arg('auto');

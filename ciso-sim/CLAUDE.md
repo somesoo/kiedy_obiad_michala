@@ -2,11 +2,11 @@
 
 Osobna gra w tym repo: symulator osoby odpowiedzialnej za cyberbezpieczeństwo w polskiej
 organizacji. **Nie jest częścią Snakes** — nie importuje niczego z `../server.js` ani `../lib/`
-(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…18` (silnik gry: `docs/18-silnik-ruchow.md`).
+(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…19` (silnik gry: `docs/18-silnik-ruchow.md`).
 
 Stan: projekt + dane + silnik miesiąca + działy-agenci + reżyser + **silnik ruchów bez quizu**
-+ **grywalna kampania „Wodnik” w terminalu** + 12 scenariuszy (S01, S03 jako incydenty bez
-drzewa) + testy. Serwera, logowania i frontu w
++ **dwie grywalne kampanie w terminalu** („Wodnik” — wodociągi, „Gmina Brzozów Wielki”) + 12
+scenariuszy (S01, S03, S07 jako incydenty bez drzewa) + testy. Serwera, logowania i frontu w
 przeglądarce jeszcze **nie ma** (roadmapa: `docs/13-roadmapa.md`).
 
 Decyzje właściciela (13.10.2026): odbiorcy — biuro; pierwsza kampania — wodociągi; **tempo
@@ -68,21 +68,25 @@ można przejrzeć, przetestować i wycofać (`docs/18-…`).
 - **Doradztwo** (`docs/18-…`, 18.13; `proto/doradztwo.js`): doradca tylko odsłania i wycenia,
   nie zmienia skuteczności kontroli. Wycena przez `K.coJesli` — na kopiach stanu, bez ruszania
   kampanii i strumieni losowości (test to pilnuje). Losowanie: `k.rnd.doradztwo`.
+- **Kampania = plik danych** (`data/kampanie/<id>.js`, wzorce: `wodociagi.js`, `gmina.js`;
+  `docs/19-…`, 19.4). Nic w `proto/` nie może zakładać konkretnej kampanii: id działów, faktów
+  i spraw biorą się z pliku, OT tylko gdy `firma.ot`, odpowiedzi automatów na sprawy kampanii —
+  w jej `automaty`. Nowy incydent w innej organizacji = `warianty[id]` w pliku kampanii.
 - **Zapis gry = lista akcji** (`k.akcje`: `ruch`, `sprawa`, `inc_start`, `inc`, `inc_czekaj`,
   `inc_koniec`, `zamknij`), wczytanie = odtworzenie z ziarna (`wykonajAkcje`). Nowa akcja gracza
   musi przechodzić przez `RU.wykonaj`/`SP.odpowiedz`/funkcje incydentu w `proto/kampania.js`
   i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan. Nowe losowanie — tylko
-  z właściwego strumienia `k.rnd.*`.
+  z właściwego strumienia `k.rnd.*`. Plik zapisu pamięta kampanię (`kampania`).
 
 ## Narzędzia
 
 ```bash
 node ciso-sim/proto/symulacja.js <firma> [N]      # porównanie strategii (Monte Carlo)
-node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--naprawione=fakt] [--auto=wzorcowo|bezczynnie]
+node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--naprawione=fakt] [--auto=wzorcowo|bezczynnie] [--kampania=gmina]
                                                  # incydent w terminalu + walidacja pliku
-node ciso-sim/proto/kampania.js [--zapis=plik.json] | --auto=madry|rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
-node ciso-sim/proto/porownaj-style.js            # 4 style gry × 20 ziaren (wyniki → docs/16-…)
-node ciso-sim/proto/brzegowe.js [N]              # strategie-prowokacje + niezmienniki (→ docs/17-…)
+node ciso-sim/proto/kampania.js [--kampania=gmina] [--zapis=plik.json] | --auto=madry|rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
+node ciso-sim/proto/porownaj-style.js [--kampania=gmina]   # 4 style gry × 20 ziaren (wyniki → docs/16-…, 19-…)
+node ciso-sim/proto/brzegowe.js [N] [--kampania=gmina]     # strategie-prowokacje + niezmienniki (→ docs/17-…)
 node ciso-sim/proto/cennik.js [N]                # koszt JEDNEGO odstępstwa w dobrej grze (→ docs/17-…, 17.8)
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```

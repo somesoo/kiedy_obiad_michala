@@ -1,13 +1,15 @@
 // Porównanie stylów gry w kampanii (20 ziaren): node ciso-sim/proto/porownaj-style.js
 // Wynik zapisujemy w proto/wyniki-kampania-*.txt, wnioski w docs/16-kampania-wodociagi.md.
 const K = require('./kampania');
+// node ciso-sim/proto/porownaj-style.js [--kampania=gmina]
+const KAMPANIA = (process.argv.find(a => a.startsWith('--kampania=')) || '=wodociagi').split('=')[1];
 (async () => {
   const N = 20;
   console.log('styl          straty    wydatki   audyt  zaufanie  ukryte  zakłóc.  reput.  mandat  P(poważny) PRAKT. INDEKS  WYNIK');
   for (const s of ['madry', 'rozsadny', 'odmawiajacy', 'bierny']) {
     const a = { straty: 0, wyd: 0, audyt: 0, zauf: 0, ukr: 0, zak: 0, rep: 0, man: 0, pow: 0, jd: 0, io: 0, wk: 0 };
     for (let seed = 1; seed <= N; seed++) {
-      const k = await K.grajAuto(s, seed, false, () => {}, false);
+      const k = await K.grajAuto(s, seed, false, () => {}, false, KAMPANIA);
       a.straty += k.st.w.straty; a.wyd += k.st.w.wydatki; a.audyt += k.kontrola.wynik;
       const dz = Object.values(k.dzialy);
       a.zauf += dz.reduce((x, d) => x + d.zaufanie, 0) / dz.length;

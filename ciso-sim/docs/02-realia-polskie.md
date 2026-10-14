@@ -46,7 +46,8 @@ dokładnie wtedy, gdy minął termin samorejestracji. Scenariusz S11 („Wykaz")
 - **Samorządy** 🟡: według źródeł wtórnych sektor „podmioty publiczne" obejmuje JST częściowo —
   na poziomie gminy **urząd gminy od 50 etatów**, na poziomie powiatu starostwo; **szkoły wyłączone**.
   Do potwierdzenia w załączniku nr 1. W grze: gmina zaczyna ze statusem „do ustalenia" — decyzja
-  gracza (i jej uzasadnienie) jest częścią oceny.
+  gracza (i jej uzasadnienie) jest częścią oceny. Prawda gry (`data/firmy.js → gmina`): urząd
+  gminy od 50 etatów = **podmiot ważny** 🟡 (`19-…`).
 - **Szacunkowa skala** 🟡: w komercyjnych poradnikach pada ~42 000 firm w 18 sektorach.
   W grze używamy tylko jako tła („jesteś jednym z kilkudziesięciu tysięcy").
 
@@ -140,6 +141,9 @@ tak jak w życiu.
 | **Krajowe Ramy Interoperacyjności** — rozporządzenie RM z 21.05.2024, **Dz.U. 2024 poz. 773**, w mocy od 23.05.2024 (zastąpiło rozporządzenie z 2012) | wymogi dla gminy; w praktyce JST zlecają audyty „zgodnie z KRI i KSC" | ✅ |
 | Wymóg SZBI w KRI (dawniej § 20 z odwołaniem do norm PN-ISO/IEC 27001) | 🟡 — sprawdzić brzmienie w wersji 2024 | 🟡 |
 | **Prawo zamówień publicznych**: próg stosowania ustawy **130 000 zł netto**; powyżej — przetarg, tygodnie–miesiące | gmina i szpital: zakup powyżej progu trwa 2–4 miesiące gry (odwołania do KIO jako zdarzenie losowe) | ✅ (próg) / 🔵 (czasy) |
+| W grze wartość zamówienia = wdrożenie + 24 mies. abonamentu (umowa dwuletnia), odwołanie do KIO z szansą 10% (+2 mies.) | `PROG_PZP`, `przetarg` w `proto/ruchy.js`; `19-…`, 19.4 | 🔵 |
+| **Trwałość projektu grantowego** („Cyberbezpieczny Samorząd"): kontrola operatora, korekta finansowa za sprzęt nieużywany zgodnie z wnioskiem; w grze 60 tys. zł (30 tys. przy wyjaśnieniach i trwających wdrożeniach); licencje z grantu do 15. miesiąca kampanii | sprawy `G_kontrola_grantu`, `G_licencje`; `19-…` | 🔵 (zasady trwałości i wysokość korekt — do sprawdzenia w umowie grantowej) |
+| **Projekt budżetu JST** przedstawiany radzie jesienią (w grze: listopad, m. 8), uchwała budżetowa — rada gminy | sprawa `S_budzet2027` w gminie | 🟡 (termin z ustawy o finansach publicznych — do potwierdzenia) |
 | **Cyberbezpieczny Samorząd** (FERC, środki UE): 2 807 JST uprawnionych (2 477 gmin, 314 powiatów, 16 województw), dla gmin 200–850 tys. zł; umowy podpisane do końca 2024; realizacja do **30.06.2026** | dług gminy: „grant rozliczony sprzętem w kartonach" — rozliczony, ale niewdrożony | ✅ |
 | Program dla wodociągów („Cyberbezpieczne Wodociągi") | wspomniany przez ministra; szczegóły nieznane | 🟡 — w grze jako „możliwy nabór", bez kwot |
 | Kierownik jednostki sektora finansów publicznych = kierownik podmiotu w rozumieniu KSC | wójt/burmistrz/dyrektor SP ZOZ jako adresat kary | ✅ |
@@ -151,6 +155,7 @@ tak jak w życiu.
 | Mechanizm | W grze | Status |
 |---|---|---|
 | **KSeF**: obowiązkowy od 1.02.2026 dla dużych (sprzedaż > 200 mln zł), od 1.04.2026 dla pozostałych, od 1.01.2027 dla najmniejszych; do końca 2026 bez kar za błędy | nowe „klucze do królestwa" (uprawnienia/tokeny/certyfikaty KSeF) w biurze rachunkowym i firmach; zmiana wzorców oszustw fakturowych | ✅ (daty) |
+| **Przestępstwa przeciwko ochronie informacji** (Kodeks karny: m.in. nieuprawniony dostęp do systemu, niszczenie danych informatycznych, zakłócanie pracy systemu) — podstawa zawiadomienia w S07 | S07: akcja „zawiadomienie o przestępstwie"; w grze bez numerów artykułów | 🟡 (numery i brzmienie przepisów — do potwierdzenia przed użyciem w debriefie) |
 | **Biała lista podatników VAT** (wykaz rachunków): płatność > 15 000 zł na rachunek spoza wykazu → brak kosztu podatkowego i solidarna odpowiedzialność za VAT | procedura anty-BEC: weryfikacja w wykazie jako realny, darmowy krok | ✅ |
 | **Mechanizm podzielonej płatności** | tło do BEC | ✅ |
 | **moje.cert.pl** (CERT Polska): darmowy skan domen skanerem **Artemis**, alerty o wyciekach haseł w domenie, sprawdzenie ochrony **Listą Ostrzeżeń**, widok infrastruktury zewnętrznej; ponad 20 tys. użytkowników | kontrola `moje_cert` za 0 zł — gra ma pokazać, że część rzeczy jest darmowa | ✅ |

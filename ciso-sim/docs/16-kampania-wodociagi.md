@@ -113,8 +113,8 @@ zamykający z dowodami, koordynacja projektów, decyzje cykliczne i doradztwo (1
 
 | Styl | Straty | Wydatki | Audyt /60 | Zaufanie działów | Ukryte obejścia | Zakłócenia wody | Reputacja | Mandat | Poważny incydent | Praktyka | Indeks | **Wynik** |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **mądry** (rozpoznanie, „tanie i ważne", pilotaże, testy, warunki) | **204 tys.** | 521 tys. | **58** | **0,83** | 0,3 | 0,1 | 52 | **64** | 30% | 94% | **905** | **921** |
-| odmawiający (mądre ruchy, odmowa + kara za obejścia) | 209 tys. | 492 tys. | 57 | **0,01** | 2,2 | 0,1 | 57 | 34 | 30% | 75% | 824 | 786 |
+| **mądry** (rozpoznanie, „tanie i ważne", pilotaże, testy, warunki) | **193 tys.** | 423 tys. | **55** | **0,82** | 0,1 | 0,1 | 57 | **57** | 35% | 95% | **867** | **910** |
+| odmawiający (mądre ruchy, odmowa + kara za obejścia) | 250 tys. | 407 tys. | 55 | **0,01** | 2,4 | 0,2 | 55 | 27 | 40% | 76% | 777 | 767 |
 | rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 455 tys. | 367 tys. | 38 | 0,40 | 17,2 | 1,6 | 38 | 20 | 95% | 50% | 592 | 547 |
 | bierny (nic; sprawy same, incydenty bez niego) | **1,70 mln** | 11 tys. | **10** | 0,31 | 11,6 | **2,8** | **15** | **0** | 100% | 0% | 131 | 66 |
 

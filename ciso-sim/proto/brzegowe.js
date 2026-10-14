@@ -162,15 +162,17 @@ function sprawdz(k, nazwa, seed) {
   return bledy.map(b => `[${nazwa} #${seed}] ${b}`);
 }
 
+// Kampania laboratorium: node ciso-sim/proto/brzegowe.js [N] [--kampania=gmina]
+const KAMPANIA = (process.argv.find(a => a.startsWith('--kampania=')) || '=wodociagi').split('=')[1];
 async function main() {
-  const N = Number(process.argv[2] || 10);
+  const N = Number(process.argv.slice(2).find(a => /^\d+$/.test(a)) || 10);
   const wszystkieBledy = [];
   console.log('strategia        straty  wydatki  audyt mandat rep morale zauf. ukryte  maxMnoż  awarie OT  praktyka odwołany  sufit  INDEKS  WYNIK');
   for (const [nazwa, strat] of Object.entries(STRATEGIE)) {
     const a = { straty: 0, wyd: 0, audyt: 0, man: 0, rep: 0, mor: 0, zauf: 0, ukr: 0, mnoz: 0, aw: 0, jd: 0, odw: 0, io: 0, sufit: 0, wk: 0 };
     for (let seed = 1; seed <= N; seed++) {
       let k;
-      try { k = await K.grajAuto(strat, seed, false, () => {}, false); } catch (e) { wszystkieBledy.push(`[${nazwa} #${seed}] WYJĄTEK: ${e.stack.split('\n').slice(0, 3).join(' | ')}`); continue; }
+      try { k = await K.grajAuto(strat, seed, false, () => {}, false, KAMPANIA); } catch (e) { wszystkieBledy.push(`[${nazwa} #${seed}] WYJĄTEK: ${e.stack.split('\n').slice(0, 3).join(' | ')}`); continue; }
       wszystkieBledy.push(...sprawdz(k, nazwa, seed));
       const dz = Object.values(k.dzialy);
       const io = await K.indeksOdpornosci(k);

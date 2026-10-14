@@ -55,12 +55,27 @@ function polacz(sk, v) {
   if (v.wyjatek) sk.wyjatki.push(v.wyjatek);
   if (v.wczesnie) sk.wczesnie = v.wczesnie;
 }
-function rozwiazParam(kon, p = {}) {
+// Wariant „OT" (stacje sterujące, sieć przemysłowa) — po nazwie parametru albo wartości.
+const wariantOt = (n, w, v) => !!v?.ot || /(^|_)ot$/.test(w) || (/_ot$/.test(n) && w !== 'bez_ot');
+// `bezOt`: firma bez sieci przemysłowej (gmina, biuro) — parametry „…_ot" przyjmują „bez_ot",
+// a jawny wybór wariantu OT jest niedostępny z powodem (nie ma czego chronić ani psuć).
+// Parametry „dla tej firmy": w organizacji bez OT warianty OT wypadają (zostaje domyślny bez OT).
+// Automaty i doradca podają zalecenia ogólne — tu dopasowują się do firmy.
+function dopasujParam(k, id, p = {}) {
+  const kon = S.kontrola[id.includes(':') ? id.split(':')[1] : id];
+  if (k.st.firma.ot || !kon?.parametry) return p;
+  return Object.fromEntries(Object.entries(p).filter(([n, w]) => !wariantOt(n, w, kon.parametry[n]?.wartosci?.[w])));
+}
+function rozwiazParam(kon, p = {}, bezOt = false) {
   const defs = kon.parametry || {};
   for (const n of Object.keys(p)) if (!defs[n]) throw blad(`${kon.nazwa}: nieznany parametr „${n}"${Object.keys(defs).length ? ` (są: ${Object.keys(defs).join(', ')})` : ' (ta kontrola nie ma parametrów)'}`);
   const wybor = {}, sk = noweSkutki();
   for (const [n, def] of Object.entries(defs)) {
-    const w = p[n] ?? def.domyslnie;
+    let w = p[n] ?? (bezOt && /_ot$/.test(n) && def.wartosci.bez_ot ? 'bez_ot' : def.domyslnie);
+    if (bezOt && def.wartosci[w] && wariantOt(n, w, def.wartosci[w])) {
+      if (p[n] !== undefined) throw blad(`${kon.nazwa}: w tej organizacji nie ma sieci przemysłowej (OT) — wariant „${w}" nie ma zastosowania`);
+      w = Object.keys(def.wartosci).find(x => !wariantOt(n, x, def.wartosci[x])) || w;
+    }
     if (!def.wartosci[w]) throw blad(`${kon.nazwa}: „${w}" to nie jest wartość parametru ${n} (możliwe: ${Object.keys(def.wartosci).join(', ')})`);
     wybor[n] = w;
     polacz(sk, def.wartosci[w]);
@@ -178,6 +193,11 @@ function poWdrozeniu(k, id) {
   // inwentaryzacja — domyślne PIN-y), kopie OT u nas zamykają zależność od laptopa integratora.
   api(k).odkryjFakty(f => (f.odkrywa_wdrozenie || []).includes(id), `wdrożenie: ${kon.nazwa}`);
   if (id === 'backup' && o.param.zakres === 'biuro_ot' && k.fakty.kopia_scada_u_integratora) k.fakty.kopia_scada_u_integratora.naprawiony = true;
+  // Fakty, które zamyka samo wdrożenie (`naprawia_wdrozenie`): brama dla dostawców zastępuje
+  // stały tunel dostawcy systemu dziedzinowego — także wtedy, gdy gracz o tunelu nie wiedział.
+  for (const f of Object.values(k.fakty)) {
+    if (f.prawda && !f.naprawiony && (f.naprawia_wdrozenie || []).includes(id)) { f.znany = true; f.naprawiony = true; k.historia.push({ m: k.st.m, t: 'naprawa_faktu', id: f.id }); }
+  }
 }
 
 // ── API dla ruchów z data/ruchy.js i dla spraw ──
@@ -270,11 +290,14 @@ function api(k) {
     },
     zaplanujSprawe: (sid, za) => { k.planowaneSprawy.push({ sid, m: k.st.m + za }); },
     // `oplacone`: koszt wdrożenia pobrał już czasownik sprawy (Z.pobierz) — nie płacimy dwa razy.
-    wdrozZeSprawy: (id, oplacone = false) => {
+    // `hMn`: ile godzin zespołu bierze wdrożenie (firma zewnętrzna robi większość — mniej).
+    wdrozZeSprawy: (id, oplacone = false, hMn = 1) => {
       const kon = S.kontrola[id];
-      const { wybor, sk } = rozwiazParam(kon, {});
+      const { wybor, sk } = rozwiazParam(kon, {}, !k.st.firma.ot);
       if (!oplacone) { k.st.w.wydatki += kon.wdrozenie.pln; k.wydaneRok[k.rok] = (k.wydaneRok[k.rok] || 0) + kon.wdrozenie.pln; }
-      k.st.projekty.push({ id, start: k.st.m, h: 0, hMn: 1 });
+      const pzp = przetarg(k, kupione(k, id) ? 0 : kon.wdrozenie.pln, S.kosztMiesieczny(k.st, id));
+      k.st.projekty.push({ id, start: k.st.m + pzp, h: 0, hMn, ...(pzp ? { od: k.st.m + pzp } : {}) });
+      if (pzp) k.historia.push({ m: k.st.m, t: 'przetarg', id, mies: pzp });
       k.st.zamowione.add(id); delete k.st.wypowiedzenia[id];
       k.obiekty[id] = nowyObiekt(k, kon, wybor, sk);
     },
@@ -368,8 +391,22 @@ function luki(k) {
 }
 
 // ── KATALOG RUCHÓW ──
+// Sprzęt kupiony wcześniej (gmina: grant rozliczony sprzętem w kartonach) — wdrożenie bez
+// zakupu, ale z godzinami zespołu: kartony same się nie podłączą.
+// `kupione`: { id: { licencja_mies } } — licencja w cenie grantu do podanego miesiąca kampanii.
+const kupione = (k, id) => !!k.def.kupione?.[id];
 function kosztWdrozenia(k, kon, sk) {
-  return { h: H_PLANOWANIA, pln: Math.round(kon.wdrozenie.pln * sk.koszt), msc: k.st.zamowione.has(kon.id) ? 0 : S.kosztMiesieczny(k.st, kon.id) };
+  return { h: H_PLANOWANIA, pln: kupione(k, kon.id) ? 0 : Math.round(kon.wdrozenie.pln * sk.koszt), msc: k.st.zamowione.has(kon.id) ? 0 : S.kosztMiesieczny(k.st, kon.id) };
+}
+
+// Prawo zamówień publicznych: w jednostce publicznej zamówienie powyżej progu (wartość umowy
+// na 2 lata, netto) to przetarg — 2–4 miesiące, a odwołanie do KIO dokłada dwa (✅ próg,
+// 🔵 czasy; docs/02-…). Losowanie tylko przy zleceniu (strumień wdrożeń), nie przy pytaniu o koszt.
+const PROG_PZP = 130000;
+function przetarg(k, pln, msc) {
+  if (!k.st.firma.publiczny || pln + 24 * (msc || 0) <= PROG_PZP) return 0;
+  const rnd = k.rnd.wdrozenia;
+  return 2 + Math.floor(rnd() * 3) + (rnd() < 0.1 ? 2 : 0);
 }
 
 // Pełna definicja ruchu z katalogu kontroli albo z data/ruchy.js.
@@ -380,9 +417,12 @@ function definicja(k, id) {
     if (!kon) return null;
     return { id, rodzaj, kon };
   }
-  const r = RUCHY[id];
+  // Ruchy kampanii (k.def.ruchy) — np. naprawa faktu, który istnieje tylko w tej organizacji.
+  const r = k.def.ruchy?.[id] || RUCHY[id];
   return r ? { id, rodzaj: 'ruch', r } : null;
 }
+const wszystkieRuchy = k => ({ ...RUCHY, ...(k.def.ruchy || {}) });
+const bezOtPowod = 'w tej organizacji nie ma sieci przemysłowej (OT)';
 
 function nazwaRuchu(k, def) {
   if (def.rodzaj === 'ruch') return def.r.nazwa;
@@ -403,7 +443,7 @@ function koszt(k, def, p = {}) {
   const kon = def.kon;
   const o = k.obiekty[kon.id];
   switch (def.rodzaj) {
-    case 'wdroz': return kosztWdrozenia(k, kon, rozwiazParam(kon, p).sk);
+    case 'wdroz': return kosztWdrozenia(k, kon, rozwiazParam(kon, p, !k.st.firma.ot).sk);
     case 'pilotaz': return { h: kon.pilot?.h || 6 };
     case 'przeglad': return { h: Math.max(2, Math.round((kon.utrzymanie.h || 4) * 0.5)) };
     case 'test': { const t = kon.test || DOMYSLNY_TEST; return { h: t.h || 0, pln: t.pln || 0 }; }
@@ -421,6 +461,7 @@ function dostepny(k, id, p = {}) {
   if (k.incydent) return 'trwa incydent — najpierw go poprowadź (albo zakończ fazę ostrą)';
   if (def.rodzaj === 'ruch') {
     const r = def.r;
+    if (r.ot && !k.st.firma.ot) return bezOtPowod;
     if (r.raz && k.zrobioneRuchy.has(id)) return 'już zrobione';
     for (const [n, d] of Object.entries(r.param || {})) {
       if (p[n] === undefined) return `brak parametru ${n}=…`;
@@ -445,11 +486,12 @@ function dostepny(k, id, p = {}) {
       if (stan === 'projekt') return 'wdrożenie już trwa';
       if (stan === 'dziala') return 'już działa — możesz zmienić parametry albo wycofać';
       let sk;
-      try { sk = rozwiazParam(kon, p).sk; } catch (e) { return e.message; }
+      try { sk = rozwiazParam(kon, p, !k.st.firma.ot).sk; } catch (e) { return e.message; }
       for (const w of sk.wymaga) if (!S.dziala(k.st, w)) return `ten wariant wymaga działającej kontroli: ${S.kontrola[w].nazwa}`;
       return Z.brakZasobow(k, kosztWdrozenia(k, kon, sk));
     }
     case 'pilotaz':
+      if (!k.st.firma.ot) return bezOtPowod;
       if (!kon.pilot) return 'ta kontrola nie ma pilotażu na OT';
       if (k.pilotaze[kon.id]) return `pilotaż już był (m. ${k.pilotaze[kon.id].m})`;
       return Z.brakZasobow(k, koszt(k, def, p));
@@ -469,7 +511,7 @@ function dostepny(k, id, p = {}) {
       if (!kon.parametry) return 'ta kontrola nie ma parametrów';
       if (!Object.keys(p).length) return `podaj parametry (${Object.keys(kon.parametry).join(', ')})`;
       let sk;
-      try { sk = rozwiazParam(kon, { ...o.param, ...p }).sk; } catch (e) { return e.message; }
+      try { sk = rozwiazParam(kon, { ...o.param, ...p }, !k.st.firma.ot).sk; } catch (e) { return e.message; }
       for (const w of sk.wymaga) if (!S.dziala(k.st, w)) return `ten wariant wymaga działającej kontroli: ${S.kontrola[w].nazwa}`;
       return Z.brakZasobow(k, koszt(k, def, p));
     }
@@ -494,7 +536,7 @@ function lista(k) {
     if (kon.tylko_sprawa) continue;
     const o = k.obiekty[kon.id];
     if (!o || o.stan === 'wycofany') dodaj(`wdroz:${kon.id}`);
-    if (kon.pilot && !k.pilotaze[kon.id]) dodaj(`pilotaz:${kon.id}`);
+    if (kon.pilot && !k.pilotaze[kon.id] && k.st.firma.ot) dodaj(`pilotaz:${kon.id}`);
     if (o?.stan === 'dziala') {
       dodaj(`przeglad:${kon.id}`); dodaj(`test:${kon.id}`);
       // Zmiana bez parametrów nie ma sensu — na liście pokazujemy ją jako dostępną, jeśli są zasoby.
@@ -504,7 +546,8 @@ function lista(k) {
     }
     if (o?.stan === 'dziala' || o?.stan === 'projekt') dodaj(`wycofaj:${kon.id}`);
   }
-  for (const id of Object.keys(RUCHY)) dodaj(id, przykladoweParam(k, RUCHY[id]));
+  // Ruchów OT w organizacji bez OT nie pokazujemy wcale — to nie „niedostępne", tylko „nie ma czego".
+  for (const [id, r] of Object.entries(wszystkieRuchy(k))) if (!r.ot || k.st.firma.ot) dodaj(id, przykladoweParam(k, r));
   return out;
 }
 function przykladoweParam(k, r) {
@@ -556,9 +599,12 @@ function cyklZycia(k, def, p, c) {
   const rnd = k.rnd.wdrozenia;
   switch (def.rodzaj) {
     case 'wdroz': {
-      const { wybor, sk } = rozwiazParam(kon, p);
+      const { wybor, sk } = rozwiazParam(kon, p, !k.st.firma.ot);
       Z.pobierz(k, { h: c.h, pln: c.pln });
-      st.projekty.push({ id, start: st.m, h: 0, hMn: sk.h });
+      const pzp = przetarg(k, c.pln, c.msc);
+      // W czasie przetargu projekt nie dostaje godzin zespołu (od), a termin liczy się od umowy.
+      st.projekty.push({ id, start: st.m + pzp, h: 0, hMn: sk.h, ...(pzp ? { od: st.m + pzp } : {}) });
+      if (pzp) k.historia.push({ m: st.m, t: 'przetarg', id, mies: pzp });
       st.zamowione.add(id); delete st.wypowiedzenia[id];
       k.obiekty[id] = nowyObiekt(k, kon, wybor, sk);
       if (sk.ot) k.historia.push({ m: st.m, t: 'ot_zmiana', id, pilot: !!k.pilotaze[id], param: wybor });
@@ -567,6 +613,8 @@ function cyklZycia(k, def, p, c) {
       Object.assign(k.flagi, sk.flagi);
       const ostr = (kon.wymaga || []).filter(w => !S.dziala(st, w));
       return `Zlecone (${Z.zl(c.pln)} + ${Z.zl(c.msc)}/mies.; zespół: ok. ${Math.round(kon.wdrozenie.h * sk.h * Math.max(0.4, st.skalaH))} h, min. ${kon.wdrozenie.mies} mies.).` +
+        (pzp ? ` Wartość umowy ponad próg Pzp (${Z.zl(PROG_PZP)} netto): przetarg — umowa za ok. ${pzp} mies.` : '') +
+        (kupione(k, id) ? ' Sprzęt już jest (z grantu) — płacimy tylko pracą.' : '') +
         (ostr.length ? ` Uwaga: bez ${ostr.map(w => S.kontrola[w].nazwa).join(', ')} zadziała tylko w ~30%.` : '') +
         (sk.ot && !k.pilotaze[id] && kon.pilot ? ' Bez pilotażu na OT.' : '');
     }
@@ -612,7 +660,7 @@ function cyklZycia(k, def, p, c) {
       Z.pobierz(k, c);
       const o = k.obiekty[id];
       const stare = o.param;
-      const { wybor, sk } = rozwiazParam(kon, { ...stare, ...p });
+      const { wybor, sk } = rozwiazParam(kon, { ...stare, ...p }, !k.st.firma.ot);
       // Skutki uboczne tylko ZMIENIONYCH wartości (nowa wartość wchodzi, stara nie liczy się drugi raz).
       const zmiany = noweSkutki();
       for (const [n, w] of Object.entries(wybor)) if (stare[n] !== w) polacz(zmiany, kon.parametry[n].wartosci[w]);
@@ -685,6 +733,7 @@ function tarcie(k) {
 // kampanii (pilotaż ją odsłania, wdrożenie bez pilotażu sprawdza „na żywo").
 function noweNiezgodnosci(k) {
   const out = {};
+  if (!k.st.firma.ot) return out;
   for (const kon of KONTROLE) {
     const p = Math.max(0, ...Object.values(kon.parametry || {}).flatMap(d => Object.values(d.wartosci)).map(v => (v.ot ? v.awaria || 0 : 0)));
     if (p > 0) out[kon.id] = k.rnd.wdrozenia() < p;
@@ -696,7 +745,7 @@ function noweNiezgodnosci(k) {
 // porządne wdrożenie sprzed kampanii, bez usterek, jakość bazowa.
 function zainstalujGotowe(k, id, p = {}) {
   const kon = S.kontrola[id];
-  const { wybor, sk } = rozwiazParam(kon, p);
+  const { wybor, sk } = rozwiazParam(kon, p, !k.st.firma.ot);
   k.st.aktywne[id] = -12; k.st.zamowione.add(id);
   k.obiekty[id] = { ...nowyObiekt(k, kon, wybor, sk), stan: 'dziala', od: -12, dzialaOd: -12, jakoscBazowa: JAKOSC_BAZOWA, jakosc: JAKOSC_BAZOWA };
   przeliczKonf(k, id);
@@ -704,6 +753,6 @@ function zainstalujGotowe(k, id, p = {}) {
 }
 
 module.exports = {
-  JAKOSC_BAZOWA, zainstalujGotowe, rozwiazParam, noweFakty, noweNiezgodnosci, mnozniki, przeliczKonf, skutecznosc, wiedzaOJakosci,
+  PROG_PZP, przetarg, kupione, dopasujParam, JAKOSC_BAZOWA, zainstalujGotowe, rozwiazParam, noweFakty, noweNiezgodnosci, mnozniki, przeliczKonf, skutecznosc, wiedzaOJakosci,
   api, luki, lista, dostepny, wykonaj, koszt, definicja, poMiesiacu, tarcie, awariaOT, stosujDzialy, RUCHY,
 };

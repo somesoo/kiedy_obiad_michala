@@ -32,6 +32,7 @@ function wycena(k, p = {}) {
 }
 
 function dostepny(k, p) {
+  if (D.TEMATY[p.temat]?.ot && !k.st.firma.ot) return 'w tej organizacji nie ma sieci przemysłowej (OT)';
   if (k.doradztwo.zlecenia.some(z => z.temat === p.temat)) return 'ten temat jest już zlecony — raport jeszcze nie przyszedł';
   const c = wycena(k, p);
   if (k.st.m + c.mies > k.def.miesiecy) return `raport przyszedłby po końcu kampanii (za ${c.mies} mies.)`;
@@ -87,7 +88,7 @@ function raport(k, z) {
     if (!kon || kon.tylko_sprawa) continue;
     const o = k.obiekty[id];
     if (!o || o.stan === 'wycofany') {
-      const par = D.ZALECANE_PARAMETRY[id] || {};
+      const par = RU.dopasujParam(k, `wdroz:${id}`, D.ZALECANE_PARAMETRY[id] || {});
       const brak = (kon.wymaga || []).filter(x => !S.dziala(k.st, x));
       dodaj({ opis: `Wdrożyć: ${kon.nazwa}${brak.length ? ` (najpierw: ${brak.map(x => S.kontrola[x].nazwa).join(', ')})` : ''}`, ruch: `wdroz:${id}`, p: par,
         polecenie: polecenie(`wdroz:${id}`, par), slad: { t: 'ruch', id: `wdroz:${id}` }, zmiana: k2 => RU.zainstalujGotowe(k2, id, par) });

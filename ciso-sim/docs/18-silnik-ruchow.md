@@ -183,21 +183,21 @@ kolejności; miesiąc zamyka sam (`n`).
 
 ## 18.10. Wyniki na nowym silniku (20 ziaren, `proto/wyniki-*-2026-10-13.txt`)
 
-Stan po 18.12–18.13 (koordynacja projektów, decyzje cykliczne, doradztwo).
+Stan po 18.12–18.13 (koordynacja projektów, decyzje cykliczne, doradztwo) i uogólnieniu automatów pod drugą kampanię (`19-…`).
 
 | Strategia | Straty | Audyt /60 | Morale | Praktyka | Indeks | **Wynik** | Uwagi |
 |---|---|---|---|---|---|---|---|
-| mądry (rozpoznanie, „tanie i ważne", ≤ 3 projekty naraz, pilotaże, testy, decyzje cykliczne) | 204 tys. | 58 | 43 | 94% | 905 | **921** | |
-| odmawiający (mądre ruchy, odmowa każdej prośbie) | 209 tys. | 57 | — | 75% | 824 | 786 | zaufanie działów 0,01 |
-| pracoholik (przeglądy co miesiąc, polowanie, szkolenia) | 331 tys. | 53 | 16 | 68% | 740 | 709 | wypalenie |
+| mądry (rozpoznanie, „tanie i ważne", ≤ 3 projekty naraz, pilotaże, testy, decyzje cykliczne) | 193 tys. | 55 | 32 | 95% | 867 | **910** | |
+| odmawiający (mądre ruchy, odmowa każdej prośbie) | 250 tys. | 55 | — | 76% | 777 | 767 | zaufanie działów 0,01 |
+| pracoholik (przeglądy co miesiąc, polowanie, szkolenia) | 360 tys. | 54 | 16 | 69% | 734 | 711 | wypalenie |
 | **laik z doradcą** (robi tylko to, co mówi raport doradcy) | 448 tys. | 43 | 52 | 54% | 706 | **624** | 18.13 |
 | wszystko naraz (cały katalog w m. 1) | 952 tys. | 19 | 23 | 76% | 447 | 591 | 18.12 — z 16 zamówień działają 2–4 |
 | skąpiec (tylko to, co nie kosztuje złotówek) | 665 tys. | 25 | 75 | 62% | 535 | 578 | |
 | rozsądny laik (wdraża to, o czym słyszy, domyślnie) | 455 tys. | 38 | 75 | 50% | 592 | 547 | 17 ukrytych obejść, awarie OT, certyfikaty wygasają |
 | paranoik | 494 tys. | 10 | 65 | 48% | 348 | 416 | |
-| potakiwacz | 179 tys. | 37 | 49 | 64% | 340 | 340 | sufit w 20/20 |
-| losowy (fuzzer) | 804 tys. | 21 | 47 | 28% | 362 | 322 | niezmienniki OK |
-| kłamca | 254 tys. | 42 | 35 | 50% | 250 | **250** | odwołany w 18/20 |
+| potakiwacz | 221 tys. | 37 | 50 | 66% | 330 | 330 | sufit w 20/20 |
+| losowy (fuzzer) | 968 tys. | 18 | 46 | 24% | 348 | 306 | niezmienniki OK |
+| kłamca | 169 tys. | 41 | 24 | 53% | 250 | **250** | odwołany w 18/20 |
 | bierny / odkładacz | 1,70 mln | 10 | 72 | 0% | 131 | 66 | odwołany w 20/20 |
 
 Cennik pojedynczych odstępstw w grze mądrego: `17-…`, 17.8–17.9.
@@ -309,5 +309,5 @@ Zlecenie pentestu albo audytu OT w miesiącu ostrzeżenia CERT liczy się jako r
 
 **Ile to daje**: laik, który robi WYŁĄCZNIE to, co mówi raport (pentest lokalnej firmy w m. 1,
 ocena luk w m. 2, druga ocena od renomowanej w m. 11), ma **624** pkt wobec **547** laika
-działającego sam — ale daleko za mądrym (921). Doradca odpowiada „co" i „w jakiej kolejności";
+działającego sam — ale daleko za mądrym (910). Doradca odpowiada „co" i „w jakiej kolejności";
 nie prowadzi za gracza spraw działów, incydentów, testów i przeglądów.

@@ -179,6 +179,8 @@ function zakonczMiesiac(st) {
   const wdrozone = [];
   for (let i = 0; i < st.projekty.length; i++) {
     const pr = st.projekty[i];
+    // Kampania: projekt czeka na umowę (przetarg Pzp) — godzin zespołu jeszcze nie dostaje.
+    if (pr.od !== undefined && m < pr.od) continue;
     const k = kontrola[pr.id];
     // hMn: parametry wdrożenia z kampanii (pasywny spis OT trwa dłużej, „z pudełka" — krócej).
     const potrzeba = hWdr(st, k) * (pr.hMn ?? 1);

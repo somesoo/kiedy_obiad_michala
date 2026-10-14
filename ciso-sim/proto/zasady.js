@@ -22,7 +22,10 @@ function pomocnik(k) {
   const ruchy = id => H.filter(e => e.t === 'ruch' && (e.id === id || (id.endsWith(':') && e.id.startsWith(id))));
   const pierwszy = id => ruchy(id)[0];
   const sprawy = pred => H.filter(e => (e.t === 'sprawa' || e.t === 'sprawa_domyslnie' || e.t === 'sprawa_zapobiegnieta') && pred(e));
-  return { H, ruchy, pierwszy, sprawy };
+  // Kiedy kontrola została zlecona — ruchem gracza albo decyzją w sprawie (kartony z grantu),
+  // a zastana od startu liczy się jako zrobiona.
+  const zlecone = id => { const r = pierwszy(`wdroz:${id}`)?.m; const o = k.obiekty[id]?.od; const x = Math.min(r ?? 99, o ?? 99); return x === 99 ? undefined : x; };
+  return { H, ruchy, pierwszy, sprawy, zlecone };
 }
 
 // Pozostałe ryzyko po warunkach (największy ułamek na wektorach inicjatywy).
@@ -47,23 +50,26 @@ function doMiesiaca(k, id, cel, waga, opis, dlaczego, termin, kiedy) {
 const ZASADY = [
   // ── PODSTAWY W PIERWSZYM PÓŁROCZU (priorytety przy małym budżecie) ──
   (k, h) => doMiesiaca(k, 'inwentaryzacja', 'E4', 2, 'Inwentaryzacja w pierwszym półroczu',
-    'Nie da się chronić tego, o czym się nie wie. Bez ewidencji każda kontrola chroni tylko część firmy.', 6, h.pierwszy('wdroz:inwentaryzacja')?.m),
+    'Nie da się chronić tego, o czym się nie wie. Bez ewidencji każda kontrola chroni tylko część firmy.', 6, h.zlecone('inwentaryzacja')),
   (k, h) => doMiesiaca(k, 'mfa', 'E2', 2, 'MFA na poczcie i dostępie zdalnym w pierwszym półroczu',
-    'Najtańsza z dużych kontroli: przejęte hasło to wciąż otwarte drzwi, dopóki nie ma drugiego składnika.', 6, h.pierwszy('wdroz:mfa')?.m),
+    'Najtańsza z dużych kontroli: przejęte hasło to wciąż otwarte drzwi, dopóki nie ma drugiego składnika.', 6, h.zlecone('mfa')),
   (k, h) => doMiesiaca(k, 'kopie', 'E12', 2, 'Kopie zapasowe (offline) w pierwszym półroczu',
-    'Kopia offline zamienia ransomware z katastrofy w przestój.', 6, h.pierwszy('wdroz:backup')?.m),
+    'Kopia offline zamienia ransomware z katastrofy w przestój.', 6, h.zlecone('backup')),
+  // Procedura: kontrola z katalogu albo uzgodniony zwyczaj (gmina: kontrasygnata skarbnika obejmuje rachunek).
   (k, h) => doMiesiaca(k, 'procedura_platnosci', 'E2', 1, 'Procedura zmiany rachunku kontrahenta w ciągu 8 miesięcy',
-    'BEC to jeden z najczęstszych realnych ataków; zatrzymuje go tylko procedura poza pocztą.', 8, h.pierwszy('wdroz:weryfikacja_platnosci')?.m),
+    'BEC to jeden z najczęstszych realnych ataków; zatrzymuje go tylko procedura poza pocztą.', 8,
+    Math.min(h.zlecone('weryfikacja_platnosci') ?? 99, k.flagi.weryfikacja_rachunku ?? 99) === 99 ? undefined
+      : Math.min(h.zlecone('weryfikacja_platnosci') ?? 99, k.flagi.weryfikacja_rachunku ?? 99)),
 
   // ── REAKCJA NA OSTRZEŻENIE I NA ODKRYTE DRZWI ──
   (k, h) => {
     const m0 = k.flagi.ostrzezenie_cert;
     if (m0 === undefined) return [];
     const reakcja = h.H.find(e => e.t === 'ruch' && e.m >= m0 && e.m <= m0 + 1 &&
-      (['skan_ekspozycji', 'odetnij_hmi', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm'].includes(e.id) ||
+      ((k.def.reakcja_na_ostrzezenie || ['skan_ekspozycji', 'odetnij_hmi', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm']).includes(e.id) ||
         (e.id === 'zlec_doradcy' && ['ekspozycja', 'ot', 'ogolny'].includes(e.p?.temat))));
     return doMiesiaca(k, 'reakcja_na_ostrzezenie', 'E4', 3, 'Reakcja na ostrzeżenie dla sektora w ciągu miesiąca',
-      'Ostrzeżenie z nazwą Twojego sektora to sygnał do działania od razu — panel HMI w internecie to dokładnie ten wzorzec.', m0 + 1, reakcja?.m);
+      k.def.reakcja_dlaczego || 'Ostrzeżenie z nazwą Twojego sektora to sygnał do działania od razu — panel HMI w internecie to dokładnie ten wzorzec.', m0 + 1, reakcja?.m);
   },
   (k, h) => {
     const out = [];
@@ -259,6 +265,20 @@ const ZASADY = [
     id: 'odejscie', wynik: ['zatrudnij', 'msp'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: e.m,
     opis: 'Odejście z IT ma zastępstwo (rekrutacja albo usługa)',
     dlaczego: 'Gdy cudza praca spada na bezpieczeństwo, bezpieczeństwo przegrywa z drukarką — codziennie, po cichu.' })),
+  // ── SPRAWY KAMPANII GMINNEJ (data/kampanie/gmina.js) ──
+  (k, h) => h.sprawy(e => e.sid === 'G_kontrola_grantu' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
+    id: 'grant', wynik: ['ok', 'harmonogram'].includes(k.flagi.grant_trwalosc) ? 'spelniona' : 'naruszona', waga: 2, cel: 'E7', m: e.m,
+    opis: 'Sprzęt z grantu działa (albo realnie się wdraża) przed kontrolą trwałości',
+    dlaczego: 'Grant rozliczony sprzętem w kartonach to podwójna strata: pieniądze wydane, ochrony nie ma — a kontrola i tak przyjdzie.' })),
+  (k, h) => h.sprawy(e => e.sid === 'G_wybory' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
+    id: 'wybory', wynik: ['przygotuj', 'procedura'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E10', m: e.m,
+    opis: 'Przed głosowaniem: procedura komunikatów i ścieżka do CSIRT', dlaczego: 'Dzień głosowania to najgorszy moment na pisanie procedury — i najlepszy dla dezinformacji.' })),
+  (k, h) => h.sprawy(e => e.sid === 'G_dostawca' && e.t !== 'sprawa_otwarta').slice(0, 1).flatMap(e => [
+    { id: 'dostawca_odciety', wynik: k.flagi.dostawca_odciety && k.flagi.dostawca_awaryjny ? 'spelniona' : 'naruszona', waga: 2, cel: 'E8', m: e.m,
+      opis: 'Incydent u dostawcy: odcięcie jego dostępu i tryb awaryjny', dlaczego: 'Zaszyfrowany dostawca to możliwa droga do Ciebie — a mieszkańcy dalej muszą zapłacić podatek.' },
+    { id: 'dostawca_rodo', wynik: k.flagi.dostawca_info ? 'spelniona' : 'naruszona', waga: 1, cel: 'E11', m: e.m,
+      opis: 'Pytanie do podmiotu przetwarzającego o dane mieszkańców', dlaczego: 'To urząd jest administratorem danych — bez informacji od dostawcy nie oceni, czy musi zgłosić naruszenie.' },
+  ]),
   // Limit pracy w toku: więcej niż pięć wdrożeń naraz to kolejka, nie program.
   (k, h) => (k.koniec && h.H.filter(e => e.t === 'ruch').length >= 12 ? [{ id: 'wip', wynik: (k.maxProjekty || 0) <= 5 ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: k.st.m,
     opis: 'Najwyżej pięć wdrożeń w toku naraz', dlaczego: 'Każdy projekt w toku zjada godziny koordynacji, a zespół traci czas na przełączanie się. Szybciej kończy ten, kto zaczyna mniej naraz.' }] : []),

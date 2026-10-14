@@ -15,6 +15,9 @@
 //   dostepny(k, p, a)     — null albo powód, dla którego TERAZ się nie da
 //   wykonaj(k, p, a)      — skutek; zwraca tekst dla gracza (tylko to, czego się dowiedział)
 //   nieuczciwe            — { wobec, wykrywalnosc } — ruch trafia do rejestru kłamstw
+//   ot                    — ruch dotyczy sieci przemysłowej; w organizacji bez OT go nie ma
+// Kampania może dodać własne ruchy (`ruchy` w pliku kampanii) — np. naprawę faktu, który
+// istnieje tylko u niej. Mają ten sam format.
 //
 // `a` = API kampanii (proto/ruchy.js → api): fakty, działy, wskaźniki, flagi, kłamstwa, log…
 
@@ -42,11 +45,34 @@ module.exports = {
   },
   przeglad_ot: {
     nazwa: 'Obchód stacji z automatykiem: szafy, sterowniki, hasła, PIN-y, kto ma klucze',
-    kategoria: 'rozpoznanie', h: 6,
+    ot: true, kategoria: 'rozpoznanie', h: 6,
     wykonaj: (k, p, a) => {
       a.dzial('produkcja', { zaufanie: 0.03 });
       const fakty = a.odkryjFakty(f => f.na_obiekcie, 'obchód stacji');
       return fakty.length ? fakty.map(f => `Znalezione: ${f}.`).join(' ') : 'Na stacji nic nowego — kierownik docenia, że przyszedłeś osobiście.';
+    },
+  },
+  // Konta osób, które odeszły (JML): najtańsza kontrola w grze to spięcie kadr z IT (S07).
+  przeglad_kont: {
+    nazwa: 'Przegląd kont: lista z kadr kontra aktywne konta we wszystkich systemach (także zleceniobiorcy i dostawcy)',
+    kategoria: 'rozpoznanie', h: 6, co_ile: 3,
+    wykonaj: (k, p, a) => {
+      a.dzial('kadry', { zaufanie: 0.02 });
+      const fakty = a.odkryjFakty(f => f.konta || f.uprawnienia, 'przegląd kont');
+      const obejscia = a.odkryjObejscia(ini => !!ini.ryzyko?.wektory?.insider, 0.6, 'przegląd kont');
+      if (!fakty.length && !obejscia) return 'Konta zgadzają się z kadrami — przynajmniej w tych systemach, które masz na liście.';
+      return [...fakty.map(f => `Znalezione: ${f}.`), obejscia ? `Konta działów bez Twojej wiedzy: ${obejscia} (sprawy w skrzynce).` : ''].filter(Boolean).join(' ');
+    },
+  },
+  zamknij_konta: {
+    nazwa: 'Wyłączyć konta osób, które odeszły, i odebrać zbędne uprawnienia administratora',
+    kategoria: 'ludzie', h: 3,
+    dostepny: (k, p, a) => (Object.values(k.fakty).some(f => f.konta && f.prawda && f.znany && !f.naprawiony) ? null
+      : 'nie znasz martwych kont — najpierw przegląd kont z kadrami'),
+    wykonaj: (k, p, a) => {
+      const f = Object.values(k.fakty).filter(x => x.konta && x.prawda && x.znany && !x.naprawiony);
+      for (const x of f) a.napraw(x.id);
+      return `Wyłączone: ${f.map(x => x.opis).join('; ')}.`;
     },
   },
   polowanie: {
@@ -64,7 +90,7 @@ module.exports = {
   // ── DZIAŁANIA W OT (wymagają wiedzy o fakcie) ──
   odetnij_hmi: {
     nazwa: 'Odciąć panel HMI od internetu (zamknąć przekierowanie portu u integratora)',
-    kategoria: 'ot', h: 4,
+    ot: true, kategoria: 'ot', h: 4,
     dostepny: (k, p, a) => a.faktDoNaprawy('hmi_wystawiony', 'nie wiesz, czy cokolwiek ze stacji jest w internecie — najpierw przegląd ekspozycji'),
     wykonaj: (k, p, a) => {
       a.napraw('hmi_wystawiony');
@@ -79,13 +105,13 @@ module.exports = {
   },
   zmien_pin: {
     nazwa: 'Zmienić domyślne PIN-y i hasła sterowników i paneli (z automatykiem i integratorem)',
-    kategoria: 'ot', h: 6,
+    ot: true, kategoria: 'ot', h: 6,
     dostepny: (k, p, a) => a.faktDoNaprawy('pin_domyslny', 'nie wiesz, jakie hasła mają sterowniki — najpierw obchód stacji albo inwentaryzacja'),
     wykonaj: (k, p, a) => { a.napraw('pin_domyslny'); return 'PIN-y zmienione i zapisane w sejfie haseł; integrator dostał je imiennie.'; },
   },
   usun_narzedzie_zdalne: {
     nazwa: 'Usunąć narzędzie zdalnej pomocy integratora ze stacji inżynierskiej',
-    kategoria: 'ot', h: 2,
+    ot: true, kategoria: 'ot', h: 2,
     dostepny: (k, p, a) => a.faktDoNaprawy('narzedzie_zdalne_integratora', 'nie wiesz o żadnym narzędziu zdalnym na stacji — najpierw przegląd dostępów'),
     wykonaj: (k, p, a) => {
       a.napraw('narzedzie_zdalne_integratora');

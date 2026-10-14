@@ -493,3 +493,98 @@ test('doradca pomaga laikowi: laik wykonujący rekomendacje wypada lepiej niż l
   }
   assert.ok(zDor > sam, `z doradcą ${zDor / 3} vs sam ${sam / 3}`);
 });
+
+// ── DRUGA KAMPANIA: GMINA (docs/19-kampania-gmina.md) ──
+const gmina = (seed = 1) => K.nowaKampania('gmina', seed);
+const grajG = (strat, seed) => K.grajAuto(typeof strat === 'string' && B.STRATEGIE[strat] ? B.STRATEGIE[strat] : strat, seed, false, cicho, false, 'gmina');
+
+test('gmina: dane przechodzą walidację, zapis fuzzera odtwarza identyczny stan', async () => {
+  assert.deepStrictEqual(K.walidujKampanie(K.pelnaDefinicja('gmina')), []);
+  const a = await grajG('losowy', 4);
+  const b = await K.odtworz('gmina', 4, a.akcje);
+  assert.strictEqual(b.st.w.straty, a.st.w.straty);
+  assert.deepStrictEqual(b.wskazniki, a.wskazniki);
+});
+
+test('gmina: Wynik porządkuje style sensownie (mądry > rozsądny > bierny), kłamca pod sufitem, niezmienniki', async () => {
+  const w = {};
+  for (const n of ['madry', 'rozsadny', 'bierny', 'klamca']) {
+    w[n] = 0;
+    for (const seed of [1, 2]) w[n] += (await K.indeksOdpornosci(await grajG(n === 'bierny' ? K.AUTO.bierny : n, seed))).kampania / 2;
+  }
+  assert.ok(w.madry > w.rozsadny && w.rozsadny > w.bierny, JSON.stringify(w));
+  assert.ok(w.klamca <= 650, JSON.stringify(w));
+  for (const [nazwa, strat] of Object.entries(B.STRATEGIE)) assert.deepStrictEqual(B.sprawdz(await grajG(strat, 1), nazwa, 1), []);
+});
+
+test('gmina bez OT: ruchy OT znikają z listy, warianty OT są niedostępne z powodem', () => {
+  const k = gmina();
+  const ids = RU.lista(k).map(r => r.id);
+  for (const id of ['przeglad_ot', 'odetnij_hmi', 'zmien_pin', 'pilotaz:edr']) assert.ok(!ids.includes(id), id);
+  assert.match(RU.dostepny(k, 'odetnij_hmi'), /nie ma sieci przemysłowej/);
+  assert.match(RU.dostepny(k, 'wdroz:edr', { zakres: 'z_ot' }), /nie ma sieci przemysłowej/);
+  assert.strictEqual(RU.dostepny(k, 'wdroz:inwentaryzacja'), null, 'wdrożenie bez parametrów OT musi przejść (bez_ot domyślnie)');
+  assert.match(RU.dostepny(k, 'zlec_doradcy', { temat: 'ot', firma: 'lokalna', tryb: 'zwykly' }), /nie ma sieci przemysłowej/);
+  assert.deepStrictEqual(k.otNiezgodne, {});
+});
+
+test('gmina: zamówienie ponad próg Pzp czeka na przetarg; w spółce prywatnej nie', () => {
+  const k = gmina();
+  k.budzet[k.rok] = 1e6;
+  RU.wykonaj(k, 'wdroz:pam');
+  const pr = k.st.projekty.find(p => p.id === 'pam');
+  assert.ok(pr.od > k.st.m && k.historia.some(h => h.t === 'przetarg' && h.id === 'pam'));
+  RU.wykonaj(k, 'wdroz:mfa');
+  assert.strictEqual(k.st.projekty.find(p => p.id === 'mfa').od, undefined, 'MFA poniżej progu idzie bez przetargu');
+  const w = nowa(); w.budzet[w.rok] = 1e6;
+  RU.wykonaj(w, 'wdroz:pam');
+  assert.strictEqual(w.st.projekty.find(p => p.id === 'pam').od, undefined);
+});
+
+test('gmina: sprzęt z grantu kosztuje tylko pracę, a kontrola trwałości rozlicza kartony', () => {
+  const k = gmina();
+  assert.strictEqual(RU.koszt(k, RU.definicja(k, 'wdroz:ngfw'), {}).pln, 0);
+  const kontrola = przygotuj => {
+    const x = gmina(2); przygotuj(x);
+    const s = SP.dodajScenariuszowa(x, 'G_kontrola_grantu');
+    SP.odpowiedz(x, s.id, 'pokaz');
+    return x;
+  };
+  const kartony = kontrola(() => {});
+  assert.strictEqual(kartony.flagi.grant_trwalosc, 'korekta');
+  assert.ok(kartony.st.w.straty >= 60000);
+  const dziala = kontrola(x => { RU.zainstalujGotowe(x, 'ngfw'); RU.zainstalujGotowe(x, 'backup'); });
+  assert.strictEqual(dziala.flagi.grant_trwalosc, 'ok');
+});
+
+test('gmina S07: kolejność ma znaczenie, a odebrane wcześniej uprawnienia zamieniają atak w próbę', () => {
+  const k = gmina();
+  I.rozpocznij(k, 'S07');
+  assert.ok(!k.incydent.s.proba);
+  I.wykonaj(k, 'odblokuj_konta');
+  assert.ok(k.incydent.s.zablokowane_ponownie && k.incydent.s.obsluga_stoi, 'odblokowanie przed odebraniem dostępu nie może działać');
+  I.wykonaj(k, 'odbierz_dostep'); I.wykonaj(k, 'odblokuj_konta');
+  assert.ok(!k.incydent.s.obsluga_stoi);
+  const w = I.zakoncz(k, true);
+  assert.ok(w.oceny.some(o => o.id === 'S07:najpierw_dostep' && o.wynik === 'naruszona'));
+
+  const k2 = gmina();
+  I.rozpocznij(k2, 'S07'); I.wykonaj(k2, 'telefon_do_zleceniobiorcy');
+  assert.ok(k2.incydent.s.dane_usuniete, 'ostrzeżony sprawca z dostępem kasuje dane');
+
+  const k3 = gmina();
+  RU.api(k3).napraw('zleceniobiorca_admin');
+  I.rozpocznij(k3, 'S07');
+  assert.ok(k3.incydent.s.proba);
+});
+
+test('gmina S01: kwota z wariantu kampanii; kontrasygnata skarbnika z rachunkiem udaremnia wyłudzenie', () => {
+  const k = gmina();
+  I.rozpocznij(k, 'S01');
+  assert.strictEqual(k.incydent.s.kwota, 480000);
+  const k2 = gmina();
+  const s = SP.dodajScenariuszowa(k2, 'G_skarbnik');
+  SP.odpowiedz(k2, s.id, 'rozszerz');
+  I.rozpocznij(k2, 'S01');
+  assert.ok(k2.incydent.s.udaremnione);
+});

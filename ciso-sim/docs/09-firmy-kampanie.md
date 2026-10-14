@@ -70,6 +70,9 @@ jest firma z zewnątrz na godziny.
 
 ## 2. Gmina: Urząd Gminy Brzozów Wielki (82 etaty)
 
+> **Grywalna od 13.10.2026** (`data/kampanie/gmina.js`, `--kampania=gmina`). Co weszło do gry,
+> co się zmieniło i wyniki: `19-kampania-gmina.md`. Oś poniżej to projekt pierwotny.
+
 **Rola gracza:** informatyk urzędu (jedyny etatowy), z „przydziałem cyber" od sekretarza.
 
 - **Status KSC:** **do ustalenia** (🟡 urząd gminy ≥ 50 etatów — pierwsza decyzja gry).

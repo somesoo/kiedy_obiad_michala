@@ -1,0 +1,5 @@
+styl          straty    wydatki   audyt  zaufanie  ukryte  zakłóc.  reput.  mandat  P(poważny) PRAKT. INDEKS  WYNIK
+madry           276 tys.    212 tys.    53      0.76     0.6      0.0      52      59         30%   94%     826    885
+rozsadny        846 tys.    217 tys.    29      0.46    17.2      0.1      28      21         50%   48%     496    487
+odmawiajacy     234 tys.    199 tys.    53      0.01     3.5      0.0      52      37         35%   74%     745    743
+bierny          793 tys.     22 tys.    13      0.37    12.8      0.1      18       0         20%    0%     233    117

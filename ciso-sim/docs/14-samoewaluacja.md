@@ -301,6 +301,25 @@ decyzje przychodzą w każdym okresie? Szczegóły: `18-…`, 18.12–18.13; `17
 3. **Doradca widzi prawdę silnika** (z szansą). To uproszczenie: w życiu raport też bywa
    po prostu błędny, a nie tylko niepełny — modeluje to tylko szum szacunków taniej firmy.
 
+## 14.8f. Ósma iteracja: druga kampania (gmina)
+
+Prośba właściciela (13.10.2026): „czas na nowe firmy — weź jedną i dodaj". Wybrałem gminę
+(projekt w `09-…` gotowy, najbliżej biurowego odbiorcy, inne mechaniki niż Wodnik). Szczegóły
+i wyniki: `19-…`.
+
+**Najważniejsze odkrycie dotyczy silnika, nie gminy**: kampania była „przyspawana" do Wodnika
+w kilkunastu miejscach (OT w parametrach i ruchach, id działów w automatach, `'wodociagi'`
+w automatach i referencji biernego gracza, regex „S03/fala" w Indeksie, kopie OT w audycie).
+Po uogólnieniu (`19-…`, 19.4) dodanie kampanii to plik danych + ewentualnie incydent.
+
+**Wynik**: ta sama kolejność stylów co w Wodniku (mądry 885, odmawiający 743, laik 487,
+bierny 117); niezmienniki trzymają się dla wszystkich 11 strategii; migawka Monte Carlo bez
+zmian. Wodnik po uogólnieniu: mądry 921 → 910 (automat robi przegląd kont i poprawia zastane
+ustawienia — więcej godzin).
+
+**Ryzyka do oceny przez CISO**: status JST (🟡), trwałość grantu i korekty (🔵), czy S07
+(sabotaż zleceniobiorcy) nie jest zbyt „filmowy" jak na typową gminę.
+
 ## 14.9. Następne kroki (propozycja)
 
 1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, sprawy i fakty kampanii w `data/kampanie/wodociagi.js`,

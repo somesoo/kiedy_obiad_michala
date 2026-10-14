@@ -1,37 +1,37 @@
-Mądry bez odstępstw: Wynik 921 (20 ziaren)
+Mądry bez odstępstw: Wynik 910 (20 ziaren)
 odstępstwo od praktyki                                ΔWYNIK   ΔIndeks  ΔPraktyka(pp)
-upiększone raporty dla zarządu                          -666      -650         -31.4
-dokumenty z datą wsteczną                               -596      -580         -16.0
-cały katalog zamówiony w 1. miesiącu                    -309      -396         -21.3
-brak rozpoznania + S03: komunikat „woda bezpieczna" bez wyników    -248      -235          -8.3
-kłamstwo w ankiecie ubezpieczyciela                     -194      -188          -2.2
-brak rozpoznania + S03: zdalne logowanie do przejętego panelu     -89      -103          -7.5
-odmowa każdej prośby działu                              -87       -95          -7.8
-brak rozpoznania + S03: aktywny skan sieci OT w trakcie     -66       -97          -3.6
-brak rozpoznania (skan, obchód, dostępy)                 -60       -91          -2.8
-sygnały od ludzi ignorowane                              -55       -13          -9.7
-nocny telefon: podać hasło                               -45       -74          -1.5
-S01: najpierw szukanie winnych                           -40       -30          -4.9
-żadnych przeglądów ani testów                            -39        -2          -7.6
-kara za każde odkryte obejście                           -31        15          -7.6
-EDR na stacje OT bez pilotażu                            -26       -30          -2.2
-budżet „bo NIS2 i hakerzy"                               -21       -39          -0.3
-bez szkolenia kierownika                                 -13        -2          -2.5
-aktywny skan OT przy inwentaryzacji                      -12        -8          -1.6
-odejście z IT: „przejmę sam"                             -10       -11          -1.0
-koniec wsparcia: „zostawić jak jest"                     -10        12          -3.3
-przejęcie: połączyć bez przeglądu                        -10        -2          -1.7
-kopie nigdy nie testowane                                 -9        -0          -1.7
-S01: mail do przejętej skrzynki                           -8        -1          -1.6
-MFA bez zarządu (bez akceptacji ryzyka)                   -8        -3          -1.3
-emerytura „po swojemu"                                    -7       -11          -0.4
-cięcie budżetu bez argumentów                             -3         0          -0.7
-EDR zostaje w trybie „wykrywaj"                           -3        -4          -0.2
-rozbudowa „po swojemu" wykonawcy                          -1         5          -0.8
-certyfikaty odnawiane ręcznie co rok                      -1        -2          -0.0
-wodomierze bez udziału bezpieczeństwa                     -0         4          -0.6
+upiększone raporty dla zarządu                          -655      -612         -32.6
+dokumenty z datą wsteczną                               -550      -507         -15.1
+cały katalog zamówiony w 1. miesiącu                    -318      -385         -25.1
+brak rozpoznania + S03: komunikat „woda bezpieczna" bez wyników    -260      -232          -9.5
+kłamstwo w ankiecie ubezpieczyciela                     -141      -129          -2.3
+brak rozpoznania + S03: zdalne logowanie do przejętego panelu    -114      -143          -8.5
+odmowa każdej prośby działu                              -96      -104          -8.8
+brak rozpoznania + S03: aktywny skan sieci OT w trakcie     -80      -125          -3.4
+brak rozpoznania (skan, obchód, dostępy)                 -77      -123          -3.0
+nocny telefon: podać hasło                               -54       -83          -2.6
+S01: najpierw szukanie winnych                           -46       -37          -5.5
+sygnały od ludzi ignorowane                              -41        24         -10.5
+kara za każde odkryte obejście                           -31        14          -7.6
+koniec wsparcia: „zostawić jak jest"                     -31        -4          -5.7
+żadnych przeglądów ani testów                            -30        14          -7.4
+przejęcie: połączyć bez przeglądu                        -19       -18          -1.9
+bez szkolenia kierownika                                 -13        -7          -1.9
+S01: mail do przejętej skrzynki                          -10        -2          -1.7
+EDR na stacje OT bez pilotażu                             -9        -8          -1.0
+budżet „bo NIS2 i hakerzy"                                -9        -8          -0.9
+emerytura „po swojemu"                                    -7        -8          -0.6
+kopie nigdy nie testowane                                 -6         8          -2.0
+MFA bez zarządu (bez akceptacji ryzyka)                   -4        -1          -0.7
+odejście z IT: „przejmę sam"                              -3        -0          -0.5
+rozbudowa „po swojemu" wykonawcy                          -1         9          -1.1
+wodomierze bez udziału bezpieczeństwa                     -1         6          -0.8
+cięcie budżetu bez argumentów                             -1         5          -0.7
 S03: komunikat „woda bezpieczna" bez wyników               0         0           0.0
 S03: zdalne logowanie do przejętego panelu                 0         0           0.0
 S03: aktywny skan sieci OT w trakcie                       0         0           0.0
-umowy przedłużane bez negocjacji                           1         1           0.1
-SZBI z pudełka                                            13        17           0.9
+EDR zostaje w trybie „wykrywaj"                            0         0           0.0
+certyfikaty odnawiane ręcznie co rok                       0         1          -0.1
+umowy przedłużane bez negocjacji                           2         4           0.1
+aktywny skan OT przy inwentaryzacji                        3        34          -2.9
+SZBI z pudełka                                             4        15          -0.6

@@ -23,11 +23,12 @@ tym, jak się skończyło.
 |---|---|
 | Projekt gry (ten folder `docs/`) | **wersja 0.1, do dyskusji** |
 | Realia polskie (prawo, CSIRT-y, incydenty) | zweryfikowane na 13.10.2026 w źródłach wtórnych, z listą rzeczy do potwierdzenia w Dz.U. |
-| Scenariusze incydentów | 12 pełnych + 32 zalążki (`scenariusze/`); S01 i S03 jako incydenty bez drzewa decyzji (`*.incydent.js`), grywalne w terminalu |
+| Scenariusze incydentów | 12 pełnych + 32 zalążki (`scenariusze/`); S01, S03 i S07 jako incydenty bez drzewa decyzji (`*.incydent.js`), grywalne w terminalu |
 | Dane liczbowe (kontrole, zagrożenia, firmy) | `data/*.js`, pierwsza kalibracja |
 | Prototyp symulacji (Monte Carlo) | `proto/symulacja.js` — działa, wyniki w `proto/wyniki-*.txt` |
 | Działy jako uczące się agenty + reżyser | `docs/15-…`, `proto/dzialy.js`, `proto/rezyser.js` |
 | **Kampania „Wodnik” (wodociągi) — grywalna w terminalu**, własne tempo, zapis/wczytanie | `docs/16-…`, `proto/kampania.js` |
+| **Kampania „Gmina Brzozów Wielki” — grywalna** (`--kampania=gmina`): bez OT, Pzp, grant w kartonach, wybory, incydent S07 | `docs/19-…`, `data/kampanie/gmina.js`, `scenariusze/S07-konto.incydent.js` |
 | **Silnik ruchów — gra bez quizu**: dowolne ruchy z parametrami, cykl życia kontroli, sprawy, incydenty bez drzewa, ocena zasadami | `docs/18-…`, `proto/ruchy.js`, `sprawy.js`, `incydent.js`, `zasady.js` |
 | **Skończone zasoby i decyzje w każdym okresie**: koordynacja projektów, odnowienia, certyfikaty, koniec wsparcia, zmiany firmy; **doradztwo** z raportem „od największej poprawy" | `docs/18-…` (18.12–18.13), `proto/cykl.js`, `proto/doradztwo.js`, `data/cykliczne.js`, `data/doradztwo.js` |
 | Testy automatyczne | `test/` — `node --test ciso-sim/test/*.test.js` |
@@ -54,6 +55,7 @@ tym, jak się skończyło.
 | [`docs/15-dzialy-i-rezyser.md`](docs/15-dzialy-i-rezyser.md) | działy firmy jako agenci (inicjatywy, pytaj/obejdź, uczenie, raporty) i reżyser (diagnoza, model gracza, rytm, przeciwnik) |
 | [`docs/16-kampania-wodociagi.md`](docs/16-kampania-wodociagi.md) | pierwsza kampania: ludzie, oś 24 miesięcy, wyniki stylów gry |
 | [`docs/17-przypadki-brzegowe.md`](docs/17-przypadki-brzegowe.md) | „test penetracyjny" gry: strategie-prowokacje, fuzzer, znalezione absurdy, poprawki, cennik złych decyzji |
+| [`docs/19-kampania-gmina.md`](docs/19-kampania-gmina.md) | druga kampania: urząd gminy — co wnosi do silnika, oś, S07, wyniki |
 | [`docs/18-silnik-ruchow.md`](docs/18-silnik-ruchow.md) | silnik bez quizu: obiekty i cykl życia kontroli, ruchy, sprawy, incydent bez drzewa, zasady, komendy gry, wyniki, skończone zasoby, decyzje cykliczne, doradztwo |
 | [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 i S03 jako incydenty (`*.incydent.js`) |
 | [`data/`](data/) | liczby: kontrole, zagrożenia, firmy, inicjatywy działów, kampanie (`data/kampanie/`) |
@@ -64,6 +66,7 @@ tym, jak się skończyło.
 
 ```bash
 node ciso-sim/proto/kampania.js --zapis=moja-gra.json    # zagraj kampanię „Wodnik” we własnym tempie
+node ciso-sim/proto/kampania.js --kampania=gmina --zapis=gmina.json   # albo kampanię gminną
 node ciso-sim/proto/kampania.js --auto=bierny --szczegoly # zobacz, co robią działy i reżyser
 node --test ciso-sim/test/*.test.js                       # testy
 ```

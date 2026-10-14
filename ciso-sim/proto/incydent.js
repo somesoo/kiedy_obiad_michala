@@ -57,8 +57,11 @@ function waliduj(def) {
 }
 
 // Kontekst z kampanii: co gracz przygotował wcześniej, zmienia start incydentu.
-function kontekst(k) {
+// `wariant`: dane incydentu z pliku kampanii (k.def.warianty[id]) — ten sam incydent w innej
+// organizacji ma inną kwotę, innych ludzi i inne skróty (gmina: kontrasygnata skarbnika).
+function kontekst(k, id = k.incydent?.id) {
   return {
+    wariant: k.def.warianty?.[id] || {},
     dziala: id => S.dziala(k.st, id),
     jakosc: id => (k.st.konf[id]?.jakosc ?? (S.dziala(k.st, id) ? 1 : 0)),
     fakt: id => k.fakty?.[id],
@@ -73,7 +76,7 @@ function kontekst(k) {
 
 function rozpocznij(k, id) {
   const def = wczytaj(id);
-  const ctx = kontekst(k);
+  const ctx = kontekst(k, id);
   const s = def.start(ctx);
   s.t = 0; s.kiedy = {}; s.zrobione = [];
   k.incydent = { id, def, s, h: 0 };

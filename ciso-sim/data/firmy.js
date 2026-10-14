@@ -52,7 +52,9 @@ module.exports = {
   },
   gmina: {
     nazwa: 'Urząd Gminy Brzozów Wielki', rola: 'kampania',
-    sektor: 'administracja publiczna (JST)', status_ksc: 'do_ustalenia', csirt: 'CSIRT NASK',
+    // Prawda gry: urząd gminy od 50 etatów = podmiot WAŻNY (🟡 docs/02-…, do potwierdzenia
+    // w załączniku ustawy). Gracz zaczyna bez tej wiedzy — status ustala analizą (decyzja gry).
+    sektor: 'administracja publiczna (JST)', status_ksc: 'wazny', csirt: 'CSIRT NASK',
     regulacje: ['KSC (urząd gminy ≥50 etatów — do weryfikacji)', 'KRI (Dz.U. 2024 poz. 773)', 'RODO', 'Pzp'],
     pracownicy: 82, zasoby: { stacje: 90, serwery: 8, znane: 0.8 },
     koszt_dnia: 40000, przychod_rok: 0, rekordy: 14000,

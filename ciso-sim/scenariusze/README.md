@@ -27,7 +27,7 @@ prawdziwych zdarzeń są opisane w debriefie, bez przypisywania winy.
 | [S04](S04-dostawca-ktoremu-ufalismy.md) | Dostawca, któremu ufaliśmy | wyciek u dostawcy SaaS | szpital, przychodnia, gmina | ★★ | 30 dni | wyciek z dostawcy EDM, sierpień 2026 |
 | [S05](S05-klucz-w-repozytorium.md) | Klucz w repozytorium | wyciek z chmury, podmiot przetwarzający | software house | ★★★ | 30 dni | wycieki z chmury dostawców 2026 |
 | [S06](S06-czarny-piatek.md) | Czarny piątek | DDoS z wymuszeniem + przejęcia kont | sklep | ★★ | 4 dni | wzorce RDoS i credential stuffing |
-| [S07](S07-konto-bylego-pracownika.md) | Konto byłego pracownika | insider, JML | fabryka, gmina, sklep | ★★ | 14 dni | powszechny wzorzec |
+| [S07](S07-konto-bylego-pracownika.md) (+ [incydent, wariant gminny](S07-konto.incydent.js)) | Konto byłego pracownika | insider, JML | fabryka, gmina, sklep | ★★ | 14 dni | powszechny wzorzec |
 | [S08](S08-glos-prezesa.md) | Głos prezesa | deepfake, „na prezesa" | fabryka, sklep, bank | ★ | 2 dni | rosnąca liczba oszustw z klonowaniem głosu |
 | [S09](S09-linia-stoi.md) | Linia stoi | ransomware IT→OT, kary umowne | fabryka | ★★★ | 21 dni | ataki ransomware na produkcję |
 | [S10](S10-miedzy-swietami.md) | Między świętami | wiper, APT, infrastruktura krytyczna | elektrociepłownia | ★★★★ | 14 dni + epilog | atak na energetykę 29.12.2025 |
