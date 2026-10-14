@@ -521,7 +521,9 @@ test('gmina bez OT: ruchy OT znikają z listy, warianty OT są niedostępne z po
   const k = gmina();
   const ids = RU.lista(k).map(r => r.id);
   for (const id of ['przeglad_ot', 'odetnij_hmi', 'zmien_pin', 'pilotaz:edr']) assert.ok(!ids.includes(id), id);
-  assert.match(RU.dostepny(k, 'odetnij_hmi'), /nie ma sieci przemysłowej/);
+  assert.match(RU.dostepny(k, 'przeglad_ot'), /nie ma sieci przemysłowej/);
+  // Ruchy OT Wodnika (odcięcie HMI, PIN, narzędzie zdalne) żyją w pliku jego kampanii — w gminie ich nie ma wcale.
+  assert.match(RU.dostepny(k, 'odetnij_hmi'), /nieznany ruch/);
   assert.match(RU.dostepny(k, 'wdroz:edr', { zakres: 'z_ot' }), /nie ma sieci przemysłowej/);
   assert.strictEqual(RU.dostepny(k, 'wdroz:inwentaryzacja'), null, 'wdrożenie bez parametrów OT musi przejść (bez_ot domyślnie)');
   assert.match(RU.dostepny(k, 'zlec_doradcy', { temat: 'ot', firma: 'lokalna', tryb: 'zwykly' }), /nie ma sieci przemysłowej/);
@@ -587,4 +589,96 @@ test('gmina S01: kwota z wariantu kampanii; kontrasygnata skarbnika z rachunkiem
   SP.odpowiedz(k2, s.id, 'rozszerz');
   I.rozpocznij(k2, 'S01');
   assert.ok(k2.incydent.s.udaremnione);
+});
+
+// ── KAŻDA KAMPANIA: KONTRAKT PLIKU WEJŚCIOWEGO (docs/20-nowa-kampania.md) ──
+// Te testy nie wymieniają kampanii z nazwy — biorą każdy plik z data/kampanie/. Nowa kampania
+// dostaje je za darmo i nie przejdzie, dopóki jej plik nie pokrywa wszystkiego: automatów
+// każdego stylu, zasad, odstępstw dla cennika, przygotowania do incydentów.
+const C = require('../proto/cennik');
+const KAMPANIE = fs.readdirSync(path.join(__dirname, '../data/kampanie')).filter(f => f.endsWith('.js')).map(f => f.slice(0, -3));
+const grajW = (id, strat, seed) => K.grajAuto(typeof strat === 'string' && B.STRATEGIE[strat] ? B.STRATEGIE[strat] : strat, seed, false, cicho, false, id);
+const incydentyOsi = id => K.pelnaDefinicja(id).zdarzenia.filter(z => z.typ === 'incydent').map(z => z.id);
+
+test('każda kampania: kontrakt kompletności przechodzi; kampania bez kawałka — nie, z powodem', () => {
+  assert.ok(KAMPANIE.length >= 2);
+  for (const id of KAMPANIE) assert.deepStrictEqual(K.walidujKampanie(K.pelnaDefinicja(id)), [], id);
+  // Typowe „zapomnienia" przy tworzeniu kampanii: każde ma dać czytelny wiersz.
+  for (const id of KAMPANIE) {
+    const def = K.pelnaDefinicja(id);
+    const sid = Object.keys(def.automaty.klamca.sprawy)[0];
+    const { [sid]: _, ...bezSid } = def.automaty.klamca.sprawy;
+    const zasada = def.zasady.find(z => typeof z === 'object');
+    const zle = {
+      ...def,
+      automaty: { ...def.automaty, klamca: { ...def.automaty.klamca, sprawy: bezSid } },
+      zasady: def.zasady.filter(z => z !== zasada),
+      odstepstwa: {}, przygotowanie: {}, reakcja_na_ostrzezenie: undefined,
+    };
+    const b = K.walidujKampanie(zle).join('\n');
+    assert.match(b, new RegExp(`sprawa ${sid}: brak odpowiedzi automatu „klamca"`), id);
+    if (!def.sprawy_bez_zasady?.[zasada.sprawa]) assert.match(b, new RegExp(`sprawa ${zasada.sprawa}: brak zasady`), id);
+    assert.match(b, /brak odstępstwa dla cennika/, id);
+    assert.match(b, /przygotowanie\./, id);
+    assert.match(b, /reakcja_na_ostrzezenie/, id);
+  }
+});
+
+test('każda kampania: zapis fuzzera odtwarza stan; mądry > laik > bierny; kłamca pod sufitem; niezmienniki', async () => {
+  for (const id of KAMPANIE) {
+    const a = await grajW(id, 'losowy', 5);
+    const b = await K.odtworz(id, 5, a.akcje);
+    assert.deepStrictEqual(b.wskazniki, a.wskazniki, id);
+    assert.strictEqual(b.st.w.straty, a.st.w.straty, id);
+    const w = {};
+    for (const n of ['madry', 'rozsadny', 'bierny', 'klamca']) w[n] = (await K.indeksOdpornosci(await grajW(id, n === 'bierny' ? K.AUTO.bierny : n, 1))).kampania;
+    assert.ok(w.madry > w.rozsadny && w.rozsadny > w.bierny, `${id}: ${JSON.stringify(w)}`);
+    assert.ok(w.klamca <= 650, `${id}: ${JSON.stringify(w)}`);
+    for (const [nazwa, strat] of Object.entries(B.STRATEGIE)) assert.deepStrictEqual(B.sprawdz(await grajW(id, strat, 2), nazwa, 2), [], `${id}/${nazwa}`);
+  }
+});
+
+test('każda kampania: mądry odpowiada na każdą sprawę kampanii, która się otworzyła (nie zostawia jej domyślnemu)', async () => {
+  for (const id of KAMPANIE) {
+    const def = K.pelnaDefinicja(id);
+    const bezOdp = new Set(Object.entries(def.automaty.madry.sprawy || {}).filter(([, v]) => v === null).map(([s]) => s));
+    for (const seed of [1, 2, 3]) {
+      const k = await grajW(id, 'madry', seed);
+      const otwarte = k.historia.filter(h => h.t === 'sprawa_otwarta' && def.sprawy[h.sid] && !bezOdp.has(h.sid));
+      for (const h of otwarte) assert.ok(k.historia.some(x => x.t === 'sprawa' && x.id === h.id), `${id}/${seed}: mądry nie odpowiedział na ${h.sid}`);
+    }
+  }
+});
+
+test('każda kampania: plany automatów incydentu (wzorcowo, laik, odstępstwa) używają tylko istniejących akcji', () => {
+  for (const id of KAMPANIE) for (const inc of incydentyOsi(id)) {
+    const def = I.wczytaj(inc);
+    const k = K.nowaKampania(id, 1);
+    I.rozpocznij(k, inc);
+    // Ten sam stan i stan z odwróconymi flagami (próba / udaremnione / …) — plan nie może zależeć od
+    // tego, że akurat jest „pełny atak".
+    const stany = [k.incydent.s, ...Object.keys(k.incydent.s).filter(n => typeof k.incydent.s[n] === 'boolean').map(n => ({ ...k.incydent.s, [n]: !k.incydent.s[n] }))];
+    for (const s of stany) for (const plan of [def.automaty.wzorcowo(s), def.automaty.laik(s), ...Object.values(def.odstepstwa).map(f => f(def.automaty.wzorcowo(s), s))]) {
+      assert.ok(Array.isArray(plan), `${id}/${inc}`);
+      for (const a of plan) assert.ok(def.akcje[a], `${id}/${inc}: nieznana akcja „${a}"`);
+    }
+  }
+});
+
+test('każda kampania: każde odstępstwo z cennika naprawdę zmienia grę mądrego (nie jest martwe)', async () => {
+  // Ogólne mogą nie dotyczyć danej kampanii (np. mądry nie zdąży wdrożyć EDR) — to wynik cennika,
+  // nie błąd pliku. Odstępstwa incydentu liczą się jako żywe, gdy żyją w wariancie „bez
+  // przygotowania" (przygotowany mądry ich nie popełnia, bo atak zamienia się w próbę).
+  for (const id of KAMPANIE) {
+    const ods = C.odstepstwa(id), zywe = new Set();
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const baza = JSON.stringify((await grajW(id, 'madry', seed)).akcje);
+      for (const [n, { o }] of Object.entries(ods)) if (!zywe.has(n) && JSON.stringify((await grajW(id, B.zMadrego(o), seed)).akcje) !== baza) zywe.add(n);
+    }
+    for (const [n, { zrodlo }] of Object.entries(ods)) {
+      if (zrodlo === 'ogólne' || n.startsWith('bez przygotowania')) continue;
+      assert.ok(zywe.has(n) || zywe.has(`bez przygotowania + ${n}`), `${id}: martwe odstępstwo „${n}" (${zrodlo})`);
+    }
+    for (const inc of incydentyOsi(id)) assert.ok(zywe.has(`bez przygotowania do ${inc}`), `${id}: przygotowanie do ${inc} niczego nie zmienia`);
+  }
 });

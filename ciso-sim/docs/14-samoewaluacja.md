@@ -320,6 +320,24 @@ ustawienia — więcej godzin).
 **Ryzyka do oceny przez CISO**: status JST (🟡), trwałość grantu i korekty (🔵), czy S07
 (sabotaż zleceniobiorcy) nie jest zbyt „filmowy" jak na typową gminę.
 
+## 14.8g. Dziewiąta iteracja: kampania jako kompletny plik wejściowy
+
+Uwaga właściciela (14.10.2026): przy gminie trzeba było dopytywać o cennik, automaty stylów
+i zasady spraw — „zapominasz". Przyczyna była w silniku: część rzeczy kampanii siedziała
+w `proto/` z identyfikatorami Wodnika (plany incydentów `PLAYBOOK`/`PLAN_LAIKA`, odpowiedzi
+mądrego na sprawy Wodnika, zasady wodociągów i gminy w `zasady.js`, fala haktywistów, ruchy
+OT Wodnika, lista odstępstw cennika). Wszystko przeniosłem do plików kampanii i incydentów,
+a kompletność pilnuje **kontrakt kampanii** (`kontraktKampanii`, lista kontrolna w `20-…`)
+i testy „każda kampania", które biorą każdy plik z `data/kampanie/`.
+
+**Dowód, że przeniesienie nie zmieniło gry**: po wyniesieniu zasad i automatów Wodnik miał
+**identyczne** wyniki wszystkich 7 strategii (3 ziarna). Potem świadome zmiany: generyczne
+zamykanie znanych faktów przez skąpca, nowe zasady i automaty gminy (pokusa „oświadczenie,
+że działa" przy kontroli grantu) i „pilne sprawy najpierw" w automatach (17.10).
+
+**Cennik dla każdej kampanii** (`17-…`, 17.10): trzy źródła odstępstw, wyniki dla obu kampanii.
+Migawka Monte Carlo bez zmian (silnik zagrożeń nietknięty).
+
 ## 14.9. Następne kroki (propozycja)
 
 1. Ocena przez CISO: `02-…` (🟡), statusy firm w `09-…`, sprawy i fakty kampanii w `data/kampanie/wodociagi.js`,

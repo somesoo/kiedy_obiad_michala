@@ -47,6 +47,25 @@ function doMiesiaca(k, id, cel, waga, opis, dlaczego, termin, kiedy) {
   return [];
 }
 
+// Zasady z pliku kampanii. Deklaratywnie: { sprawa, id, waga, cel, opis, dlaczego,
+// wybierz?(e) — które rozstrzygnięcie oceniać (domyślnie pierwsze), kazda? — każde osobno,
+// ocena(e, k) → true (spełniona) | false (naruszona) | null (nie oceniać) }. Albo funkcja (k, h).
+// Deklaracja z `sprawa` pozwala walidatorowi sprawdzić, że każda sprawa kampanii jest oceniana.
+function zasadyKampanii(k, h) {
+  const out = [];
+  for (const z of k.def.zasady || []) {
+    if (typeof z === 'function') { out.push(...z(k, h)); continue; }
+    const ev = h.sprawy(e => e.sid === z.sprawa && (!z.wybierz || z.wybierz(e, k)));
+    for (const e of z.kazda ? ev : ev.slice(0, 1)) {
+      const w = z.ocena(e, k, h);
+      if (w === null || w === undefined) continue;
+      out.push({ id: z.kazda ? `${z.id}:${e.m}` : z.id, wynik: w === true ? 'spelniona' : w === false ? 'naruszona' : w,
+        waga: z.waga, cel: z.cel, m: e.m, opis: z.opis, dlaczego: typeof z.dlaczego === 'function' ? z.dlaczego(e, k) : z.dlaczego });
+    }
+  }
+  return out;
+}
+
 const ZASADY = [
   // ── PODSTAWY W PIERWSZYM PÓŁROCZU (priorytety przy małym budżecie) ──
   (k, h) => doMiesiaca(k, 'inwentaryzacja', 'E4', 2, 'Inwentaryzacja w pierwszym półroczu',
@@ -66,10 +85,10 @@ const ZASADY = [
     const m0 = k.flagi.ostrzezenie_cert;
     if (m0 === undefined) return [];
     const reakcja = h.H.find(e => e.t === 'ruch' && e.m >= m0 && e.m <= m0 + 1 &&
-      ((k.def.reakcja_na_ostrzezenie || ['skan_ekspozycji', 'odetnij_hmi', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm']).includes(e.id) ||
+      ((k.def.reakcja_na_ostrzezenie || ['skan_ekspozycji', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm']).includes(e.id) ||
         (e.id === 'zlec_doradcy' && ['ekspozycja', 'ot', 'ogolny'].includes(e.p?.temat))));
     return doMiesiaca(k, 'reakcja_na_ostrzezenie', 'E4', 3, 'Reakcja na ostrzeżenie dla sektora w ciągu miesiąca',
-      k.def.reakcja_dlaczego || 'Ostrzeżenie z nazwą Twojego sektora to sygnał do działania od razu — panel HMI w internecie to dokładnie ten wzorzec.', m0 + 1, reakcja?.m);
+      k.def.reakcja_dlaczego || 'Ostrzeżenie z nazwą Twojego sektora to sygnał do działania od razu.', m0 + 1, reakcja?.m);
   },
   (k, h) => {
     const out = [];
@@ -186,36 +205,13 @@ const ZASADY = [
     return out;
   },
 
-  // ── SPRAWY Z KAMPANII ──
-  (k, h) => h.sprawy(e => e.sid === 'S_przejecie' && e.t !== 'sprawa_otwarta').filter(e => e.v !== 'przeglad').slice(0, 1).map(e => ({
-    id: 'przejecie', wynik: k.flagi.oczyszczalnia_sprawdzona || k.flagi.oczyszczalnia_odlozona ? 'spelniona' : 'naruszona', waga: 2, cel: 'E8', m: e.m,
-    opis: 'Przegląd przejmowanej sieci przed połączeniem', dlaczego: 'Przejmując firmę, przejmujesz też jej intruzów. Najpierw ocena i izolacja, potem połączenie.' })),
-  (k, h) => h.sprawy(e => e.sid === 'S_umowa_integratora').slice(0, 1).map(e => ({
-    id: 'umowa_integratora', wynik: (k.flagi.klauzule_integratora || 0) >= 3 ? 'spelniona' : 'naruszona', waga: 1, cel: 'E8', m: e.m,
-    opis: 'Klauzule bezpieczeństwa w umowie z integratorem', dlaczego: 'Umowa to jedyne realne narzędzie wobec dostawcy; najlepszy moment na wymagania to odnowienie.' })),
-  (k, h) => h.sprawy(e => e.sid === 'S_noc_integrator').slice(0, 1).map(e => ({
-    id: 'noc_integrator', wynik: e.t === 'sprawa_zapobiegnieta' || ['oddzwon', 'odmow'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 2, cel: 'E8', m: e.m,
-    opis: 'Hasła nigdy przez telefon', dlaczego: 'Socjotechnika na zmianie nocnej to realny wzorzec. Weryfikacja innym kanałem kosztuje minutę.' })),
-  (k, h) => h.sprawy(e => e.sid === 'S_falszywy_komunikat' && e.v !== 'zgloszenie').slice(0, 1).map(e => ({
-    id: 'dementi', wynik: (k.flagi.dementi_kanaly || 0) >= 2 ? 'spelniona' : 'naruszona', waga: 2, cel: 'E10', m: e.m,
-    opis: 'Dezinformacja zdementowana szybko, kilkoma kanałami, z danymi', dlaczego: 'Dezinformacja wygrywa czasem; cisza wygląda jak potwierdzenie.' })),
-  (k, h) => h.sprawy(e => e.sid === 'S_wodomierze').slice(0, 1).map(e => {
-    const s = k.flagi.wodomierze_srodki || [];
-    return { id: 'wodomierze', wynik: s.includes('ocena_dostawcy') && s.includes('umowa_powierzenia') ? 'spelniona' : 'naruszona', waga: 1, cel: 'E11', m: e.m,
-      opis: 'Nowy dostawca i nowe dane osobowe oceniane przed startem projektu', dlaczego: 'Bezpieczeństwo w projektowaniu kosztuje mało; dorabiane po wdrożeniu — dużo.' };
-  }),
-  (k, h) => h.sprawy(e => e.sid === 'S_emerytura').slice(0, 1).map(e => {
-    const s = k.flagi.emerytura_srodki || [];
-    return { id: 'emerytura', wynik: s.includes('dokumentacja') && s.includes('zmiana_hasel') ? 'spelniona' : 'naruszona', waga: 1, cel: 'E12', m: e.m,
-      opis: 'Wiedza i hasła nie odchodzą razem z człowiekiem', dlaczego: 'Ryzyko jednej osoby to też bezpieczeństwo: dokumentacja i zmiana haseł po przekazaniu.' };
-  }),
-  (k, h) => h.sprawy(e => e.sid === 'S_dwr' && e.t === 'sprawa_domyslnie').slice(0, 1).map(e => ({
-    id: 'dwr', wynik: k.flagi.dwr_rozstrzygniete?.plan ? 'spelniona' : 'naruszona', waga: 1, cel: 'E8', m: e.m,
-    opis: 'Lista urządzeń i plan na decyzję o dostawcy wysokiego ryzyka', dlaczego: 'Z ewidencją to godzina pracy; bez niej — panika w dniu decyzji.' })),
+  // ── SPRAWY Z KAMPANII: zasady z pliku kampanii (`zasady`, deklaratywnie — każda sprawa ma swoją) ──
+  (k, h) => zasadyKampanii(k, h),
   (k, h) => {
     const u = k.flagi.wniosek_budzetowy;
     if (!u || u === 'tyle_co_rok') return [];
-    const e = h.sprawy(x => x.sid === 'S_budzet2027')[0];
+    // Wniosek budżetowy to czasownik `wniosek` w sprawie budżetowej kampanii (każda ją ma).
+    const e = h.sprawy(x => x.v === 'wniosek')[0];
     return [{ id: 'budzet', wynik: u === 'straszenie' ? 'naruszona' : 'spelniona', waga: 1, cel: 'E1', m: e?.m ?? k.st.m,
       opis: 'Wniosek budżetowy oparty na ryzyku albo konkretnych potrzebach', dlaczego: 'Zarząd decyduje lepiej, gdy widzi ryzyko w złotówkach; straszenie bez danych kosztuje zaufanie.' }];
   },
@@ -252,33 +248,6 @@ const ZASADY = [
     return doMiesiaca(k, `doradca:${e.temat}:${e.m}`, 'E1', 1, 'Najważniejsza rekomendacja doradcy wykonana w ciągu 3 miesięcy',
       'Zapłacony raport w szufladzie to najdroższy dokument w firmie — i dowód dla audytora, że o ryzyku wiedziano.', e.m + 3, zrobione?.m);
   }),
-  // Zmiany firmy: rozwój, cięcia, odejścia — bezpieczeństwo przy stole, kiedy firma się zmienia.
-  (k, h) => h.sprawy(e => e.sid === 'S_rozbudowa' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
-    id: 'rozbudowa', wynik: ['wlacz', 'przez_msp'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E4', m: e.m,
-    opis: 'Nowe obiekty w ewidencji i procesach od pierwszego dnia',
-    dlaczego: 'Urządzenia podłączone „po swojemu" przez wykonawcę to shadow IT z publicznym adresem — najtaniej włączyć je w procesy na starcie.' })),
-  (k, h) => h.sprawy(e => e.sid === 'S_ciecie' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
-    id: 'ciecie', wynik: ['argumentuj', 'zaproponuj'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E1', m: e.m,
-    opis: 'Cięcie budżetu z pokazaniem skutków',
-    dlaczego: 'Zarząd może ciąć — ale powinien wiedzieć, jakie ryzyko przez to przyjmuje. Cisza oznacza, że przyjmuje je nieświadomie.' })),
-  (k, h) => h.sprawy(e => e.sid === 'S_odejscie' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
-    id: 'odejscie', wynik: ['zatrudnij', 'msp'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: e.m,
-    opis: 'Odejście z IT ma zastępstwo (rekrutacja albo usługa)',
-    dlaczego: 'Gdy cudza praca spada na bezpieczeństwo, bezpieczeństwo przegrywa z drukarką — codziennie, po cichu.' })),
-  // ── SPRAWY KAMPANII GMINNEJ (data/kampanie/gmina.js) ──
-  (k, h) => h.sprawy(e => e.sid === 'G_kontrola_grantu' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
-    id: 'grant', wynik: ['ok', 'harmonogram'].includes(k.flagi.grant_trwalosc) ? 'spelniona' : 'naruszona', waga: 2, cel: 'E7', m: e.m,
-    opis: 'Sprzęt z grantu działa (albo realnie się wdraża) przed kontrolą trwałości',
-    dlaczego: 'Grant rozliczony sprzętem w kartonach to podwójna strata: pieniądze wydane, ochrony nie ma — a kontrola i tak przyjdzie.' })),
-  (k, h) => h.sprawy(e => e.sid === 'G_wybory' && e.t !== 'sprawa_otwarta').slice(0, 1).map(e => ({
-    id: 'wybory', wynik: ['przygotuj', 'procedura'].includes(e.v) ? 'spelniona' : 'naruszona', waga: 1, cel: 'E10', m: e.m,
-    opis: 'Przed głosowaniem: procedura komunikatów i ścieżka do CSIRT', dlaczego: 'Dzień głosowania to najgorszy moment na pisanie procedury — i najlepszy dla dezinformacji.' })),
-  (k, h) => h.sprawy(e => e.sid === 'G_dostawca' && e.t !== 'sprawa_otwarta').slice(0, 1).flatMap(e => [
-    { id: 'dostawca_odciety', wynik: k.flagi.dostawca_odciety && k.flagi.dostawca_awaryjny ? 'spelniona' : 'naruszona', waga: 2, cel: 'E8', m: e.m,
-      opis: 'Incydent u dostawcy: odcięcie jego dostępu i tryb awaryjny', dlaczego: 'Zaszyfrowany dostawca to możliwa droga do Ciebie — a mieszkańcy dalej muszą zapłacić podatek.' },
-    { id: 'dostawca_rodo', wynik: k.flagi.dostawca_info ? 'spelniona' : 'naruszona', waga: 1, cel: 'E11', m: e.m,
-      opis: 'Pytanie do podmiotu przetwarzającego o dane mieszkańców', dlaczego: 'To urząd jest administratorem danych — bez informacji od dostawcy nie oceni, czy musi zgłosić naruszenie.' },
-  ]),
   // Limit pracy w toku: więcej niż pięć wdrożeń naraz to kolejka, nie program.
   (k, h) => (k.koniec && h.H.filter(e => e.t === 'ruch').length >= 12 ? [{ id: 'wip', wynik: (k.maxProjekty || 0) <= 5 ? 'spelniona' : 'naruszona', waga: 1, cel: 'E3', m: k.st.m,
     opis: 'Najwyżej pięć wdrożeń w toku naraz', dlaczego: 'Każdy projekt w toku zjada godziny koordynacji, a zespół traci czas na przełączanie się. Szybciej kończy ten, kto zaczyna mniej naraz.' }] : []),
@@ -323,4 +292,4 @@ function jakoscPraktyki(oceny) {
   return w ? Math.max(0, s / w) : 0;
 }
 
-module.exports = { ZASADY, PKT, KLUCZOWE, ocen, jakoscPraktyki, resztka };
+module.exports = { ZASADY, PKT, KLUCZOWE, ocen, jakoscPraktyki, resztka, zasadyKampanii };

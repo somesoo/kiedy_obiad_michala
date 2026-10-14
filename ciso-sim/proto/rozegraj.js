@@ -12,9 +12,8 @@ const I = require('./incydent');
 const K = require('./kampania');
 const RU = require('./ruchy');
 
-// Kampania domyślna dla incydentu: S07 to wariant gminny, reszta — Wodnik (można nadpisać --kampania=).
-const KAMPANIA_INCYDENTU = { S07: 'gmina' };
-function przygotuj(id, { seed = 7, kontrole = [], naprawione = [], kampania = KAMPANIA_INCYDENTU[id] || 'wodociagi' } = {}) {
+// Kampania domyślna — z pliku incydentu (`kampania`); można nadpisać --kampania=.
+function przygotuj(id, { seed = 7, kontrole = [], naprawione = [], kampania = I.wczytaj(id).kampania || 'wodociagi' } = {}) {
   const k = K.nowaKampania(kampania, seed);
   // Przygotowanie z „poprzednich miesięcy": działające kontrole (wdrożone porządnie) i naprawione fakty.
   for (const kid of kontrole) RU.zainstalujGotowe(k, kid);
@@ -45,7 +44,7 @@ async function main() {
   const auto = arg('auto');
   if (auto) {
     if (auto === 'wzorcowo') {
-      for (const a of K.PLAYBOOK[id](k.incydent.s)) {
+      for (const a of K.planIncydentu(id, 'wzorcowo', k.incydent.s)) {
         if (!k.incydent || I.dostepnaAkcja(k, a)) continue;
         widok();
         const r = K.incydentAkcja(k, a);

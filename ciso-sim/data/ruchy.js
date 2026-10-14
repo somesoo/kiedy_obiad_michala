@@ -47,7 +47,7 @@ module.exports = {
     nazwa: 'Obchód stacji z automatykiem: szafy, sterowniki, hasła, PIN-y, kto ma klucze',
     ot: true, kategoria: 'rozpoznanie', h: 6,
     wykonaj: (k, p, a) => {
-      a.dzial('produkcja', { zaufanie: 0.03 });
+      if (k.def.dzial_ot) a.dzial(k.def.dzial_ot, { zaufanie: 0.03 });
       const fakty = a.odkryjFakty(f => f.na_obiekcie, 'obchód stacji');
       return fakty.length ? fakty.map(f => `Znalezione: ${f}.`).join(' ') : 'Na stacji nic nowego — kierownik docenia, że przyszedłeś osobiście.';
     },
@@ -87,42 +87,11 @@ module.exports = {
     },
   },
 
-  // ── DZIAŁANIA W OT (wymagają wiedzy o fakcie) ──
-  odetnij_hmi: {
-    nazwa: 'Odciąć panel HMI od internetu (zamknąć przekierowanie portu u integratora)',
-    ot: true, kategoria: 'ot', h: 4,
-    dostepny: (k, p, a) => a.faktDoNaprawy('hmi_wystawiony', 'nie wiesz, czy cokolwiek ze stacji jest w internecie — najpierw przegląd ekspozycji'),
-    wykonaj: (k, p, a) => {
-      a.napraw('hmi_wystawiony');
-      if (!a.dziala('brama_dostepu')) {
-        // Integrator traci drogę, którą serwisował zdalnie — stacja zacznie naciskać na „stały dostęp".
-        a.dzial('produkcja', { zaufanie: -0.05 });
-        a.presja('produkcja', 'zdalny_integrator', 0.4);
-        return 'Panel nie jest już widoczny z internetu. Integrator protestuje: „jak mamy teraz serwisować w nocy?".';
-      }
-      return 'Panel nie jest już widoczny z internetu; integrator łączy się przez bramę.';
-    },
-  },
-  zmien_pin: {
-    nazwa: 'Zmienić domyślne PIN-y i hasła sterowników i paneli (z automatykiem i integratorem)',
-    ot: true, kategoria: 'ot', h: 6,
-    dostepny: (k, p, a) => a.faktDoNaprawy('pin_domyslny', 'nie wiesz, jakie hasła mają sterowniki — najpierw obchód stacji albo inwentaryzacja'),
-    wykonaj: (k, p, a) => { a.napraw('pin_domyslny'); return 'PIN-y zmienione i zapisane w sejfie haseł; integrator dostał je imiennie.'; },
-  },
-  usun_narzedzie_zdalne: {
-    nazwa: 'Usunąć narzędzie zdalnej pomocy integratora ze stacji inżynierskiej',
-    ot: true, kategoria: 'ot', h: 2,
-    dostepny: (k, p, a) => a.faktDoNaprawy('narzedzie_zdalne_integratora', 'nie wiesz o żadnym narzędziu zdalnym na stacji — najpierw przegląd dostępów'),
-    wykonaj: (k, p, a) => {
-      a.napraw('narzedzie_zdalne_integratora');
-      if (!a.dziala('brama_dostepu')) {
-        a.dzial('produkcja', { zaufanie: -0.1 });
-        a.presja('produkcja', 'zdalny_integrator', 0.5);
-        return 'Narzędzie usunięte. Bez bramy dla dostawców integrator nie ma jak pomóc zdalnie — kierownik stacji jest wściekły.';
-      }
-      return 'Narzędzie usunięte; integrator przechodzi na bramę.';
-    },
-  },
+  // ── DZIAŁANIA W OT: naprawy konkretnych faktów żyją w plikach kampanii (`ruchy`), np. odcięcie
+  //    panelu HMI w data/kampanie/wodociagi.js ──
+
+
+
 
   // ── DORADZTWO (data/doradztwo.js, proto/doradztwo.js) ──
   zlec_doradcy: {

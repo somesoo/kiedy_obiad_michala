@@ -1,0 +1,38 @@
+Kampania: gmina. Mądry bez odstępstw: Wynik 885 (20 ziaren)
+odstępstwo od praktyki                                                 źródło       ΔWYNIK   ΔIndeks  ΔPraktyka(pp)
+upiększone raporty dla zarządu                                         ogólne         -620      -562         -35.9
+dokumenty z datą wsteczną                                              ogólne         -545      -487         -19.4
+kartony „na później", a na kontrolę oświadczenie, że działa            kampania       -345      -287          -6.7
+cały katalog zamówiony w 1. miesiącu                                   ogólne         -137      -237          -3.7
+odmowa każdej prośby działu                                            ogólne          -78       -79          -7.7
+sygnały od ludzi ignorowane                                            ogólne          -70       -22         -11.8
+bez przygotowania + S01: najpierw szukanie winnych                     incydent S01    -66       -78          -5.3
+żadnych przeglądów ani testów                                          ogólne          -59       -36          -8.3
+bez przygotowania + S07: zapłata za „odblokowanie"                     incydent S07    -58       -26          -9.1
+bez przygotowania + S01: mail do przejętej skrzynki                    incydent S01    -53       -79          -2.8
+bez przygotowania + S07: odblokowanie kont przed odebraniem dostępu    incydent S07    -50       -24          -7.6
+bez przygotowania + S07: telefon do sprawcy                            incydent S07    -41       -34          -4.9
+kara za każde odkryte obejście                                         ogólne          -36         8          -8.0
+koniec wsparcia: „zostawić jak jest"                                   ogólne          -29        -2          -5.5
+bez przygotowania do S01                                               incydent S01    -27       -44          -1.0
+dostawca zaszyfrowany: tylko czekać                                    kampania        -22       -18          -2.7
+bez przygotowania do S07                                               incydent S07    -20       -20          -2.0
+S01: najpierw szukanie winnych                                         incydent S01    -18       -14          -2.2
+S01: mail do przejętej skrzynki                                        incydent S01    -18       -17          -1.9
+wybory: bez przygotowań                                                kampania        -15       -21          -0.9
+kopie nigdy nie testowane                                              ogólne          -14        -2          -2.6
+budżet „bo NIS2 i hakerzy"                                             ogólne          -12       -10          -1.4
+kartony z grantu „na później"                                          kampania         -9        -1          -1.6
+kontrasygnata bez sprawdzania rachunku                                 kampania         -8       -18           0.2
+budżet 2027: bez wniosku                                               kampania         -7        -9          -0.6
+bez szkolenia kierownika                                               ogólne           -6        -2          -0.9
+SZBI z pudełka                                                         ogólne           -4        -2          -0.6
+licencje z grantu: zrezygnować                                         kampania         -3        -0          -0.6
+MFA bez zarządu (bez akceptacji ryzyka)                                ogólne           -1        -0          -0.1
+EDR zostaje w trybie „wykrywaj"                                        ogólne            0         0           0.0
+S07: telefon do sprawcy                                                incydent S07      0         0           0.0
+S07: zapłata za „odblokowanie"                                         incydent S07      0         0           0.0
+S07: odblokowanie kont przed odebraniem dostępu                        incydent S07      0         0           0.0
+umowy przedłużane bez negocjacji                                       ogólne            0        -1           0.1
+certyfikaty odnawiane ręcznie co rok                                   ogólne            1         1           0.0
+bez rozpoznania (skan, obchód, dostępy, konta)                         ogólne            2        -1           0.4

@@ -208,6 +208,21 @@ module.exports = {
       ocen: s => (s.ekspozycja_przegladnieta && !s.furtka ? 'spelniona' : 'naruszona') },
   ],
 
+  // ── Dla laboratoriów i testów (gracz tego nie widzi; to nie są oceny akcji) ──
+  kampania: 'wodociagi',
+  automaty: {
+    wzorcowo: s => (s.proba ? ['przeglad_ekspozycji', 'usun_furtke', 'csirt']
+      : ['proces_reczny', 'odetnij', 'probki', 'komunikat_prawda', 'csirt', 'dowody', 'zmien_pin', 'odtworz_konfiguracje', 'przeglad_ekspozycji', 'usun_furtke']),
+    laik: s => (s.proba ? ['csirt'] : ['integrator_zdalnie', 'proces_reczny', 'odetnij', 'komunikat_prawda', 'csirt']),
+  },
+  // Przy próbie (panel zamknięty wcześniej) te błędy nic nie kosztują — cennik liczy je też
+  // w grze bez przygotowania (pole `przygotowanie` w pliku kampanii).
+  odstepstwa: {
+    'komunikat „woda bezpieczna" bez wyników': (plan, s) => (s.proba ? plan : ['proces_reczny', 'komunikat_uspokajajacy', ...plan.filter(a => !a.startsWith('komunikat'))]),
+    'zdalne logowanie do przejętego panelu': (plan, s) => (s.proba ? plan : ['zdalne_logowanie', ...plan]),
+    'aktywny skan sieci OT w trakcie': (plan, s) => (s.proba ? plan : [...plan, 'aktywny_skan']),
+  },
+
   debrief: [
     'To nie był wyrafinowany atak: panel w internecie i domyślne hasło. Według raportu ABW właśnie to było główną przyczyną włamań do stacji uzdatniania wody w 2025 r.',
     'Nie da się zamknąć drzwi, o których się nie wie — darmowy skan (moje.cert.pl) pokazałby ten panel.',

@@ -233,6 +233,15 @@ module.exports = {
       czasowniki: {
         pokaz: { opis: 'Pokazać działające wdrożenia (konfiguracja, raporty z kopii)', h: 4, wykonaj: (k, p, a) => kontrolaGrantu(k, a, false) },
         wyjasnij: { opis: 'Złożyć wyjaśnienia z harmonogramem uruchomienia (pomaga, jeśli projekty naprawdę trwają)', h: 6, wykonaj: (k, p, a) => kontrolaGrantu(k, a, true) },
+        // Pokusa: kontrola zdalna „na oświadczenie". Jeśli sprzęt nie działa, to kłamstwo wobec
+        // operatora — wychodzi przy kontroli na miejscu albo w audycie zamykającym.
+        oswiadczenie: { opis: 'Wysłać oświadczenie, że sprzęt jest używany zgodnie z wnioskiem (kontrola zdalna, bez pokazywania)', h: 1,
+          wykonaj: (k, p, a) => {
+            if (a.dziala('ngfw') && a.dziala('backup')) return kontrolaGrantu(k, a, false);
+            a.klamstwo({ wobec: 'operator programu grantowego', wykrywalnosc: 0.6, tekst: 'oświadczenie o trwałości projektu, choć sprzęt z grantu nie działał', przy_incydencie: 0.3 });
+            a.flaga('grant_trwalosc', 'oswiadczenie');
+            return 'Oświadczenie przyjęte. Na razie.';
+          } },
       },
       domyslnie: (k, a) => kontrolaGrantu(k, a, false),
     },
@@ -310,6 +319,34 @@ module.exports = {
     },
   },
 
+  // ── ZASADY SPRAW TEJ KAMPANII (proto/zasady.js → zasadyKampanii) ──
+  zasady: [
+    { sprawa: 'G_kartony', id: 'kartony', waga: 1, cel: 'E12',
+      opis: 'Sprzęt z grantu uruchomiony, a nie odłożony', dlaczego: 'Zapora i serwer kopii w kartonach nie chronią przed niczym — a były już zapłacone.',
+      ocena: e => ['wlasnymi_silami', 'z_firma'].includes(e.v) },
+    { sprawa: 'G_kontrola_grantu', id: 'grant', waga: 2, cel: 'E7',
+      opis: 'Sprzęt z grantu działa (albo realnie się wdraża) przed kontrolą trwałości',
+      dlaczego: 'Grant rozliczony sprzętem w kartonach to podwójna strata: pieniądze wydane, ochrony nie ma — a kontrola i tak przyjdzie.',
+      ocena: (e, k) => ['ok', 'harmonogram'].includes(k.flagi.grant_trwalosc) },
+    { sprawa: 'G_licencje', id: 'licencje', waga: 1, cel: 'E1',
+      opis: 'Świadoma decyzja o licencjach po grancie (koszt całkowity, nie tylko zakup)',
+      dlaczego: 'Grant płaci za start, gmina — za utrzymanie. Licencja, która wygasła „sama", to ochrona, która zgasła bez decyzji.',
+      ocena: e => e.t === 'sprawa' && ['przedluz', 'podstawowa'].includes(e.v) },
+    { sprawa: 'G_wybory', id: 'wybory', waga: 1, cel: 'E10',
+      opis: 'Przed głosowaniem: procedura komunikatów i ścieżka do CSIRT', dlaczego: 'Dzień głosowania to najgorszy moment na pisanie procedury — i najlepszy dla dezinformacji.',
+      ocena: e => ['przygotuj', 'procedura'].includes(e.v) },
+    { sprawa: 'G_dostawca', id: 'dostawca_odciety', waga: 2, cel: 'E8',
+      opis: 'Incydent u dostawcy: odcięcie jego dostępu i tryb awaryjny', dlaczego: 'Zaszyfrowany dostawca to możliwa droga do Ciebie — a mieszkańcy dalej muszą zapłacić podatek.',
+      ocena: (e, k) => !!(k.flagi.dostawca_odciety && k.flagi.dostawca_awaryjny) },
+    { sprawa: 'G_dostawca', id: 'dostawca_rodo', waga: 1, cel: 'E11',
+      opis: 'Pytanie do podmiotu przetwarzającego o dane mieszkańców', dlaczego: 'To urząd jest administratorem danych — bez informacji od dostawcy nie oceni, czy musi zgłosić naruszenie.',
+      ocena: (e, k) => !!k.flagi.dostawca_info },
+  ],
+  sprawy_bez_zasady: {
+    G_skarbnik: 'ocenia ją zasada ogólna „procedura zmiany rachunku" (kontrasygnata z rachunkiem się liczy)',
+    S_budzet2027: 'ocenia ją zasada ogólna „wniosek budżetowy" (czasownik wniosek)',
+  },
+
   // ── AUTOMATY (laboratoria i testy; gracz ich nie widzi) — odpowiedzi na sprawy tej kampanii ──
   automaty: {
     madry: {
@@ -329,6 +366,8 @@ module.exports = {
         O_status: [['wpis_s46', { status: 'kluczowy' }]], O_cert: [['wdroz:mfa']], O_rachunki: [['wdroz:weryfikacja_platnosci']],
         O_haslo_poczta: [['wdroz:mfa']], O_kopie: [['wdroz:backup']], O_praca_reczna: [['wdroz:bcp']], O_pol_etatu: [['wdroz:msp', { umowa: 'standardowa' }]],
         O_kierownik_szkolenie: [['szkolenie_kierownika']], O_szbi: [['wdroz:szbi']], O_audyt: [['plan_naprawczy']], O_wybory: [['wdroz:ngfw']],
+        // [] = laik słyszy, ale nic z tym nie robi (ufa zleceniobiorcy, BIP „ktoś ogarnie").
+        O_wykaz: [], O_zleceniobiorca: [], O_radni: [], O_bip: [], O_lista_obecnosci: [],
       },
       sprawy: {
         G_kartony: [{ v: 'wlasnymi_silami' }], G_kontrola_grantu: [{ v: 'pokaz' }], G_licencje: [{ v: 'przedluz' }, { v: 'zrezygnuj' }], G_skarbnik: [{ v: 'szkolenie' }],
@@ -336,6 +375,42 @@ module.exports = {
         G_dostawca: (k, s) => [!s.dane.awaryjny ? { v: 'tryb_awaryjny' } : { v: 'zamknij' }],
       },
     },
+    // Robi to, co miłe wójtowi i referatom.
+    potakiwacz: {
+      sprawy: {
+        G_kartony: [{ v: 'pozniej' }], G_kontrola_grantu: 'madry', G_licencje: [{ v: 'zrezygnuj' }], G_skarbnik: [{ v: 'bez_zmian' }],
+        S_budzet2027: [{ v: 'bez_wniosku' }], G_wybory: [{ v: 'procedura' }], G_dostawca: 'madry',
+      },
+    },
+    // Najtańsza odpowiedź albo żadna.
+    skapiec: {
+      sprawy: {
+        G_kartony: [{ v: 'wlasnymi_silami' }], G_kontrola_grantu: [{ v: 'pokaz' }], G_licencje: [{ v: 'zrezygnuj' }], G_skarbnik: [{ v: 'rozszerz' }],
+        S_budzet2027: [{ v: 'bez_wniosku' }], G_wybory: [{ v: 'procedura' }], G_dostawca: (k, s) => [!s.dane.odciete ? { v: 'odetnij' } : { v: 'zamknij' }],
+      },
+    },
+    // Mądry, który kłamie, gdy prawda boli (oświadczenie dla operatora grantu zamiast korekty).
+    klamca: {
+      sprawy: {
+        G_kontrola_grantu: (k, s, A) => [A.dziala('ngfw') && A.dziala('backup') ? { v: 'pokaz' } : { v: 'oswiadczenie' }],
+        G_kartony: 'madry', G_licencje: 'madry', G_skarbnik: 'madry', S_budzet2027: 'madry', G_wybory: 'madry', G_dostawca: 'madry',
+      },
+    },
+  },
+
+  // ── CENNIK ZŁYCH DECYZJI (proto/cennik.js; format jak w wodociagi.js) ──
+  przygotowanie: {
+    S07: { ruchy: ['przeglad_kont', 'przeglad_dostepow', 'ogranicz_dostep_zleceniobiorcy', 'wdroz:jml', 'wdroz:pam'] },
+    S01: { ruchy: ['wdroz:weryfikacja_platnosci'], sprawy: { G_skarbnik: { v: 'bez_zmian' } } },
+  },
+  odstepstwa: {
+    'kartony z grantu „na później"': { sprawa: 'G_kartony', v: 'pozniej' },
+    'kartony „na później", a na kontrolę oświadczenie, że działa': { sprawy: { G_kartony: { v: 'pozniej' }, G_kontrola_grantu: { v: 'oswiadczenie' } } },
+    'licencje z grantu: zrezygnować': { sprawa: 'G_licencje', v: 'zrezygnuj' },
+    'kontrasygnata bez sprawdzania rachunku': { sprawa: 'G_skarbnik', v: 'bez_zmian' },
+    'budżet 2027: bez wniosku': { sprawa: 'S_budzet2027', v: 'bez_wniosku' },
+    'wybory: bez przygotowań': { sprawa: 'G_wybory', v: 'nic' },
+    'dostawca zaszyfrowany: tylko czekać': { sprawa: 'G_dostawca', v: 'zamknij' },
   },
 
   // ── OŚ KAMPANII (reżyser wybiera moment w oknie) ──

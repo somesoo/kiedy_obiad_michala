@@ -2,7 +2,7 @@
 
 Osobna gra w tym repo: symulator osoby odpowiedzialnej za cyberbezpieczeństwo w polskiej
 organizacji. **Nie jest częścią Snakes** — nie importuje niczego z `../server.js` ani `../lib/`
-(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…19` (silnik gry: `docs/18-silnik-ruchow.md`).
+(wzorce się kopiuje, nie współdzieli). Start: `README.md`, potem `docs/01…20` (silnik gry: `docs/18-silnik-ruchow.md`, nowa kampania: `docs/20-nowa-kampania.md`).
 
 Stan: projekt + dane + silnik miesiąca + działy-agenci + reżyser + **silnik ruchów bez quizu**
 + **dwie grywalne kampanie w terminalu** („Wodnik” — wodociągi, „Gmina Brzozów Wielki”) + 12
@@ -68,10 +68,19 @@ można przejrzeć, przetestować i wycofać (`docs/18-…`).
 - **Doradztwo** (`docs/18-…`, 18.13; `proto/doradztwo.js`): doradca tylko odsłania i wycenia,
   nie zmienia skuteczności kontroli. Wycena przez `K.coJesli` — na kopiach stanu, bez ruszania
   kampanii i strumieni losowości (test to pilnuje). Losowanie: `k.rnd.doradztwo`.
-- **Kampania = plik danych** (`data/kampanie/<id>.js`, wzorce: `wodociagi.js`, `gmina.js`;
-  `docs/19-…`, 19.4). Nic w `proto/` nie może zakładać konkretnej kampanii: id działów, faktów
-  i spraw biorą się z pliku, OT tylko gdy `firma.ot`, odpowiedzi automatów na sprawy kampanii —
-  w jej `automaty`. Nowy incydent w innej organizacji = `warianty[id]` w pliku kampanii.
+- **Kampania = KOMPLETNY plik wejściowy** (`data/kampanie/<id>.js`, wzorce: `wodociagi.js`,
+  `gmina.js`; lista kontrolna: `docs/20-nowa-kampania.md`). Nic w `proto/` nie może zakładać
+  konkretnej kampanii: id działów, faktów i spraw, ruchy tylko tej organizacji, odpowiedzi
+  automatów **każdego stylu** (`automaty.{madry,laik,potakiwacz,skapiec,klamca}`), zasady spraw
+  (`zasady` / `sprawy_bez_zasady`), odstępstwa dla cennika (`odstepstwa`), przygotowanie do
+  incydentów (`przygotowanie`) — wszystko w pliku. **Walidator `kontraktKampanii` pilnuje
+  kompletności**: kampania z brakiem nie wystartuje, a testy „każda kampania" obejmują każdy
+  plik z `data/kampanie/` bez wymieniania go. Nie „dopisuj w silniku na szybko" — rozszerz
+  kontrakt i oba pliki-wzorce. Incydent: `kampania`, `automaty.{wzorcowo,laik}`, ≥ 2
+  `odstepstwa`. Inna organizacja z tym samym incydentem = `warianty[id]` w pliku kampanii.
+- **Cennik złych decyzji jest dla każdej kampanii** (`proto/cennik.js --kampania=<id>`): ogólne
+  (`OGOLNE`) + incydent (także „bez przygotowania") + kampania. Nowa mechanika, w której da się
+  źle zdecydować, dostaje odstępstwo w cenniku (`docs/20-…`, 20.3).
 - **Zapis gry = lista akcji** (`k.akcje`: `ruch`, `sprawa`, `inc_start`, `inc`, `inc_czekaj`,
   `inc_koniec`, `zamknij`), wczytanie = odtworzenie z ziarna (`wykonajAkcje`). Nowa akcja gracza
   musi przechodzić przez `RU.wykonaj`/`SP.odpowiedz`/funkcje incydentu w `proto/kampania.js`
@@ -87,7 +96,7 @@ node ciso-sim/proto/rozegraj.js S01 [--kontrole=a,b] [--naprawione=fakt] [--auto
 node ciso-sim/proto/kampania.js [--kampania=gmina] [--zapis=plik.json] | --auto=madry|rozsadny|odmawiajacy|bierny [--seed=N] [--szczegoly]
 node ciso-sim/proto/porownaj-style.js [--kampania=gmina]   # 4 style gry × 20 ziaren (wyniki → docs/16-…, 19-…)
 node ciso-sim/proto/brzegowe.js [N] [--kampania=gmina]     # strategie-prowokacje + niezmienniki (→ docs/17-…)
-node ciso-sim/proto/cennik.js [N]                # koszt JEDNEGO odstępstwa w dobrej grze (→ docs/17-…, 17.8)
+node ciso-sim/proto/cennik.js [N] [--kampania=gmina]  # koszt JEDNEGO odstępstwa w dobrej grze (→ docs/17-…, 17.10)
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 

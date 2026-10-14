@@ -288,3 +288,61 @@ doradztwo: 18.13.
   realnie zjadają czas. Gra nie ma „stanu ustalonego", w którym dobry gracz tylko czeka.
 - Laik z doradcą (624) jest lepszy od laika samego (547), ale daleko za mądrym: raport mówi,
   co i w jakiej kolejności, nie prowadzi spraw, testów i incydentów.
+
+## 17.10. Szósta runda: cennik dla każdej kampanii (14.10.2026)
+
+Prośba właściciela: cennik złych decyzji także dla gminy i „dla każdej innej symulacji". Cennik
+był listą odstępstw Wodnika zaszytą w `proto/cennik.js`. Teraz ma trzy źródła (ogólne,
+incydent, kampania — `20-…`, 20.3), więc każda kampania dostaje go bez kodu, a kontrakt
+kampanii wymaga odstępstwa na każdą jej sprawę. Wyniki: `proto/wyniki-cennik-2026-10-14.txt`
+(Wodnik) i `proto/wyniki-cennik-gmina-2026-10-14.txt` (20 ziaren).
+
+| Odstępstwo | Wodnik | Gmina | Komentarz |
+|---|---|---|---|
+| upiększone raporty dla zarządu | **−664** | **−620** | najdroższe w obu — kłamstwo wobec zarządu |
+| dokumenty z datą wsteczną | −450 | −545 | |
+| kartony „na później", a na kontrolę oświadczenie, że działa | — | **−345** | samo „na później" to −9: kosztuje dopiero kłamstwo, które je przykrywa |
+| cały katalog zamówiony w 1. miesiącu | −294 | −137 | w gminie budżet zatrzymuje katalog szybciej |
+| bez przygotowania + S03: komunikat „woda bezpieczna" bez wyników | −274 | — | |
+| kłamstwo w ankiecie ubezpieczyciela | −120 | — | |
+| odmowa każdej prośby działu | −91 | −78 | |
+| sygnały od ludzi ignorowane | −58 | −70 | |
+| bez przygotowania + S07: zapłata za „odblokowanie" | — | −58 | |
+| nocny telefon: podać hasło | −55 | — | |
+| bez przygotowania do S03 / S01 / S07 | −60 / −1 | — / −27 / −20 | |
+
+**Co z tego wynika (do balansu, decyzja właściciela: później):**
+1. **Odstępstwa incydentu są martwe u przygotowanego mądrego** (0 w cenniku): przygotowanie
+   zamienia atak w próbę, więc błąd w prowadzeniu incydentu nic nie kosztuje. Dlatego cennik
+   liczy je też „bez przygotowania +" — i tam kosztują od −24 do −274.
+2. **Kilka pozycji jest ≈ 0 albo na plus** — dziury do balansu: „rozbudowa po swojemu" (+2),
+   „SZBI z pudełka" (+3), „umowy bez negocjacji" (+3) w Wodniku, „bez rozpoznania" (+2)
+   w gminie (mądry i tak odkrywa fakty innymi kanałami), „dostawca wysokiego ryzyka: nic"
+   i „cięcie budżetu bez argumentów" (−1).
+3. **„EDR zostaje w trybie wykrywaj" = 0 w obu kampaniach**: mądry wdraża EDR na końcu listy
+   priorytetów (w 1–2 z 4 przebiegów, w 21.–22. miesiącu), więc nie zdąży go dostroić. To nie
+   błąd cennika, tylko pytanie do CISO: czy EDR nie powinien być wyżej.
+
+**Absurd znaleziony przy okazji** (test „mądry odpowiada na każdą sprawę"): automat najpierw
+wydawał godziny na zaplanowane ruchy, a sprawy rozstrzygał potem — nocny telefon z terminem
+„dziś" przechodził na rozstrzygnięcie domyślne (pół na pół: operator poda hasło). Teraz
+automaty rozstrzygają najpierw sprawy z terminem w bieżącym miesiącu.
+
+**Zmiany wyników (20 ziaren, `proto/wyniki-brzegowe-*2026-10-14.txt`; razem z generycznym
+zamykaniem faktów przez skąpca i nowymi automatami gminy):**
+
+| Strategia | Wodnik przed → po | Gmina przed → po |
+|---|---|---|
+| mądry | 910 → 924 | 885 → 885 |
+| pracoholik | **711 → 880** | **593 → 851** |
+| skąpiec | 578 → 615 | 497 → 558 (odwołany 20/20 → 4/20) |
+| potakiwacz | 330 → 345 | 340 → 340 |
+| rozsądny laik | 547 → 557 | 487 → 486 |
+
+**Pracoholik** tracił dotąd głównie dlatego, że automat zużywał godziny przed spojrzeniem
+w skrzynkę i pilne sprawy przechodziły na rozstrzygnięcie domyślne (praktyka 69% → 90–94%).
+To był artefakt automatu, nie koszt wypalenia. Po poprawce wypalenie (morale 10–15) kosztuje
+już tylko ~45 punktów wobec mądrego — **do balansu**: czy przepracowanie nie powinno boleć
+bardziej (błędy, odejście, zwolnienie lekarskie). **Skąpiec w gminie** nie jest już odwołany
+w każdym przebiegu, bo zamyka znane fakty, kiedy naprawa nic nie kosztuje (konto zleceniobiorcy) —
+tak zrobiłby każdy oszczędny gracz.

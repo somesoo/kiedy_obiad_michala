@@ -1,0 +1,45 @@
+Kampania: wodociagi. Mądry bez odstępstw: Wynik 924 (20 ziaren)
+odstępstwo od praktyki                                                 źródło       ΔWYNIK   ΔIndeks  ΔPraktyka(pp)
+upiększone raporty dla zarządu                                         ogólne         -664      -626         -31.6
+dokumenty z datą wsteczną                                              ogólne         -450      -422         -11.2
+cały katalog zamówiony w 1. miesiącu                                   ogólne         -294      -348         -24.1
+bez przygotowania + S03: komunikat „woda bezpieczna" bez wyników       incydent S03   -274      -244          -8.1
+kłamstwo w ankiecie ubezpieczyciela                                    kampania       -120      -112          -1.4
+odmowa każdej prośby działu                                            ogólne          -91      -103          -7.9
+bez przygotowania + S03: zdalne logowanie do przejętego panelu         incydent S03    -91      -107          -7.5
+bez przygotowania + S03: aktywny skan sieci OT w trakcie               incydent S03    -63       -99          -2.7
+bez przygotowania do S03                                               incydent S03    -60       -98          -2.3
+sygnały od ludzi ignorowane                                            ogólne          -58        -3         -11.3
+nocny telefon: podać hasło                                             kampania        -55       -90          -1.9
+bez rozpoznania (skan, obchód, dostępy, konta)                         ogólne          -54       -86          -2.2
+żadnych przeglądów ani testów                                          ogólne          -42        -1          -8.3
+kara za każde odkryte obejście                                         ogólne          -37        -0          -7.3
+koniec wsparcia: „zostawić jak jest"                                   ogólne          -27        -4          -5.0
+S01: najpierw szukanie winnych                                         incydent S01    -26       -12          -4.1
+bez przygotowania + S01: najpierw szukanie winnych                     incydent S01    -24         1          -4.8
+budżet 2027: bez wniosku                                               kampania        -22       -44           0.1
+przejęcie: połączyć bez przeglądu                                      kampania        -18       -19          -1.7
+budżet „bo NIS2 i hakerzy"                                             ogólne          -18       -27          -0.9
+bez szkolenia kierownika                                               ogólne          -12       -10          -1.3
+kopie nigdy nie testowane                                              ogólne          -11         0          -2.3
+emerytura „po swojemu"                                                 kampania        -10       -14          -0.6
+bez przygotowania + S01: mail do przejętej skrzynki                    incydent S01    -10         2          -2.2
+S01: mail do przejętej skrzynki                                        incydent S01     -9        -1          -1.6
+dezinformacja: dementi tylko na stronie                                kampania         -8         1          -1.6
+EDR na stacje OT bez pilotażu                                          ogólne           -7        -5          -0.9
+umowa z integratorem bez klauzul                                       kampania         -6        -4          -0.9
+MFA bez zarządu (bez akceptacji ryzyka)                                ogólne           -5        -6          -0.4
+aktywny skan OT przy inwentaryzacji                                    ogólne           -4        21          -3.0
+wodomierze bez udziału bezpieczeństwa                                  kampania         -3         2          -0.7
+odejście z IT: „przejmę sam"                                           kampania         -3        -4          -0.1
+bez przygotowania do S01                                               incydent S01     -1         3          -0.6
+cięcie budżetu bez argumentów                                          kampania         -1         5          -0.7
+dostawca wysokiego ryzyka: nic nie robić                               kampania         -1         0          -0.1
+certyfikaty odnawiane ręcznie co rok                                   ogólne           -0        -1           0.0
+EDR zostaje w trybie „wykrywaj"                                        ogólne            0         0           0.0
+S03: komunikat „woda bezpieczna" bez wyników                           incydent S03      0         0           0.0
+S03: zdalne logowanie do przejętego panelu                             incydent S03      0         0           0.0
+S03: aktywny skan sieci OT w trakcie                                   incydent S03      0         0           0.0
+rozbudowa „po swojemu" wykonawcy                                       kampania          2        11          -0.7
+SZBI z pudełka                                                         ogólne            3        10          -0.5
+umowy przedłużane bez negocjacji                                       ogólne            3         5           0.1

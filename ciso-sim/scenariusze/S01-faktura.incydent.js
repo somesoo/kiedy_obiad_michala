@@ -166,6 +166,20 @@ module.exports = {
       ocen: s => (s.udaremnione ? (s.pochwala ? 'spelniona' : 'naruszona') : s.procedura_obiecana ? 'spelniona' : 'naruszona') },
   ],
 
+  // ── Dla laboratoriów i testów (gracz tego nie widzi; to nie są oceny akcji) ──
+  // wzorcowo: jak prowadzi doświadczony praktyk; laik: dobre intencje, zła kolejność.
+  // odstepstwa: typowe błędy — cennik (proto/cennik.js) liczy, ile kosztują w dobrej grze.
+  kampania: 'wodociagi',
+  automaty: {
+    wzorcowo: s => (s.udaremnione ? ['telefon_kontrahent', 'zgloszenie_cert', 'pochwala', 'przeglad_skrzynek', 'zabezpiecz_skrzynki', 'zgloszenie_uodo']
+      : ['bank', 'telefon_kontrahent', 'zawiadomienie', 'przeglad_skrzynek', 'zabezpiecz_skrzynki', 'zgloszenie_uodo', 'zgloszenie_cert', 'procedura']),
+    laik: () => ['zebranie', 'bank', 'przeglad_skrzynek', 'procedura'],
+  },
+  odstepstwa: {
+    'mail do przejętej skrzynki': plan => ['mail_kontrahent', ...plan],
+    'najpierw szukanie winnych': (plan, s) => (s.udaremnione ? plan : ['zebranie', ...plan]),
+  },
+
   debrief: [
     'Mail przyszedł z prawdziwego adresu kontrahenta, w prawdziwym wątku — żaden filtr tego nie zatrzyma.',
     'Zatrzymuje to wyłącznie procedura poza pocztą: oddzwonienie na znany numer, biała lista VAT, druga osoba.',

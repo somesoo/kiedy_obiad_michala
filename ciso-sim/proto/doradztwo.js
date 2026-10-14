@@ -68,7 +68,7 @@ function raport(k, z) {
 
   // 1) Fakty świata (drzwi, o których nie wiesz).
   for (const f of Object.values(k.fakty)) {
-    if (!t.fakty || !f.prawda || f.naprawiony || !t.fakty(f)) continue;
+    if (!t.fakty || !f.prawda || f.naprawiony || !t.fakty(f, k)) continue;
     // Doradca nie wie o oczyszczalni, zanim ktokolwiek zaczął mówić o przejęciu.
     if (f.widoczny_od_sprawy && !k.historia.some(h => h.t === 'sprawa_otwarta' && h.sid === f.widoczny_od_sprawy)) continue;
     if (!f.znany) {

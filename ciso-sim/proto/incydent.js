@@ -53,6 +53,12 @@ function waliduj(def) {
     if (!(z.waga > 0)) b.push(`zasada ${z.id}: waga`);
   }
   if (!(def.debrief || []).length) b.push('brak debriefu');
+  // Kompletność dla laboratoriów: plan wzorcowy i plan laika (testy sprawdzają, że ich akcje
+  // istnieją), typowe błędy dla cennika i kampania, w której incydent gra się domyślnie.
+  for (const st of ['wzorcowo', 'laik']) if (typeof def.automaty?.[st] !== 'function') b.push(`automaty.${st} musi być funkcją (stan → lista akcji)`);
+  if (Object.keys(def.odstepstwa || {}).length < 2) b.push('za mało odstępstw dla cennika (min. 2): typowe błędy w prowadzeniu tego incydentu');
+  for (const [n, f] of Object.entries(def.odstepstwa || {})) if (typeof f !== 'function') b.push(`odstępstwo „${n}" musi być funkcją (plan, stan) → plan`);
+  if (!def.kampania) b.push('brak kampanii domyślnej (pole kampania)');
   return b;
 }
 

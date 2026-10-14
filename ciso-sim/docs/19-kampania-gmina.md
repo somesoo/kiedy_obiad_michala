@@ -67,7 +67,7 @@ Nowe inicjatywy (wspólny katalog `data/dzialy.js`, każda z warunkami „tak, a
 | **Fakt zamykany wdrożeniem** | `naprawia_wdrozenie` (brama dla dostawców zamyka stały tunel dostawcy) | `poWdrozeniu` |
 | **Warianty incydentów** | ten sam incydent, inne dane (S01: kwota 480 tys. zł, wykonawca drogi) i inne skróty (kontrasygnata skarbnika jako procedura) | `kontekst.wariant` |
 | **Fale z własnym skutkiem** | `skutek` w zdarzeniu typu fala (głosowanie: DDoS na BIP i dezinformacja) | `zamknijMiesiac` |
-| **Automaty z pliku kampanii** | odpowiedzi „mądrego" i laika na sprawy tej kampanii (`automaty`); generyczna naprawa znanych faktów (`naprawa`, `po`) | `madraSprawa`, `madreRuchy` |
+| **Kampania = kompletny plik** | odpowiedzi automatów **każdego stylu** na sprawy kampanii (`automaty`), zasady spraw (`zasady`), odstępstwa dla cennika, przygotowanie do incydentów; generyczna naprawa znanych faktów (`naprawa`, `po`). Kompletność pilnuje kontrakt (`20-…`) | `kontraktKampanii`, `odpowiedzStylu`, `zasadyKampanii` |
 
 Nowe ruchy wspólne: **przegląd kont** z kadrami (odkrywa martwe konta i nadmiarowe uprawnienia)
 i **wyłączenie martwych kont** — najtańsza kontrola w grze, potrzebna w każdej organizacji.
@@ -118,24 +118,28 @@ wcześniej, JML albo PAM = tylko próba w dziennikach**.
 
 | Strategia | Straty | Audyt /60 | Mandat | Praktyka | Indeks | **Wynik** | Uwagi |
 |---|---|---|---|---|---|---|---|
-| **mądry** | 276 tys. | 53 | 59 | 94% | 826 | **885** | |
-| odmawiający | 234 tys. | 53 | 37 | 74% | 745 | 743 | zaufanie działów 0,01 |
-| wszystko naraz | 504 tys. | 20 | 30 | 79% | 621 | 707 | budżet gminy zatrzymuje „cały katalog" szybciej niż w Wodniku |
-| pracoholik | 402 tys. | 42 | 17 | 65% | 569 | 593 | wypalenie, odwołany 4/20 |
-| laik z doradcą | 507 tys. | 27 | 14 | 48% | 581 | 529 | doradztwo drogie przy 60 tys. zł/rok |
-| skąpiec | 709 tys. | 25 | 0 | 57% | 476 | 497 | **odwołany 20/20** — w gminie nie da się wyjść na zero |
-| rozsądny laik | 846 tys. | 29 | 21 | 48% | 496 | 487 | 17 ukrytych obejść |
-| paranoik | 516 tys. | 13 | 0 | 49% | 341 | 413 | odwołany 20/20 |
-| losowy (fuzzer) | 681 tys. | 23 | 5 | 31% | 392 | 350 | niezmienniki OK |
-| potakiwacz | 292 tys. | 38 | 22 | 65% | 340 | 340 | sufit 20/20 |
-| kłamca | 239 tys. | 36 | 1 | 47% | 250 | **250** | odwołany 19/20 |
+| **mądry** | 276 tys. | 53 | 58 | 94% | 827 | **885** | |
+| pracoholik | 155 tys. | 43 | 54 | 94% | 766 | 851 | morale 15 — wypalenie kosztuje za mało (`17-…`, 17.10) |
+| odmawiający | 234 tys. | 53 | 36 | 74% | 746 | 743 | zaufanie działów 0,01 |
+| wszystko naraz | 465 tys. | 20 | 29 | 79% | 616 | 703 | budżet gminy zatrzymuje „cały katalog" szybciej niż w Wodniku |
+| skąpiec | 278 tys. | 18 | 9 | 60% | 525 | 558 | odwołany 4/20 |
+| laik z doradcą | 511 tys. | 27 | 16 | 47% | 581 | 528 | doradztwo drogie przy 60 tys. zł/rok |
+| rozsądny laik | 855 tys. | 28 | 21 | 48% | 495 | 486 | 17 ukrytych obejść |
+| paranoik | 516 tys. | 13 | 0 | 47% | 341 | 407 | odwołany 20/20 |
+| losowy (fuzzer) | 806 tys. | 19 | 1 | 32% | 366 | 354 | niezmienniki OK |
+| potakiwacz | 362 tys. | 38 | 14 | 66% | 340 | 340 | sufit 20/20 |
+| kłamca | 239 tys. | 35 | 1 | 47% | 250 | **250** | odwołany 19/20 |
 | bierny / odkładacz | 793 tys. | 13 | 0 | 0% | 233 | 117 | odwołany 20/20 |
+
+Tabela po porządkach z 14.10 (kampania jako kompletny plik, `20-…`): automaty rozstrzygają
+najpierw pilne sprawy, skąpiec zamyka znane fakty, gdy naprawa jest darmowa (wcześniej:
+skąpiec 497 i odwołany 20/20, pracoholik 593).
 
 **Wnioski:**
 1. **Kolejność stylów jak w Wodniku** — silnik jest ogólny, a nie dostrojony do jednej kampanii.
 2. **Gmina jest twardsza dla oszczędnych i biernych.** S01 to 480 tys. zł, kontrola grantu
-   karze kartony, a mandat zależy od wójta przed wyborami: skąpiec i paranoik są odwołani
-   w każdym przebiegu (w Wodniku — prawie nigdy).
+   karze kartony, a mandat zależy od wójta przed wyborami: paranoik jest odwołany w każdym
+   przebiegu, skąpiec w co piątym (w Wodniku — nigdy).
 3. **Pierwsza wersja mądrego była odwołana** (wynik 500): abonamenty sprzętu z grantu
    (5,5 tys. zł/mies.) zjadały cały budżet gminy. W życiu grant zwykle obejmował licencje na
    czas projektu — stąd licencje do 15. miesiąca i sprawa o ich przedłużenie (🔵).
@@ -159,4 +163,29 @@ wcześniej, JML albo PAM = tylko próba w dziennikach**.
 
 - Debrief i raport końcowy z perspektywy wójta (kadencja, wybory).
 - Wariant S04 jako pełny incydent zamiast sprawy (dostawca dziedzinowy).
-- Cennik odstępstw dla gminy (`cennik.js` ma dziś odstępstwa Wodnika).
+- ~~Cennik odstępstw dla gminy~~ — zrobione (19.10).
+
+## 19.10. Cennik złych decyzji w gminie (20 ziaren, `proto/wyniki-cennik-gmina-2026-10-14.txt`)
+
+Cennik liczy się teraz z pliku kampanii (`20-…`, 20.3): 7 odstępstw gminy, 3 z S07 i 2 z S01
+(każde także „bez przygotowania"), do tego ogólne. Mądry bez odstępstw: 885.
+
+| Odstępstwo | ΔWynik | Komentarz |
+|---|---|---|
+| upiększone raporty dla zarządu | −620 | jak w Wodniku: najdroższe |
+| dokumenty z datą wsteczną | −545 | |
+| **kartony „na później", a na kontrolę oświadczenie, że działa** | **−345** | nowa pokusa gminy: „oświadczenie" przy kontroli trwałości grantu to kłamstwo wobec operatora programu (wykrywalność 0,6) |
+| cały katalog zamówiony w 1. miesiącu | −137 | |
+| bez przygotowania + S01: najpierw szukanie winnych | −66 | |
+| bez przygotowania + S07: zapłata za „odblokowanie" | −58 | |
+| bez przygotowania + S07: odblokowanie kont przed odebraniem dostępu | −50 | kolejność ma znaczenie (19.6) |
+| bez przygotowania do S01 / S07 | −27 / −20 | przygotowanie = kontrasygnata z rachunkiem / przegląd kont, JML, PAM |
+| dostawca zaszyfrowany: tylko czekać | −22 | |
+| wybory: bez przygotowań | −15 | |
+| kartony z grantu „na później" (bez kłamstwa) | −9 | **zwłoka kosztuje mało, kłamstwo, które ją przykrywa — dużo** |
+| kontrasygnata bez sprawdzania rachunku | −8 | mądry ma i tak procedurę płatności |
+| licencje z grantu: zrezygnować | −3 | do balansu: sprzęt bez sygnatur powinien boleć bardziej |
+| bez rozpoznania (skan, obchód, dostępy, konta) | +2 | do balansu: fakty gminy odkrywają się innymi kanałami |
+
+Odstępstwa samego S07 (bez „bez przygotowania") są w cenniku na 0: przygotowany mądry ma
+odebrane uprawnienia zleceniobiorcy i S07 jest tylko próbą.

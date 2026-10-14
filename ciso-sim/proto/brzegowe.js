@@ -24,7 +24,8 @@ const zMadrego = ({ sprawa, ruchy, filtr, playbook } = {}) => ({
   sprawa: (k, s, A) => (sprawa && sprawa(k, s, A)) || K.madraSprawa(k, s, A),
   incydent: (k, A) => {
     const inc = k.incydent;
-    const plan = playbook ? playbook(inc.id, inc.s, K.PLAYBOOK[inc.id](inc.s)) : K.PLAYBOOK[inc.id](inc.s);
+    const wzor = K.planIncydentu(inc.id, 'wzorcowo', inc.s);
+    const plan = playbook ? playbook(inc.id, inc.s, wzor) : wzor;
     for (const a of plan) { if (!k.incydent) return; A.inc(a); }
   },
 });
@@ -38,9 +39,8 @@ const STRATEGIE = {
   potakiwacz: zMadrego({
     filtr: (id, p) => (id === 'wdroz:mfa' ? [id, { ...p, zakres: 'bez_zarzadu' }] : id === 'wdroz:segmentacja' ? null : [id, p]),
     ruchy: (k, A) => { if (k.flagi.audyt_zapowiedziany) A.ruch('dokumenty_wstecz'); },
-    sprawa: (k, s) => (s.rodzaj === 'prosba' ? { v: 'zgoda' } : s.rodzaj === 'odkrycie' ? { v: 'akceptuj' }
-      : ({ S_budzet2027: { v: 'bez_wniosku' }, S_przejecie: { v: 'polacz' }, S_umowa_integratora: { v: 'przedluz' },
-        S_wodomierze: { v: 'bez_udzialu' }, S_emerytura: { v: 'po_swojemu' } })[s.sid]),
+    // Sprawy kampanii: odpowiedzi „potakiwacza" z jej pliku (automaty.potakiwacz).
+    sprawa: (k, s, A) => (s.rodzaj === 'prosba' ? { v: 'zgoda' } : s.rodzaj === 'odkrycie' ? { v: 'akceptuj' } : K.odpowiedzStylu('potakiwacz', k, s, A)),
   }),
   // Zamawia cały katalog w pierwszym miesiącu (domyślne parametry).
   wszystko_naraz: {
@@ -53,18 +53,22 @@ const STRATEGIE = {
   skapiec: {
     ruchy: (k, A) => {
       for (const x of KONTROLE) if (!x.wdrozenie.pln && !S.kosztMiesieczny(k.st, x.id)) A.ruch(`wdroz:${x.id}`);
-      if (A.znany('hmi_wystawiony')) A.ruch('odetnij_hmi');
+      // Znane drzwi zamyka, jeśli to nic nie kosztuje (ruch bez złotówek, bez czekania na inną kontrolę).
+      for (const f of Object.values(k.fakty)) {
+        const r = f.naprawa && !f.naprawa.po && !f.naprawa.ruch.includes(':') && RU.definicja(k, f.naprawa.ruch)?.r;
+        if (A.znany(f.id) && r && !r.pln) A.ruch(f.naprawa.ruch, f.naprawa.p || {});
+      }
     },
     sprawa: (k, s, A) => (s.rodzaj === 'prosba' ? { v: 'alternatywa' } : s.rodzaj === 'odkrycie' ? { v: 'wylacz' } : s.rodzaj === 'sygnal' ? { v: 'zbadaj' }
-      : ({ S_budzet2027: { v: 'bez_wniosku' }, S_przejecie: { v: 'odloz' }, S_umowa_integratora: { v: 'przedluz' }, S_ubezpieczenie: { v: 'odrzuc' },
-        S_wodomierze: { v: 'bez_udzialu' }, S_emerytura: { v: 'po_swojemu' }, S_falszywy_komunikat: { v: 'dementi', p: { kanaly: 'strona' } }, S_noc_integrator: { v: 'odmow' } })[s.sid]),
+      : K.odpowiedzStylu('skapiec', k, s, A) ?? null),
     incydent: K.madryIncydent,
   },
   // Mądry, który kłamie: upiększone raporty, „tak" w ankiecie ubezpieczyciela, dokumenty wstecz.
   klamca: zMadrego({
     filtr: (id, p) => (id === 'raport_zarzadowi' ? [id, { styl: 'upiekszony' }] : [id, p]),
     ruchy: (k, A) => { if (k.flagi.audyt_zapowiedziany) A.ruch('dokumenty_wstecz'); },
-    sprawa: (k, s) => (s.sid === 'S_ubezpieczenie' ? { v: 'ankieta', p: { mfa: 'tak', edr: 'tak', kopie: 'tak' } } : undefined),
+    // Kłamstwa w sprawach kampanii — z jej pliku (automaty.klamca), reszta jak mądry.
+    sprawa: (k, s, A) => K.odpowiedzStylu('klamca', k, s, A),
   }),
   // Wszystko, co kosztuje godziny: polowanie, przeglądy co miesiąc, szkolenia działów.
   pracoholik: zMadrego({

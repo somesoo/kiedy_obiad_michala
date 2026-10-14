@@ -13,7 +13,7 @@
 //   nazwa, mies (czas realizacji), pln, h (Twoje godziny: brief, wywiady, odbiór)
 //   dzialy      — obciążenie ludzi (wywiady, dostęp do stacji)
 //   kontrole    — co doradca ocenia (brak → rekomendacja wdrożenia; działa → usterki, dryf, ustawienia)
-//   fakty(f)    — które fakty świata może znaleźć
+//   fakty(f, k) — które fakty świata może znaleźć (k: kampania — np. dział OT z jej pliku)
 //   obejscia(ini) — których obejść działów szuka (wywiady, skany)
 //   testuje     — kontrole, które doradca TESTUJE (wynik liczy się jako test — dowód dla audytu)
 //   ot          — sprawdza zgodność wariantów OT z producentem SCADA (jak pilotaż)
@@ -35,7 +35,7 @@ const TEMATY = {
     nazwa: 'Audyt bezpieczeństwa OT/SCADA (stacja, przepompownie, dostęp integratora)', mies: 2, pln: 38000, h: 10,
     dzialy: { produkcja: { zmeczenie: 0.1 } },
     kontrole: ['segmentacja', 'brama_dostepu', 'inwentaryzacja', 'backup', 'bcp', 'patch'],
-    fakty: f => f.na_obiekcie || f.widoczne_z_internetu || f.dostep_zdalny || f.zna === 'produkcja', obejscia: ini => !!ini.ryzyko?.wektory?.uslugi, ot: true,
+    fakty: (f, k) => f.na_obiekcie || f.widoczne_z_internetu || f.dostep_zdalny || (!!k.def.dzial_ot && f.zna === k.def.dzial_ot), obejscia: ini => !!ini.ryzyko?.wektory?.uslugi, ot: true,
   },
   ciaglosc: {
     nazwa: 'Ciągłość działania: kopie, odtwarzanie i praca ręczna (z testem odtworzenia)', mies: 2, pln: 26000, h: 8,

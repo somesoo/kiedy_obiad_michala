@@ -29,6 +29,12 @@ module.exports = {
   // godzin z profilu firmy (data/firmy.js → zespol.h_it to to, co oddają inni).
   h_gracza: 40,
 
+  // Reakcja na ostrzeżenie CERT o panelach HMI (zasada w proto/zasady.js) i dział, który prowadzi
+  // sieć przemysłową (obchód stacji, doradztwo OT).
+  reakcja_na_ostrzezenie: ['skan_ekspozycji', 'odetnij_hmi', 'wdroz:ekspozycja', 'wdroz:moje_cert', 'wdroz:asm', 'zlec_doradcy'],
+  reakcja_dlaczego: 'Ostrzeżenie z nazwą Twojego sektora to sygnał do działania od razu — panel HMI w internecie to dokładnie ten wzorzec.',
+  dzial_ot: 'produkcja',
+
   // ── DZIAŁY (agenci, docs/15-…) ──
   dzialy: {
     zarzad: {
@@ -105,7 +111,47 @@ module.exports = {
       prawda: true, na_obiekcie: true, zna: 'produkcja', wektory: { uslugi: 1.1 }, odkrywa_wdrozenie: ['inwentaryzacja'], naprawa: { ruch: 'zmien_pin' } },
     kopia_scada_u_integratora: { opis: 'projekty SCADA i programy sterowników są tylko na laptopie integratora',
       prawda: true, zna: 'produkcja', ciaglosc: true, naprawa: { ruch: 'wdroz:backup', p: { zakres: 'biuro_ot', nosnik: 'offline' } } },
-    oczyszczalnia_intruz: { opis: 'w sieci przejmowanej oczyszczalni od miesięcy siedzi broker dostępu', prawda: 0.6, widoczny_od_sprawy: 'S_przejecie' },
+    oczyszczalnia_intruz: { opis: 'w sieci przejmowanej oczyszczalni od miesięcy siedzi broker dostępu', prawda: 0.6, widoczny_od_sprawy: 'S_przejecie',
+      bez_naprawy: 'nie ma ruchu, który go „zamyka": wychodzi przy przeglądzie w sprawie S_przejecie, usuwa go polowanie albo izolacja sieci' },
+  },
+
+  // ── RUCHY TEJ KAMPANII (format data/ruchy.js): naprawy faktów, które istnieją tylko tutaj ──
+  ruchy: {
+    odetnij_hmi: {
+      nazwa: 'Odciąć panel HMI od internetu (zamknąć przekierowanie portu u integratora)',
+      ot: true, kategoria: 'ot', h: 4,
+      dostepny: (k, p, a) => a.faktDoNaprawy('hmi_wystawiony', 'nie wiesz, czy cokolwiek ze stacji jest w internecie — najpierw przegląd ekspozycji'),
+      wykonaj: (k, p, a) => {
+        a.napraw('hmi_wystawiony');
+        if (!a.dziala('brama_dostepu')) {
+          // Integrator traci drogę, którą serwisował zdalnie — stacja zacznie naciskać na „stały dostęp".
+          a.dzial('produkcja', { zaufanie: -0.05 });
+          a.presja('produkcja', 'zdalny_integrator', 0.4);
+          return 'Panel nie jest już widoczny z internetu. Integrator protestuje: „jak mamy teraz serwisować w nocy?".';
+        }
+        return 'Panel nie jest już widoczny z internetu; integrator łączy się przez bramę.';
+      },
+    },
+    zmien_pin: {
+      nazwa: 'Zmienić domyślne PIN-y i hasła sterowników i paneli (z automatykiem i integratorem)',
+      ot: true, kategoria: 'ot', h: 6,
+      dostepny: (k, p, a) => a.faktDoNaprawy('pin_domyslny', 'nie wiesz, jakie hasła mają sterowniki — najpierw obchód stacji albo inwentaryzacja'),
+      wykonaj: (k, p, a) => { a.napraw('pin_domyslny'); return 'PIN-y zmienione i zapisane w sejfie haseł; integrator dostał je imiennie.'; },
+    },
+    usun_narzedzie_zdalne: {
+      nazwa: 'Usunąć narzędzie zdalnej pomocy integratora ze stacji inżynierskiej',
+      ot: true, kategoria: 'ot', h: 2,
+      dostepny: (k, p, a) => a.faktDoNaprawy('narzedzie_zdalne_integratora', 'nie wiesz o żadnym narzędziu zdalnym na stacji — najpierw przegląd dostępów'),
+      wykonaj: (k, p, a) => {
+        a.napraw('narzedzie_zdalne_integratora');
+        if (!a.dziala('brama_dostepu')) {
+          a.dzial('produkcja', { zaufanie: -0.1 });
+          a.presja('produkcja', 'zdalny_integrator', 0.5);
+          return 'Narzędzie usunięte. Bez bramy dla dostawców integrator nie ma jak pomóc zdalnie — kierownik stacji jest wściekły.';
+        }
+        return 'Narzędzie usunięte; integrator przechodzi na bramę.';
+      },
+    },
   },
 
   // ── DECYZJE CYKLICZNE (data/cykliczne.js, proto/cykl.js) ──
@@ -239,7 +285,7 @@ module.exports = {
             const mn = { mfa_konta: { dostawca: 0.85 }, zgloszenia_24h: { dostawca: 0.95 }, prawo_audytu: { dostawca: 0.95 }, zakaz_przekierowan: { uslugi: 0.9, dostawca: 0.9 } };
             for (const x of kl) for (const [w, v] of Object.entries(mn[x] || {})) a.wektor(w, v);
             if (kl.includes('kopie_u_nas')) { a.napraw('kopia_scada_u_integratora'); a.flaga('kopie_ot_umowa', true); }
-            a.flaga('umowa_integratora', kl.length >= 3); a.flaga('klauzule_integratora', kl.length);
+            a.flaga('umowa_dostawcy', kl.length >= 3); a.flaga('klauzule_integratora', kl.length);
             a.dzial('produkcja', { zaufanie: kl.length <= 3 ? 0.05 : -0.05 });
             return `Umowa przedłużona z klauzulami: ${kl.join(', ')}.${kl.length > 3 ? ' Integrator kręci nosem, kierownik stacji też.' : ''}`;
           },
@@ -437,6 +483,141 @@ module.exports = {
     },
   },
 
+  // ── ZASADY SPRAW TEJ KAMPANII (proto/zasady.js → zasadyKampanii) ──
+  // Każda sprawa kampanii ma zasadę albo powód w `sprawy_bez_zasady` (walidator tego pilnuje).
+  zasady: [
+    { sprawa: 'S_przejecie', id: 'przejecie', waga: 2, cel: 'E8', wybierz: e => e.v !== 'przeglad',
+      opis: 'Przegląd przejmowanej sieci przed połączeniem', dlaczego: 'Przejmując firmę, przejmujesz też jej intruzów. Najpierw ocena i izolacja, potem połączenie.',
+      ocena: (e, k) => !!(k.flagi.oczyszczalnia_sprawdzona || k.flagi.oczyszczalnia_odlozona) },
+    { sprawa: 'S_umowa_integratora', id: 'umowa_integratora', waga: 1, cel: 'E8',
+      opis: 'Klauzule bezpieczeństwa w umowie z integratorem', dlaczego: 'Umowa to jedyne realne narzędzie wobec dostawcy; najlepszy moment na wymagania to odnowienie.',
+      ocena: (e, k) => (k.flagi.klauzule_integratora || 0) >= 3 },
+    { sprawa: 'S_noc_integrator', id: 'noc_integrator', waga: 2, cel: 'E8',
+      opis: 'Hasła nigdy przez telefon', dlaczego: 'Socjotechnika na zmianie nocnej to realny wzorzec. Weryfikacja innym kanałem kosztuje minutę.',
+      ocena: e => e.t === 'sprawa_zapobiegnieta' || ['oddzwon', 'odmow'].includes(e.v) },
+    { sprawa: 'S_falszywy_komunikat', id: 'dementi', waga: 2, cel: 'E10', wybierz: e => e.v !== 'zgloszenie',
+      opis: 'Dezinformacja zdementowana szybko, kilkoma kanałami, z danymi', dlaczego: 'Dezinformacja wygrywa czasem; cisza wygląda jak potwierdzenie.',
+      ocena: (e, k) => (k.flagi.dementi_kanaly || 0) >= 2 },
+    { sprawa: 'S_wodomierze', id: 'wodomierze', waga: 1, cel: 'E11',
+      opis: 'Nowy dostawca i nowe dane osobowe oceniane przed startem projektu', dlaczego: 'Bezpieczeństwo w projektowaniu kosztuje mało; dorabiane po wdrożeniu — dużo.',
+      ocena: (e, k) => ['ocena_dostawcy', 'umowa_powierzenia'].every(x => (k.flagi.wodomierze_srodki || []).includes(x)) },
+    { sprawa: 'S_emerytura', id: 'emerytura', waga: 1, cel: 'E12',
+      opis: 'Wiedza i hasła nie odchodzą razem z człowiekiem', dlaczego: 'Ryzyko jednej osoby to też bezpieczeństwo: dokumentacja i zmiana haseł po przekazaniu.',
+      ocena: (e, k) => ['dokumentacja', 'zmiana_hasel'].every(x => (k.flagi.emerytura_srodki || []).includes(x)) },
+    { sprawa: 'S_dwr', id: 'dwr', waga: 1, cel: 'E8', wybierz: e => e.t === 'sprawa_domyslnie',
+      opis: 'Lista urządzeń i plan na decyzję o dostawcy wysokiego ryzyka', dlaczego: 'Z ewidencją to godzina pracy; bez niej — panika w dniu decyzji.',
+      ocena: (e, k) => !!k.flagi.dwr_rozstrzygniete?.plan },
+    { sprawa: 'S_rozbudowa', id: 'rozbudowa', waga: 1, cel: 'E4',
+      opis: 'Nowe obiekty w ewidencji i procesach od pierwszego dnia',
+      dlaczego: 'Urządzenia podłączone „po swojemu" przez wykonawcę to shadow IT z publicznym adresem — najtaniej włączyć je w procesy na starcie.',
+      ocena: e => ['wlacz', 'przez_msp'].includes(e.v) },
+    { sprawa: 'S_ciecie', id: 'ciecie', waga: 1, cel: 'E1',
+      opis: 'Cięcie budżetu z pokazaniem skutków',
+      dlaczego: 'Zarząd może ciąć — ale powinien wiedzieć, jakie ryzyko przez to przyjmuje. Cisza oznacza, że przyjmuje je nieświadomie.',
+      ocena: e => ['argumentuj', 'zaproponuj'].includes(e.v) },
+    { sprawa: 'S_odejscie', id: 'odejscie', waga: 1, cel: 'E3',
+      opis: 'Odejście z IT ma zastępstwo (rekrutacja albo usługa)',
+      dlaczego: 'Gdy cudza praca spada na bezpieczeństwo, bezpieczeństwo przegrywa z drukarką — codziennie, po cichu.',
+      ocena: e => ['zatrudnij', 'msp'].includes(e.v) },
+  ],
+  sprawy_bez_zasady: {
+    S_budzet2027: 'ocenia ją zasada ogólna „wniosek budżetowy" (czasownik wniosek)',
+    S_ubezpieczenie: 'ocenia ją zasada ogólna „uczciwość" (kłamstwo w ankiecie trafia do rejestru)',
+  },
+
+  // ── AUTOMATY (laboratoria i testy; gracz ich nie widzi) — odpowiedzi stylów na sprawy tej kampanii ──
+  // Każda sprawa kampanii ma odpowiedź każdego stylu (walidator): lista decyzji (plan A, B…),
+  // funkcja (k, s, A) → lista, null (świadomie bez odpowiedzi) albo 'madry' (jak mądry).
+  automaty: {
+    madry: {
+      sprawy: {
+        S_budzet2027: (k, s, A) => [A.dziala('ryzyko') ? { v: 'wniosek', p: { kwota: 240000, uzasadnienie: 'ryzyko' } } : { v: 'wniosek', p: { kwota: 190000, uzasadnienie: 'potrzeby' } }],
+        S_przejecie: (k, s, A) => [!s.dane.przeglad && A.mozna(s, 'przeglad') ? { v: 'przeglad' } : s.dane.przeglad ? { v: 'polacz' } : { v: 'odloz' }],
+        S_umowa_integratora: () => [{ v: 'negocjuj', p: { klauzule: 'mfa_konta,kopie_u_nas,zakaz_przekierowan' } }],
+        // Uczciwie: „tak" tylko tam, gdzie to prawda; bez wszystkich trzech — odrzucić.
+        S_ubezpieczenie: (k, s, A) => {
+          const p = { mfa: A.dziala('mfa') && A.obiekt('mfa').param.zakres === 'wszyscy' ? 'tak' : 'nie', edr: A.dziala('edr') ? 'tak' : 'nie',
+            kopie: A.dziala('backup') && A.obiekt('backup').param.nosnik === 'offline' ? 'tak' : 'nie' };
+          return [Object.values(p).every(x => x === 'tak') ? { v: 'ankieta', p } : { v: 'odrzuc' }];
+        },
+        S_dwr: (k, s) => [!s.dane.lista ? { v: 'lista' } : !s.dane.plan ? { v: 'plan' } : !s.dane.odciete ? { v: 'odetnij' } : null],
+        S_wodomierze: () => [{ v: 'srodki', p: { srodki: 'ocena_dostawcy,umowa_powierzenia,mfa_dostawcy' } }],
+        S_emerytura: () => [{ v: 'srodki', p: { srodki: 'dokumentacja,zmiana_hasel,konta_imienne' } }],
+        S_falszywy_komunikat: () => [{ v: 'dementi', p: { kanaly: 'strona,sms_gminy,media,wyniki_badan' } }],
+        S_noc_integrator: () => [{ v: 'oddzwon' }],
+        S_rozbudowa: () => [{ v: 'wlacz' }],
+        S_ciecie: () => [{ v: 'argumentuj' }],
+        S_odejscie: (k, s, A) => [A.dziala('msp') ? { v: 'msp' } : null, { v: 'zatrudnij' }, { v: 'przejmij' }],
+      },
+    },
+    laik: {
+      // Laik: wdraża to, o czym słyszy, z domyślnymi ustawieniami (EDR „także na OT").
+      obserwacje: {
+        O_status: [['wpis_s46', { status: 'wazny' }]], O_cert: [['skan_ekspozycji']], O_haslo_poczta: [['wdroz:mfa']], O_kopie_ot: [['wdroz:backup']],
+        O_rachunki: [['wdroz:weryfikacja_platnosci']], O_praca_reczna: [['wdroz:plan_ir'], ['wdroz:bcp']], O_antywirus: [['wdroz:edr', { zakres: 'z_ot' }]],
+        O_router: [['wdroz:patch']], O_lista_obecnosci: [['wdroz:szkolenia', { forma: 'elearning' }]], O_szbi: [['wdroz:szbi']],
+        O_kierownik_szkolenie: [['szkolenie_kierownika']], O_pol_etatu: [['wdroz:msp', { umowa: 'standardowa' }]], O_audyt: [['plan_naprawczy']],
+        // [] = laik słyszy, ale nic z tym nie robi (świadomie — walidator wymaga każdej obserwacji).
+        O_wykaz: [], O_siec_plaska: [], O_zakupy: [],
+      },
+      sprawy: {
+        S_budzet2027: [{ v: 'wniosek', p: { kwota: 180000, uzasadnienie: 'potrzeby' } }], S_przejecie: [{ v: 'polacz' }], S_umowa_integratora: [{ v: 'przedluz' }],
+        S_ubezpieczenie: [{ v: 'odrzuc' }], S_dwr: (k, s) => [s.dane.lista ? null : { v: 'lista' }], S_wodomierze: [{ v: 'srodki', p: { srodki: 'umowa_powierzenia' } }],
+        S_emerytura: [{ v: 'srodki', p: { srodki: 'zmiana_hasel' } }], S_falszywy_komunikat: [{ v: 'dementi', p: { kanaly: 'strona' } }], S_noc_integrator: [{ v: 'odmow' }],
+        S_rozbudowa: [{ v: 'nic' }], S_ciecie: [{ v: 'przyjmij' }], S_odejscie: [{ v: 'przejmij' }],
+      },
+    },
+    // Robi to, co miłe zarządowi i działom.
+    potakiwacz: {
+      sprawy: {
+        S_budzet2027: [{ v: 'bez_wniosku' }], S_przejecie: [{ v: 'polacz' }], S_umowa_integratora: [{ v: 'przedluz' }],
+        S_wodomierze: [{ v: 'bez_udzialu' }], S_emerytura: [{ v: 'po_swojemu' }],
+        S_ubezpieczenie: 'madry', S_dwr: 'madry', S_falszywy_komunikat: 'madry', S_noc_integrator: 'madry',
+        S_rozbudowa: 'madry', S_ciecie: 'madry', S_odejscie: 'madry',
+      },
+    },
+    // Najtańsza odpowiedź albo żadna.
+    skapiec: {
+      sprawy: {
+        S_budzet2027: [{ v: 'bez_wniosku' }], S_przejecie: [{ v: 'odloz' }], S_umowa_integratora: [{ v: 'przedluz' }], S_ubezpieczenie: [{ v: 'odrzuc' }],
+        S_wodomierze: [{ v: 'bez_udzialu' }], S_emerytura: [{ v: 'po_swojemu' }], S_falszywy_komunikat: [{ v: 'dementi', p: { kanaly: 'strona' } }],
+        S_noc_integrator: [{ v: 'odmow' }], S_dwr: null, S_rozbudowa: null, S_ciecie: null, S_odejscie: null,
+      },
+    },
+    // Mądry, który kłamie tam, gdzie kłamstwo coś daje.
+    klamca: {
+      sprawy: {
+        S_ubezpieczenie: [{ v: 'ankieta', p: { mfa: 'tak', edr: 'tak', kopie: 'tak' } }],
+        S_budzet2027: 'madry', S_przejecie: 'madry', S_umowa_integratora: 'madry', S_dwr: 'madry', S_wodomierze: 'madry', S_emerytura: 'madry',
+        S_falszywy_komunikat: 'madry', S_noc_integrator: 'madry', S_rozbudowa: 'madry', S_ciecie: 'madry', S_odejscie: 'madry',
+      },
+    },
+  },
+
+  // ── CENNIK ZŁYCH DECYZJI (proto/cennik.js) ──
+  // przygotowanie: ruchy (prefiksy id) i decyzje w sprawach, które zmieniają start incydentu —
+  //   cennik liczy też grę „bez przygotowania do X" i błędy w incydencie w takiej grze.
+  // odstepstwa: zła odpowiedź na KAŻDĄ sprawę tej kampanii (walidator) — { sprawa, v, p }
+  //   (v: null = nie odpowiadać), albo { ruchy(k, A) } / { filtr(id, p) } dla ruchów.
+  przygotowanie: {
+    S03: { ruchy: ['skan_ekspozycji', 'przeglad_ot', 'przeglad_dostepow', 'wdroz:moje_cert'] },
+    S01: { ruchy: ['wdroz:weryfikacja_platnosci'] },
+  },
+  odstepstwa: {
+    'kłamstwo w ankiecie ubezpieczyciela': { sprawa: 'S_ubezpieczenie', v: 'ankieta', p: { mfa: 'tak', edr: 'tak', kopie: 'tak' } },
+    'nocny telefon: podać hasło': { sprawa: 'S_noc_integrator', v: 'podaj' },
+    'przejęcie: połączyć bez przeglądu': { sprawa: 'S_przejecie', v: 'polacz' },
+    'umowa z integratorem bez klauzul': { sprawa: 'S_umowa_integratora', v: 'przedluz' },
+    'wodomierze bez udziału bezpieczeństwa': { sprawa: 'S_wodomierze', v: 'bez_udzialu' },
+    'emerytura „po swojemu"': { sprawa: 'S_emerytura', v: 'po_swojemu' },
+    'dezinformacja: dementi tylko na stronie': { sprawa: 'S_falszywy_komunikat', v: 'dementi', p: { kanaly: 'strona' } },
+    'dostawca wysokiego ryzyka: nic nie robić': { sprawa: 'S_dwr', v: null },
+    'budżet 2027: bez wniosku': { sprawa: 'S_budzet2027', v: 'bez_wniosku' },
+    'rozbudowa „po swojemu" wykonawcy': { sprawa: 'S_rozbudowa', v: 'nic' },
+    'cięcie budżetu bez argumentów': { sprawa: 'S_ciecie', v: 'przyjmij' },
+    'odejście z IT: „przejmę sam"': { sprawa: 'S_odejscie', v: 'przejmij' },
+  },
+
   // ── OŚ KAMPANII (reżyser wybiera moment w oknie) ──
   // typ: incydent (scenariusze/<id>-*.incydent.js) · sprawa (sprawy powyżej) · termin · fala · final
   zdarzenia: [
@@ -453,7 +634,7 @@ module.exports = {
     { id: 'T_szbi', typ: 'termin', okno: [13, 13], ciezar: 0.3, opis: '3.04.2027 — termin wdrożenia obowiązków (SZBI)' },
     { id: 'S_dwr', typ: 'sprawa', okno: [14, 14], ciezar: 0.4, szansa: 0.3 },
     { id: 'S_wodomierze', typ: 'sprawa', okno: [15, 16], ciezar: 0.3 },
-    { id: 'F_haktywisci2', typ: 'fala', okno: [15, 20], ciezar: 0.8, opis: 'druga fala haktywistów: DDoS na e-BOK i próba na przepompownię' },
+    { id: 'F_haktywisci2', typ: 'fala', okno: [15, 20], ciezar: 0.8, opis: 'druga fala haktywistów: DDoS na e-BOK i próba na przepompownię', skutek: (k, a) => falaHaktywistow(k, a) },
     { id: 'S_emerytura', typ: 'sprawa', okno: [17, 17], ciezar: 0.3 },
     { id: 'S_falszywy_komunikat', typ: 'sprawa', okno: [19, 21], ciezar: 0.6 },
     // Zmiany firmy (rozwój, cięcia, odejścia) — decyzje, których nie da się „odhaczyć" na starcie.
@@ -468,6 +649,29 @@ module.exports = {
 };
 
 // ── Skutki spraw złożonych (wspólne dla czasownika i rozstrzygnięcia domyślnego) ──
+// Druga fala haktywistów: zamknięty panel i segmentacja decydują, czy to DDoS, czy zakłócenie wody.
+function falaHaktywistow(k, a) {
+  const st = k.st;
+  const chronione = a.dziala('segmentacja') || a.dziala('ot_monitoring');
+  const hmi = k.fakty.hmi_wystawiony;
+  const odciete = !hmi || !hmi.prawda || hmi.naprawiony;
+  let pln = 0, opis;
+  if (chronione && odciete) { opis = 'Druga fala haktywistów: próby odbite, krótki DDoS na e-BOK.'; a.wskaznik('reputacja', -1); }
+  else if (odciete) {
+    // Panel zamknięty, ale sieć płaska: napastnik dochodzi tylko do telemetrii przepompowni.
+    pln = (a.dziala('bcp') ? 0.25 : 0.5) * st.firma.koszt_dnia + 10000;
+    opis = 'Druga fala haktywistów: krótkie zakłócenie telemetrii przepompowni (sieć bez segmentacji).';
+    a.strata(pln, 'sabotaz'); a.wskaznik('reputacja', -2);
+    k.incydenty.push({ m: st.m, rodzaj: 'fala haktywistów (drobna)', pln });
+  } else {
+    pln = 2 * st.firma.koszt_dnia * (a.dziala('bcp') ? 0.5 : 1) + 50000;
+    opis = 'Druga fala haktywistów: zakłócenie pracy przepompowni przez wystawione urządzenia.';
+    a.strata(pln, 'sabotaz');
+    k.flagi.incydent_powazny = true; a.wskaznik('reputacja', -8);
+    k.incydenty.push({ m: st.m, rodzaj: 'fala haktywistów', pln });
+  }
+  k.log('swiat', opis);
+}
 // Rozbudowa „po swojemu": urządzenia poza ewidencją, telemetria z publicznym IP od wykonawcy.
 function skutkiRozbudowy(a) {
   a.nieznane(13);

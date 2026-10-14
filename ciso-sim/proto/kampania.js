@@ -86,6 +86,7 @@ function walidujKampanie(def) {
   for (const e of def.koniec_wsparcia || []) {
     if (!e.id || !e.nazwa || !e.opis || !(e.m >= 1) || !e.wektory || !(e.pln >= 0) || !(e.pln_wsparcie >= 0)) b.push(`koniec wsparcia ${e.id || '?'}: id, nazwa, opis, m, wektory, pln, pln_wsparcie`);
   }
+  b.push(...kontraktKampanii(def, firma));
   for (const z of def.zdarzenia) {
     okno(z.okno, `zdarzenie ${z.id}`);
     if (!['incydent', 'sprawa', 'termin', 'fala', 'final'].includes(z.typ)) b.push(`zdarzenie ${z.id}: typ ${z.typ}`);
@@ -94,6 +95,81 @@ function walidujKampanie(def) {
       try { b.push(...I.waliduj(I.wczytaj(z.id)).map(x => `incydent ${z.id}: ${x}`)); } catch (e) { b.push(`zdarzenie ${z.id}: ${e.message}`); }
     }
   }
+  return b;
+}
+
+// ── KONTRAKT KAMPANII: plik wejściowy musi pokrywać wszystko (docs/20-…) ──
+// Silnik nie zna żadnej kampanii. Wszystko, czego potrzebuje gra, laboratoria, automaty i cennik,
+// jest w pliku kampanii — a ta funkcja pilnuje, żeby niczego nie zabrakło. Każdy brak to wiersz
+// z powodem; kampania z brakami nie wystartuje (nowaKampania) i nie przejdzie testów.
+const STYLE_AUTOMATOW = ['madry', 'laik', 'potakiwacz', 'skapiec', 'klamca'];
+const DZIALY_WYMAGANE = { zarzad: 'raport dla zarządu, szkolenie kierownika', kadry: 'przegląd kont z kadrami', finanse: 'skutki wyłudzeń (S01)' };
+// Sprawy kampanii, które odstępstwo obejmuje: { sprawa: sid, v } albo { sprawy: { sid: { v } } } (cennik).
+const sprawyOdstepstwa = o => (typeof o.sprawa === 'string' ? [o.sprawa] : Object.keys(o.sprawy || {}));
+function kontraktKampanii(def, firma) {
+  const b = [];
+  const brak = (warunek, tekst) => { if (!warunek) b.push(`kontrakt: ${tekst}`); };
+  for (const n of ['tytul', 'rola', 'miesiecy', 'h_gracza']) brak(def[n], `brak pola ${n}`);
+  brak(def.start?.rok && def.start?.miesiac, 'brak start: { rok, miesiac }');
+  brak((def.wstep || []).length >= 2, 'wstęp (wstep) ma mieć co najmniej 2 zdania');
+  brak(['mandat', 'reputacja', 'morale'].every(n => def.wskazniki?.[n] >= 0), 'wskazniki: mandat, reputacja, morale');
+  brak(def.budzet?.[def.start?.rok] > 0, 'budzet na pierwszy rok');
+  brak((def.reakcja_na_ostrzezenie || []).length, 'reakcja_na_ostrzezenie: ruchy, które są reakcją na ostrzeżenie dla sektora');
+  if (firma?.ot) brak(def.dzial_ot && def.dzialy?.[def.dzial_ot], 'firma z OT: dzial_ot (dział, który prowadzi sieć przemysłową)');
+  // Działy
+  const dz = Object.entries(def.dzialy || {});
+  brak(dz.length >= 3, 'co najmniej 3 działy');
+  for (const [id, why] of Object.entries(DZIALY_WYMAGANE)) brak(def.dzialy?.[id], `brak działu „${id}" (silnik go używa: ${why})`);
+  for (const [id, d] of dz) for (const n of ['nazwa', 'szef', 'osobowosc', 'cele', 'kpi']) brak(d[n], `dział ${id}: brak ${n}`);
+  // Fakty: jak się je odkrywa i jak zamyka
+  const KANALY = ['widoczne_z_internetu', 'dostep_zdalny', 'na_obiekcie', 'zna', 'konta', 'uprawnienia', 'odkrywa_wdrozenie', 'widoczny_od_sprawy', 'ciaglosc'];
+  brak(Object.keys(def.fakty || {}).length >= 2, 'co najmniej 2 fakty świata do odkrycia');
+  for (const [id, f] of Object.entries(def.fakty || {})) {
+    brak(KANALY.some(c => f[c]), `fakt ${id}: brak drogi odkrycia (${KANALY.join(' | ')})`);
+    brak(f.naprawa || f.naprawia_wdrozenie || f.bez_naprawy, `fakt ${id}: brak naprawy (naprawa: { ruch }, naprawia_wdrozenie albo bez_naprawy: 'dlaczego')`);
+    const r = f.naprawa?.ruch;
+    if (r) brak(r.startsWith('wdroz:') ? S.kontrola[r.slice(6)] : def.ruchy?.[r] || RU.RUCHY[r], `fakt ${id}: ruch naprawy „${r}" nie istnieje`);
+    if (f.naprawa?.po) brak(S.kontrola[f.naprawa.po], `fakt ${id}: naprawa.po — nieznana kontrola`);
+  }
+  for (const [id, r] of Object.entries(def.ruchy || {})) {
+    brak(r.nazwa && r.kategoria && typeof r.wykonaj === 'function', `ruch kampanii ${id}: nazwa, kategoria, wykonaj`);
+    brak(!('ocena' in r) && !('pkt' in r), `ruch kampanii ${id}: ruchy nie mają ocen`);
+  }
+  for (const id of Object.keys(def.kupione || {})) brak(S.kontrola[id], `kupione: nieznana kontrola ${id}`);
+  // Obserwacje: status, ostrzeżenie dla sektora, zapowiedź audytu
+  const obs = Object.values(def.obserwacje || {});
+  brak(obs.some(o => o.wymuszona && o.okno?.[0] === 1), 'obserwacja wymuszona w m. 1 (status / punkt wyjścia)');
+  brak(obs.some(o => o.flaga === 'ostrzezenie_cert'), 'obserwacja z flaga: ostrzezenie_cert (ostrzeżenie dla sektora — zasada reakcji)');
+  brak(obs.some(o => o.flaga === 'audyt_zapowiedziany'), 'obserwacja z flaga: audyt_zapowiedziany (pokusa dokumentów wstecz przed audytem)');
+  // Decyzje cykliczne
+  brak((def.certyfikaty || []).length >= 2, 'co najmniej 2 certyfikaty/domeny (decyzje cykliczne)');
+  brak((def.koniec_wsparcia || []).length >= 1, 'co najmniej 1 koniec wsparcia (decyzje cykliczne)');
+  // Oś: incydent, finał, termin SZBI, fale ze skutkiem
+  const zd = def.zdarzenia || [];
+  brak(zd.some(z => z.typ === 'incydent'), 'na osi co najmniej 1 incydent');
+  brak(zd.filter(z => z.typ === 'final').length === 1, 'na osi dokładnie 1 zdarzenie final (audyt zamykający)');
+  if (['wazny', 'kluczowy'].includes(firma?.status_ksc)) brak(zd.some(z => z.typ === 'termin'), 'podmiot w KSC: termin SZBI na osi (typ termin)');
+  for (const z of zd.filter(x => x.typ === 'fala')) brak(typeof z.skutek === 'function', `fala ${z.id}: brak skutek(k, a)`);
+  // Incydenty z osi: przygotowanie (cennik liczy grę bez niego)
+  for (const z of zd.filter(x => x.typ === 'incydent')) brak((def.przygotowanie?.[z.id]?.ruchy || []).length, `incydent ${z.id}: przygotowanie.${z.id}.ruchy (co zmienia jego start)`);
+  // Sprawy kampanii: automaty każdego stylu, zasada, odstępstwo
+  const wlasne = Object.keys(def.sprawy || {}).filter(sid => !CYKLICZNE.sprawy[sid]);
+  brak(wlasne.length >= 3, 'co najmniej 3 sprawy kampanii');
+  const zasadySpraw = new Set((def.zasady || []).filter(z => typeof z === 'object').map(z => z.sprawa));
+  const odstSpraw = new Set(Object.values(def.odstepstwa || {}).flatMap(sprawyOdstepstwa));
+  for (const sid of wlasne) {
+    for (const st of STYLE_AUTOMATOW) brak(sid in (def.automaty?.[st]?.sprawy || {}), `sprawa ${sid}: brak odpowiedzi automatu „${st}" (automaty.${st}.sprawy; null = świadomie bez odpowiedzi, 'madry' = jak mądry)`);
+    brak(zasadySpraw.has(sid) || def.sprawy_bez_zasady?.[sid], `sprawa ${sid}: brak zasady (zasady: { sprawa: '${sid}', … }) albo powodu w sprawy_bez_zasady`);
+    brak(odstSpraw.has(sid), `sprawa ${sid}: brak odstępstwa dla cennika (odstepstwa: { sprawa: '${sid}', v })`);
+  }
+  for (const st of STYLE_AUTOMATOW) for (const sid of Object.keys(def.automaty?.[st]?.sprawy || {})) brak(def.sprawy?.[sid], `automaty.${st}: nieznana sprawa ${sid}`);
+  for (const z of (def.zasady || []).filter(x => typeof x === 'object')) {
+    brak(def.sprawy?.[z.sprawa], `zasada ${z.id}: nieznana sprawa ${z.sprawa}`);
+    brak(z.id && z.opis && z.dlaczego && z.cel && z.waga > 0 && typeof z.ocena === 'function', `zasada ${z.id || '?'}: id, opis, dlaczego, cel, waga, ocena`);
+  }
+  // Laik reaguje (albo świadomie nie) na każdą obserwację
+  for (const id of Object.keys(def.obserwacje || {})) brak(id in (def.automaty?.laik?.obserwacje || {}), `obserwacja ${id}: brak reakcji laika (automaty.laik.obserwacje; [] = nie reaguje)`);
+  brak(Object.keys(def.odstepstwa || {}).length >= wlasne.length, 'odstępstwa: co najmniej jedno na każdą sprawę kampanii');
   return b;
 }
 
@@ -295,8 +371,8 @@ function zamknijMiesiac(k) {
   for (const z of k.zdarzenia) {
     intensywnosc += z.ciezar || 0;
     if (z.typ === 'termin') terminSzbi(k);
-    // Fala ze skutkiem opisanym w pliku kampanii (np. wybory w gminie) albo domyślna — haktywiści na OT.
-    if (z.typ === 'fala') (z.skutek ? z.skutek(k, RU.api(k)) : falaHaktywistow(k));
+    // Fala ze skutkiem opisanym w pliku kampanii (haktywiści na OT w Wodniku, wybory w gminie).
+    if (z.typ === 'fala') z.skutek(k, RU.api(k));
     if (z.typ === 'final') k.log('zarzad', 'Rada nadzorcza: audyt zamykający na koniec kampanii.');
   }
   k.tarcie = RU.tarcie(k);
@@ -432,29 +508,6 @@ function terminSzbi(k) {
   else { k.flagi.szbi_po_terminie = true; k.wskazniki.mandat = przytnij(k.wskazniki.mandat - 5); k.log('termin', 'Minął termin SZBI (3.04.2027) — obowiązki niewdrożone.'); }
 }
 
-function falaHaktywistow(k) {
-  const st = k.st;
-  const chronione = S.dziala(st, 'segmentacja') || S.dziala(st, 'ot_monitoring');
-  const hmi = k.fakty.hmi_wystawiony;
-  const odciete = !hmi || !hmi.prawda || hmi.naprawiony;
-  let pln = 0, opis;
-  if (chronione && odciete) { opis = 'Druga fala haktywistów: próby odbite, krótki DDoS na e-BOK.'; k.wskazniki.reputacja = przytnij(k.wskazniki.reputacja - 1); }
-  else if (odciete) {
-    // Panel zamknięty, ale sieć płaska: napastnik dochodzi tylko do telemetrii przepompowni.
-    pln = (S.dziala(st, 'bcp') ? 0.25 : 0.5) * st.firma.koszt_dnia + 10000;
-    opis = 'Druga fala haktywistów: krótkie zakłócenie telemetrii przepompowni (sieć bez segmentacji).';
-    st.w.straty += pln; st.w.szczegoly.sabotaz = (st.w.szczegoly.sabotaz || 0) + pln;
-    k.wskazniki.reputacja = przytnij(k.wskazniki.reputacja - 2);
-    k.incydenty.push({ m: st.m, rodzaj: 'fala haktywistów (drobna)', pln });
-  } else {
-    pln = 2 * st.firma.koszt_dnia * (S.dziala(st, 'bcp') ? 0.5 : 1) + 50000;
-    opis = 'Druga fala haktywistów: zakłócenie pracy przepompowni przez wystawione urządzenia.';
-    st.w.straty += pln; st.w.szczegoly.sabotaz = (st.w.szczegoly.sabotaz || 0) + pln;
-    k.flagi.incydent_powazny = true; k.wskazniki.reputacja = przytnij(k.wskazniki.reputacja - 8);
-    k.incydenty.push({ m: st.m, rodzaj: 'fala haktywistów', pln });
-  }
-  k.log('swiat', opis);
-}
 
 // ── AUDYT ZAMYKAJĄCY (z dowodami) ──
 // Audytor patrzy na to, co DZIAŁA, jak dobrze (próbki — także ukryte usterki), czy są DOWODY
@@ -478,7 +531,8 @@ function ocenaKontroli(k) {
     ['Szacowanie ryzyka', d('ryzyko') ? (dowod('ryzyko') || st.m - o('ryzyko').dzialaOd <= 12 ? 'zgodny' : 'drobna') : 'glowna'],
     ['Incydenty i zgłoszenia', d('plan_ir') ? (o('plan_ir').ostTest !== null && !(f.incydent_powazny && !f.zgloszone_w_terminie) ? 'zgodny' : 'drobna') : 'glowna'],
     ['Ciągłość działania', d('backup') ? (o('backup').ostTest !== null && d('bcp') ? (f.kopie_ot || f.kopie_ot_umowa || !st.firma.ot ? 'zgodny' : 'drobna') : 'drobna') : 'glowna'],
-    ['Łańcuch dostaw', d('dostawcy') || f.umowa_integratora ? 'zgodny' : d('brama_dostepu') ? 'drobna' : 'glowna'],
+    // `umowa_dostawcy`: klauzule bezpieczeństwa w umowie z kluczowym dostawcą (sprawa kampanii).
+    ['Łańcuch dostaw', d('dostawcy') || f.umowa_dostawcy ? 'zgodny' : d('brama_dostepu') ? 'drobna' : 'glowna'],
     ['Dostęp i tożsamość', d('mfa') ? (o('mfa').sk.wyjatki.every(w => k.akceptacje[`wyjatek:${w}`] !== undefined) ? 'zgodny' : 'drobna') : 'glowna'],
     ['Podatności', d('patch') || d('skaner_podatnosci') ? 'zgodny' : d('ekspozycja') ? 'drobna' : 'glowna'],
     ['Monitorowanie', d('edr') || d('mdr') || d('siem') || d('siem_os') ? (d('edr') && !d('mdr') && o('edr').param.tryb === 'wykrywaj' ? 'drobna' : 'zgodny') : 'glowna'],
@@ -760,6 +814,7 @@ function apiAuto(k) {
     ruch: (id, p = {}) => (RU.dostepny(k, id, p) ? null : RU.wykonaj(k, id, p)),
     dostepny: (id, p = {}) => RU.dostepny(k, id, p),
     sprawa: (s, v, p = {}) => (SP.dostepnyCzasownik(k, s, v, p) ? null : SP.odpowiedz(k, s.id, v, p)),
+    mozna: (s, v, p = {}) => !SP.dostepnyCzasownik(k, s, v, p),
     inc: aid => (k.incydent && !I.dostepnaAkcja(k, aid) ? incydentAkcja(k, aid) : null),
     czekaj: h => (k.incydent ? incydentCzekaj(k, h) : null),
     znany: id => !!(k.fakty[id]?.znany && !k.fakty[id].naprawiony),
@@ -785,15 +840,9 @@ function najlepszeWarunki(k, s, A) {
   return best?.ids;
 }
 
-const PLAYBOOK = {
-  S01: s => (s.udaremnione ? ['telefon_kontrahent', 'zgloszenie_cert', 'pochwala', 'przeglad_skrzynek', 'zabezpiecz_skrzynki', 'zgloszenie_uodo']
-    : ['bank', 'telefon_kontrahent', 'zawiadomienie', 'przeglad_skrzynek', 'zabezpiecz_skrzynki', 'zgloszenie_uodo', 'zgloszenie_cert', 'procedura']),
-  S03: s => (s.proba ? ['przeglad_ekspozycji', 'usun_furtke', 'csirt']
-    : ['proces_reczny', 'odetnij', 'probki', 'komunikat_prawda', 'csirt', 'dowody', 'zmien_pin', 'odtworz_konfiguracje', 'przeglad_ekspozycji', 'usun_furtke']),
-  S07: s => (s.proba ? ['zabezpiecz_logi', 'przeglad_kont_wszystkich', 'zgloszenie_csirt']
-    : ['odbierz_dostep', 'tryb_papierowy', 'komunikat_mieszkancy', 'zabezpiecz_logi', 'rozmowa_z_wojtem', 'odblokuj_konta', 'przywroc_dane',
-      'zgloszenie_csirt', 'ocena_rodo', 'zawiadomienie', 'przeglad_kont_wszystkich']),
-};
+// Plany incydentów żyją w plikach incydentów (`automaty.wzorcowo`, `automaty.laik`) — incydent
+// jest kompletny sam w sobie i działa w każdej kampanii, która go ma na osi.
+const planIncydentu = (id, styl, s) => I.wczytaj(id).automaty[styl](s);
 
 // Pierwsza dostępna odpowiedź z listy (budżet, godziny, wymagania) — jak człowiek, który ma
 // plan A, B i C, zamiast zostawiać sprawę do terminu, gdy plan A nie przejdzie.
@@ -810,19 +859,29 @@ function madraCykliczna(k, s, A) {
     C_eol: () => [{ v: 'izoluj' }, { v: 'modernizuj', p: { tryb: 'z_pilotazem' } }, { v: 'wsparcie' }, { v: 'akceptuj' }],
     C_alerty: () => [{ v: 'mdr' }, { v: 'strojenie' }],
     C_kolejka: () => [{ v: 'msp' }, { v: 'priorytety' }],
-    S_rozbudowa: () => [{ v: 'wlacz' }],
-    S_ciecie: () => [{ v: 'argumentuj' }],
-    S_odejscie: () => [A.dziala('msp') ? { v: 'msp' } : null, { v: 'zatrudnij' }, { v: 'przejmij' }],
   }[s.sid];
   return plany ? pierwszaDostepna(k, s, plany()) : undefined;
 }
 
-// Sprawy z kampanii — odpowiedzi „mądre" (uczciwe, z priorytetami i budżetem).
+// Odpowiedź danego stylu na sprawę z pliku kampanii (`automaty.<styl>.sprawy[sid]`):
+// funkcja (k, s, A) albo lista decyzji (plan A, B, C…) → pierwsza dostępna; null — świadomie
+// bez odpowiedzi (termin rozstrzygnie); 'madry' — tak jak mądry. undefined: kampania nie ma tej
+// sprawy w mapie (sprawy cykliczne, prośby, odkrycia, sygnały — obsługuje je styl ogólnie).
+function odpowiedzStylu(styl, k, s, A) {
+  const m = k.def.automaty?.[styl]?.sprawy;
+  if (!m || !(s.sid in m)) return undefined;
+  const x = m[s.sid];
+  if (x === 'madry') return styl === 'madry' ? null : madraSprawa(k, s, A);
+  if (x === null) return null;
+  return pierwszaDostepna(k, s, typeof x === 'function' ? x(k, s, A) : x);
+}
+
+// Sprawy — odpowiedzi „mądre" (uczciwe, z priorytetami i budżetem). Sprawy kampanii: z jej pliku.
 function madraSprawa(k, s, A) {
   const cyk = madraCykliczna(k, s, A);
   if (cyk !== undefined) return cyk;
-  const zKampanii = k.def.automaty?.madry?.sprawy?.[s.sid];
-  if (zKampanii) return pierwszaDostepna(k, s, zKampanii(k, s, A));
+  const zKampanii = odpowiedzStylu('madry', k, s, A);
+  if (zKampanii !== undefined) return zKampanii;
   if (s.rodzaj === 'prosba') {
     if (D.ciezarRyzyka(INICJATYWY[s.ini]) < 0.1) return { v: 'zgoda' };
     const w = najlepszeWarunki(k, s, A);
@@ -830,26 +889,11 @@ function madraSprawa(k, s, A) {
   }
   if (s.rodzaj === 'odkrycie') { const w = najlepszeWarunki(k, s, A); return w ? { v: 'legalizuj', p: { warunki: w.join(',') } } : { v: 'wylacz' }; }
   if (s.rodzaj === 'sygnal') return A.dziala('mdr') ? { v: 'przekaz_mdr' } : { v: 'zbadaj' };
-  const sw = {
-    S_budzet2027: () => (A.dziala('ryzyko') ? { v: 'wniosek', p: { kwota: 240000, uzasadnienie: 'ryzyko' } } : { v: 'wniosek', p: { kwota: 190000, uzasadnienie: 'potrzeby' } }),
-    S_przejecie: () => (!s.dane.przeglad && !SP.dostepnyCzasownik(k, s, 'przeglad') ? { v: 'przeglad' } : s.dane.przeglad ? { v: 'polacz' } : { v: 'odloz' }),
-    S_umowa_integratora: () => ({ v: 'negocjuj', p: { klauzule: 'mfa_konta,kopie_u_nas,zakaz_przekierowan' } }),
-    S_ubezpieczenie: () => {
-      const p = { mfa: A.dziala('mfa') && A.obiekt('mfa').param.zakres === 'wszyscy' ? 'tak' : 'nie', edr: A.dziala('edr') ? 'tak' : 'nie',
-        kopie: A.dziala('backup') && A.obiekt('backup').param.nosnik === 'offline' ? 'tak' : 'nie' };
-      return Object.values(p).every(x => x === 'tak') ? { v: 'ankieta', p } : { v: 'odrzuc' };
-    },
-    S_dwr: () => (!s.dane.lista ? { v: 'lista' } : !s.dane.plan ? { v: 'plan' } : !s.dane.odciete ? { v: 'odetnij' } : null),
-    S_wodomierze: () => ({ v: 'srodki', p: { srodki: 'ocena_dostawcy,umowa_powierzenia,mfa_dostawcy' } }),
-    S_emerytura: () => ({ v: 'srodki', p: { srodki: 'dokumentacja,zmiana_hasel,konta_imienne' } }),
-    S_falszywy_komunikat: () => ({ v: 'dementi', p: { kanaly: 'strona,sms_gminy,media,wyniki_badan' } }),
-    S_noc_integrator: () => ({ v: 'oddzwon' }),
-  }[s.sid];
-  return sw ? sw() : null;
+  return null;
 }
 function madryIncydent(k, A) {
   const inc = k.incydent;
-  for (const a of PLAYBOOK[inc.id](inc.s)) { if (!k.incydent) return; A.inc(a); }
+  for (const a of planIncydentu(inc.id, 'wzorcowo', inc.s)) { if (!k.incydent) return; A.inc(a); }
 }
 
 // Rozmowy po kolei ze wszystkimi działami kampanii.
@@ -909,28 +953,17 @@ function madreRuchy(k, A) {
   k.def.automaty?.madry?.ruchy?.(k, A);
 }
 
-// Rozsądny laik: dobre intencje, wdraża to, o czym słyszy, z domyślnymi ustawieniami; nie robi
-// rozpoznania, pilotaży, testów ani przeglądów — „wdrożone = działa".
-const OBSERWACJA_NA_RUCH = {
-  O_status: [['wpis_s46', { status: 'wazny' }]], O_cert: [['skan_ekspozycji']], O_haslo_poczta: [['wdroz:mfa']], O_kopie_ot: [['wdroz:backup']],
-  O_rachunki: [['wdroz:weryfikacja_platnosci']], O_praca_reczna: [['wdroz:plan_ir'], ['wdroz:bcp']], O_antywirus: [['wdroz:edr', { zakres: 'z_ot' }]],
-  O_router: [['wdroz:patch']], O_lista_obecnosci: [['wdroz:szkolenia', { forma: 'elearning' }]], O_szbi: [['wdroz:szbi']],
-  O_kierownik_szkolenie: [['szkolenie_kierownika']], O_pol_etatu: [['wdroz:msp', { umowa: 'standardowa' }]], O_audyt: [['plan_naprawczy']],
-};
+// Rozsądny laik: dobre intencje, wdraża to, o czym słyszy (obserwacje — reakcje z pliku kampanii,
+// `automaty.laik.obserwacje`), z domyślnymi ustawieniami; nie robi rozpoznania, pilotaży, testów
+// ani przeglądów — „wdrożone = działa".
 
-// Jak incydent prowadzi laik: z dobrymi intencjami, w złej kolejności.
-const PLAN_LAIKA = {
-  S01: () => ['zebranie', 'bank', 'przeglad_skrzynek', 'procedura'],
-  S03: s => (s.proba ? ['csirt'] : ['integrator_zdalnie', 'proces_reczny', 'odetnij', 'komunikat_prawda', 'csirt']),
-  S07: s => (s.proba ? ['przeglad_kont_wszystkich'] : ['telefon_do_zleceniobiorcy', 'odblokuj_konta', 'odbierz_dostep', 'komunikat_mieszkancy']),
-};
 
 const AUTO = {
   madry: { ruchy: madreRuchy, sprawa: madraSprawa, incydent: madryIncydent },
   rozsadny: {
     ruchy: (k, A) => {
       k.zaleglosci = k.zaleglosci || [];
-      const reakcje = { ...OBSERWACJA_NA_RUCH, ...(k.def.automaty?.laik?.obserwacje || {}) };
+      const reakcje = k.def.automaty?.laik?.obserwacje || {};
       for (const o of k.obserwacje) k.zaleglosci.push(...(reakcje[o.id] || []));
       k.zaleglosci = k.zaleglosci.filter(([id, p]) => !A.ruch(id, p || {}) && !String(RU.dostepny(k, id, p || {})).startsWith('już'));
       // Laik zamyka drzwi, o których się dowiedział — ale tylko te „oczywiste" (bez czekania na bramę).
@@ -942,18 +975,13 @@ const AUTO = {
       if (s.rodzaj === 'sygnal') return { v: 'zbadaj' };
       // Laik: odnawia jak leci, modernizuje „od razu", zatrudnia, gdy coś nie działa.
       const cyk = { C_odnowienie: [{ v: 'przedluz' }], C_certyfikat: [{ v: 'odnow' }], C_eol: [{ v: 'modernizuj', p: { tryb: 'od_razu' } }, { v: 'zostaw' }],
-        C_alerty: [{ v: 'zatrudnij' }, { v: 'zostaw' }], C_kolejka: [{ v: 'nadgodziny' }], S_rozbudowa: [{ v: 'nic' }], S_ciecie: [{ v: 'przyjmij' }],
-        S_odejscie: [{ v: 'przejmij' }] }[s.sid];
+        C_alerty: [{ v: 'zatrudnij' }, { v: 'zostaw' }], C_kolejka: [{ v: 'nadgodziny' }] }[s.sid];
       if (cyk) return pierwszaDostepna(k, s, cyk);
-      const zKampanii = k.def.automaty?.laik?.sprawy?.[s.sid];
-      if (zKampanii) return pierwszaDostepna(k, s, typeof zKampanii === 'function' ? zKampanii(k, s, A) : zKampanii);
-      return ({ S_budzet2027: { v: 'wniosek', p: { kwota: 180000, uzasadnienie: 'potrzeby' } }, S_przejecie: { v: 'polacz' }, S_umowa_integratora: { v: 'przedluz' },
-        S_ubezpieczenie: { v: 'odrzuc' }, S_dwr: s.dane.lista ? null : { v: 'lista' }, S_wodomierze: { v: 'srodki', p: { srodki: 'umowa_powierzenia' } },
-        S_emerytura: { v: 'srodki', p: { srodki: 'zmiana_hasel' } }, S_falszywy_komunikat: { v: 'dementi', p: { kanaly: 'strona' } }, S_noc_integrator: { v: 'odmow' } })[s.sid] || null;
+      return odpowiedzStylu('laik', k, s, A) ?? null;
     },
     incydent: (k, A) => {
       const inc = k.incydent;
-      const plan = PLAN_LAIKA[inc.id](inc.s);
+      const plan = planIncydentu(inc.id, 'laik', inc.s);
       for (const a of plan) { if (!k.incydent) return; A.inc(a); }
     },
   },
@@ -972,7 +1000,20 @@ async function grajAuto(nazwa, seed, szczegoly, wypisz = console.log, podsumuj =
   strat.reset?.(seed);
   const k = nowaKampania(defId, seed);
   const A = apiAuto(k);
+  const sprawy = pilne => {
+    for (const s of [...k.sprawy]) {
+      if (!k.sprawy.includes(s) || !strat.sprawa || (pilne && s.termin > k.st.m)) continue;
+      for (let i = 0; i < 4 && k.sprawy.includes(s); i++) {        // sprawy wieloetapowe (przegląd → połączenie)
+        const d = strat.sprawa(k, s, A);
+        if (!d || !A.sprawa(s, d.v, d.p || {})) break;
+      }
+    }
+  };
   while (!k.koniec) {
+    // Najpierw sprawy z terminem w tym miesiącu (nocny telefon, kontrola) — inaczej godziny
+    // zjadają zaplanowane ruchy, a pilna sprawa przechodzi na rozstrzygnięcie domyślne,
+    // czego żaden gracz przy zdrowych zmysłach by nie zrobił (test „mądry odpowiada").
+    sprawy(true);
     strat.ruchy?.(k, A);
     for (const z of k.zdarzenia.filter(x => x.typ === 'incydent' && !x.zagrane)) {
       if (!strat.incydent) continue;
@@ -980,13 +1021,7 @@ async function grajAuto(nazwa, seed, szczegoly, wypisz = console.log, podsumuj =
       strat.incydent(k, A);
       if (k.incydent) incydentZakoncz(k);
     }
-    for (const s of [...k.sprawy]) {
-      if (!k.sprawy.includes(s) || !strat.sprawa) continue;
-      for (let i = 0; i < 4 && k.sprawy.includes(s); i++) {        // sprawy wieloetapowe (przegląd → połączenie)
-        const d = strat.sprawa(k, s, A);
-        if (!d || !A.sprawa(s, d.v, d.p || {})) break;
-      }
-    }
+    sprawy(false);
     if (szczegoly) {
       wypisz(`m.${String(k.st.m).padStart(2)} ${nazwaMiesiaca(k).padEnd(16)} mandat ${String(Math.round(k.wskazniki.mandat)).padStart(3)} rep ${String(Math.round(k.wskazniki.reputacja)).padStart(3)} | ` +
         `h ${k.hKart} | sprawy ${k.sprawy.length} | obiekty ${Object.values(k.obiekty).filter(o => o.stan === 'dziala').length}`);
@@ -1125,7 +1160,7 @@ async function main() {
 module.exports = {
   walidujKampanie, pelnaDefinicja, nowaKampania, zamknijMiesiac, rozpocznijIncydent, incydentAkcja, incydentCzekaj, incydentZakoncz,
   ujawnij, ocenaKontroli, indeksOdpornosci, ekspozycja, coJesli, jakoscDecyzji, BRAMKI, KLUCZOWE, podsumowanie, widokRuchow, widokSpraw,
-  apiAuto, najlepszeWarunki, madraSprawa, pierwszaDostepna, madreRuchy, madryIncydent, PLAYBOOK, AUTO, grajAuto, wykonajAkcje, odtworz,
+  sprawyOdstepstwa, apiAuto, najlepszeWarunki, madraSprawa, odpowiedzStylu, pierwszaDostepna, madreRuchy, madryIncydent, planIncydentu, AUTO, grajAuto, wykonajAkcje, odtworz,
 };
 
 // Po module.exports: moduły ładowane leniwie (doradztwo → kampania.coJesli) muszą widzieć eksporty,

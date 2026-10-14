@@ -202,6 +202,20 @@ module.exports = {
       ocen: s => (s.proba ? null : s.wojt ? 'spelniona' : 'naruszona') },
   ],
 
+  // ── Dla laboratoriów i testów (gracz tego nie widzi; to nie są oceny akcji) ──
+  kampania: 'gmina',
+  automaty: {
+    wzorcowo: s => (s.proba ? ['zabezpiecz_logi', 'przeglad_kont_wszystkich', 'zgloszenie_csirt']
+      : ['odbierz_dostep', 'tryb_papierowy', 'komunikat_mieszkancy', 'zabezpiecz_logi', 'rozmowa_z_wojtem', 'odblokuj_konta', 'przywroc_dane',
+        'zgloszenie_csirt', 'ocena_rodo', 'zawiadomienie', 'przeglad_kont_wszystkich']),
+    laik: s => (s.proba ? ['przeglad_kont_wszystkich'] : ['telefon_do_zleceniobiorcy', 'odblokuj_konta', 'odbierz_dostep', 'komunikat_mieszkancy']),
+  },
+  odstepstwa: {
+    'telefon do sprawcy': (plan, s) => (s.proba ? plan : ['telefon_do_zleceniobiorcy', ...plan]),
+    'zapłata za „odblokowanie"': (plan, s) => (s.proba ? plan : ['zaplac_fakture', ...plan]),
+    'odblokowanie kont przed odebraniem dostępu': (plan, s) => (s.proba ? plan : ['odblokuj_konta', ...plan]),
+  },
+
   debrief: [
     'Najtańsza kontrola w grze: odebranie uprawnień w dniu zakończenia umowy — także zleceniobiorcom i dostawcom.',
     'Admin „z domu", bez MFA i bez osobnego konta, to nie wygoda, tylko klucze do urzędu w cudzej kieszeni.',
