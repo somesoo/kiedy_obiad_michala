@@ -514,6 +514,9 @@ document.getElementById('btn-office-later').addEventListener('click', () => {
 // tylko, gdy w sezonie jest coś do kupienia, czego gracz jeszcze nie ma, i nigdy NA okienku
 // Rzutu od Prezesa — czeka, aż tamto zniknie (następne odświeżenie stanu).
 const PROMO_SEEN_KEY = 'sl_costume_promo_seen';
+// Wyłącznik okienka (jak BOSS_NOTICE_ACTIVE). Promocja swoje zrobiła — schowana 19.10.2026.
+// Kolejna akcja w garderobie: nowa treść w #promo-overlay i z powrotem true.
+const PROMO_ACTIVE = false;
 
 function slPromoItems(g) {
   const items = (g && g.costumes && g.costumes.items) || [];
@@ -523,7 +526,7 @@ function slPromoItems(g) {
 function slRenderShopPromo() {
   const g = state.game;
   const overlay = document.getElementById('promo-overlay');
-  if (!g || overlay.style.display === 'flex') return;
+  if (!PROMO_ACTIVE || !g || overlay.style.display === 'flex') return;
   if (document.getElementById('office-overlay').style.display === 'flex') return;
   let seen = null;
   try { seen = localStorage.getItem(PROMO_SEEN_KEY); } catch (e) { /* bez pamięci: pokaże się przy każdym wejściu */ }
