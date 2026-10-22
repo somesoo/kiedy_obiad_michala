@@ -107,6 +107,16 @@ module.exports = {
     wykonaj: (k, p, a) => require('../proto/doradztwo').zlec(k, p, a),
   },
 
+  // ── ZEWNĘTRZNY SIEM / SOAR (tryb CTF/MSSP, data/zewnetrzne.js, docs/21-…) ──
+  // Tylko w grze połączonej z systemem właściciela; w zwykłej grze tego ruchu nie ma.
+  flaga: {
+    nazwa: 'Flaga z SIEM-a / SOAR-a: zadanie wdrożenia zrobione w Twoim tenancie',
+    kategoria: 'zewnetrzne', h: 0.5, zewnetrzne: true,
+    param: { flaga: { opis: 'flaga LO{…} z systemu', typ: 'tekst' } },
+    dostepny: (k, p, a) => a.sprawdzKod(p.flaga),
+    wykonaj: (k, p, a) => a.potwierdzZewnetrzne(p.flaga),
+  },
+
   // ── LUDZIE ──
   rozmowa: {
     nazwa: 'Rozmowa z kierownikiem działu (plany, kłopoty, co obchodzą i dlaczego)',

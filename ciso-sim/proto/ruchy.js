@@ -18,6 +18,7 @@ const Z = require('./zasoby');
 const KONTROLE = require('../data/kontrole');
 const RUCHY = require('../data/ruchy');
 const INICJATYWY = require('../data/dzialy');
+const ZWN = require('./zewnetrzne');
 
 const sprawy = () => require('./sprawy');   // leniwie: sprawy.js używa zasobów, nie ruchów
 
@@ -172,13 +173,17 @@ function awariaOT(k, id, skala = 1, opis = null) {
 
 function poWdrozeniu(k, id) {
   const o = k.obiekty[id];
-  if (!o || o.stan !== 'projekt') return;
+  // „konfiguracja": wdrożone po naszej stronie, czekało na zadania w zewnętrznym systemie (21.11).
+  if (!o || (o.stan !== 'projekt' && o.stan !== 'konfiguracja')) return;
   const kon = S.kontrola[id];
   const rnd = k.rnd.wdrozenia;
   o.stan = 'dziala';
   o.dzialaOd = k.st.aktywne[id];
   // Wypalony zespół wdraża gorzej (morale < 25: −15% jakości).
   o.jakoscBazowa = przytnij(JAKOSC_BAZOWA * o.sk.jakosc * (0.92 + 0.16 * rnd()) * (k.wskazniki.morale < 25 ? 0.85 : 1), 0.15, 1);
+  // Tryb z zewnętrznym systemem: jakość zależy też od tego, co gracz naprawdę skonfigurował
+  // (źródła logów, reguły, playbooki z kodu potwierdzenia). Surową zapamiętujemy do przeliczeń.
+  if (ZWN.wymaga(k, id)) { o.jakoscSurowa = o.jakoscBazowa; o.jakoscBazowa = przytnij(o.jakoscBazowa * ZWN.mnoznik(k, id), 0.1, 1); }
   o.jakosc = o.jakoscBazowa;
   o.usterki = (kon.usterki ?? DOMYSLNE_USTERKI).filter(u => rnd() < u.szansa).map(u => ({ ...u, odkryta: false, naprawiona: false }));
   if (o.sk.ot && k.otNiezgodne[id]) {
@@ -306,13 +311,16 @@ function api(k) {
       if (!o || o.stan !== 'dziala') return;
       o.jakoscBazowa *= mn; o.jakosc *= mn; przeliczKonf(k, id);
     },
+    // ── zewnętrzny SIEM/SOAR (data/zewnetrzne.js, docs/21-…, 21.11) ──
+    sprawdzKod: kod => ZWN.sprawdzKod(k, kod),
+    potwierdzZewnetrzne: kod => potwierdzZewnetrzne(k, kod),
     // ── dla decyzji cyklicznych (data/cykliczne.js) i doradztwa ──
     cena: (id, mn) => { k.st.ceny = k.st.ceny || {}; k.st.ceny[id] = (k.st.ceny[id] ?? 1) * mn; },
     odnowiono: id => { const o = k.obiekty[id]; if (o) o.umowaOd = k.st.m; },
     // Wycofanie z decyzji w sprawie (wypowiedzenie umowy, wstrzymanie projektu) — bez ruchu w zapisie.
     wycofajObiekt: id => {
       const o = k.obiekty[id];
-      if (!o || (o.stan !== 'dziala' && o.stan !== 'projekt')) return false;
+      if (!o || !['dziala', 'projekt', 'konfiguracja'].includes(o.stan)) return false;
       S.wycofaj(k.st, id);
       o.stan = 'wycofany'; o.wycofanoM = k.st.m;
       return true;
@@ -462,6 +470,7 @@ function dostepny(k, id, p = {}) {
   if (def.rodzaj === 'ruch') {
     const r = def.r;
     if (r.ot && !k.st.firma.ot) return bezOtPowod;
+    if (r.zewnetrzne && !ZWN.wlaczone(k)) return 'ta gra nie jest połączona z zewnętrznym SIEM-em/SOAR-em';
     if (r.raz && k.zrobioneRuchy.has(id)) return 'już zrobione';
     for (const [n, d] of Object.entries(r.param || {})) {
       if (p[n] === undefined) return `brak parametru ${n}=…`;
@@ -484,6 +493,7 @@ function dostepny(k, id, p = {}) {
     case 'wdroz': {
       if (kon.tylko_sprawa) return 'tego nie da się „wdrożyć" — przychodzi jako oferta (sprawa)';
       if (stan === 'projekt') return 'wdrożenie już trwa';
+      if (stan === 'konfiguracja') return 'wdrożone — czeka na konfigurację w Twoim SIEM-ie/SOAR-ze i flagę (flaga LO{…})';
       if (stan === 'dziala') return 'już działa — możesz zmienić parametry albo wycofać';
       let sk;
       try { sk = rozwiazParam(kon, p, !k.st.firma.ot).sk; } catch (e) { return e.message; }
@@ -516,7 +526,7 @@ function dostepny(k, id, p = {}) {
       return Z.brakZasobow(k, koszt(k, def, p));
     }
     case 'wycofaj':
-      if (stan !== 'dziala' && stan !== 'projekt') return 'nie ma czego wycofać';
+      if (!['dziala', 'projekt', 'konfiguracja'].includes(stan)) return 'nie ma czego wycofać';
       return Z.brakZasobow(k, koszt(k, def, p));
     default: return 'nieznany rodzaj ruchu';
   }
@@ -544,10 +554,11 @@ function lista(k) {
       const u = o.usterki.find(x => x.odkryta && !x.naprawiona && x.naprawa_h);
       if (u) dodaj(`napraw:${kon.id}`, { usterka: u.id });
     }
-    if (o?.stan === 'dziala' || o?.stan === 'projekt') dodaj(`wycofaj:${kon.id}`);
+    if (['dziala', 'projekt', 'konfiguracja'].includes(o?.stan)) dodaj(`wycofaj:${kon.id}`);
   }
   // Ruchów OT w organizacji bez OT nie pokazujemy wcale — to nie „niedostępne", tylko „nie ma czego".
-  for (const [id, r] of Object.entries(wszystkieRuchy(k))) if (!r.ot || k.st.firma.ot) dodaj(id, przykladoweParam(k, r));
+  // Tak samo ruchy trybu z zewnętrznym systemem — w zwykłej grze ich nie ma.
+  for (const [id, r] of Object.entries(wszystkieRuchy(k))) if ((!r.ot || k.st.firma.ot) && (!r.zewnetrzne || ZWN.wlaczone(k))) dodaj(id, przykladoweParam(k, r));
   return out;
 }
 function przykladoweParam(k, r) {
@@ -555,6 +566,7 @@ function przykladoweParam(k, r) {
   for (const [n, d] of Object.entries(r.param || {})) {
     if (d.typ === 'dzial') p[n] = Object.keys(k.dzialy)[0];
     else if (d.typ === 'luka') p[n] = luki(k)[0]?.id;
+    else if (d.typ === 'tekst') p[n] = '';
     else p[n] = d.wartosci[0];
   }
   return p;
@@ -562,7 +574,7 @@ function przykladoweParam(k, r) {
 function parametryRuchu(k, def) {
   if (def.rodzaj === 'ruch') {
     return Object.fromEntries(Object.entries(def.r.param || {}).map(([n, d]) => [n,
-      d.typ === 'dzial' ? Object.keys(k.dzialy) : d.typ === 'luka' ? luki(k).map(l => l.id) : d.wartosci]));
+      d.typ === 'dzial' ? Object.keys(k.dzialy) : d.typ === 'luka' ? luki(k).map(l => l.id) : d.typ === 'tekst' ? d.opis : d.wartosci]));
   }
   if (['wdroz', 'zmien'].includes(def.rodzaj)) return Object.fromEntries(Object.entries(def.kon.parametry || {}).map(([n, d]) => [n, Object.keys(d.wartosci)]));
   if (def.rodzaj === 'napraw') return { usterka: (k.obiekty[def.kon.id]?.usterki || []).filter(u => u.odkryta && !u.naprawiona && u.naprawa_h).map(u => u.id) };
@@ -702,7 +714,19 @@ function cyklZycia(k, def, p, c) {
 // ── KONIEC MIESIĄCA: wdrożenia, dryf, ryzyko bieżące, rekrutacje ──
 function poMiesiacu(k, wdrozone) {
   const st = k.st;
-  for (const id of wdrozone) poWdrozeniu(k, id);
+  for (const id of wdrozone) {
+    // Gra z zewnętrznym SIEM-em/SOAR-em: koniec projektu to dopiero „zainstalowane". Działać zacznie,
+    // gdy gracz zrobi zadania w prawdziwym narzędziu i wróci z flagą (ruch `flaga`).
+    const brak = ZWN.brakujace(k, id);
+    if (ZWN.wymaga(k, id) && brak.length && k.obiekty[id]) {
+      delete st.aktywne[id];
+      k.obiekty[id].stan = 'konfiguracja';
+      k.historia.push({ m: st.m, t: 'czeka_na_konfiguracje', id, brak });
+      k.raportIT?.push(`${S.kontrola[id].nazwa}: wdrożone po naszej stronie — czeka na konfigurację w Twoim tenancie (${brak.map(z => ZWN.ZW.kontrole[id].zadania[z].opis).join('; ')}). Po zrobieniu wróć z flagą: flaga LO{…}`);
+      continue;
+    }
+    poWdrozeniu(k, id);
+  }
   for (const o of Object.values(k.obiekty)) {
     if (o.stan !== 'dziala') continue;
     const kon = S.kontrola[o.id];
@@ -750,6 +774,32 @@ function zainstalujGotowe(k, id, p = {}) {
   k.obiekty[id] = { ...nowyObiekt(k, kon, wybor, sk), stan: 'dziala', od: -12, dzialaOd: -12, jakoscBazowa: JAKOSC_BAZOWA, jakosc: JAKOSC_BAZOWA };
   przeliczKonf(k, id);
   return k.obiekty[id];
+}
+
+// Flaga z zewnętrznego systemu (sprawdzona wcześniej w `dostepny`): zapisuje, co skonfigurowano;
+// (flaga wdrożenia) gdy to ostatnie brakujące zadanie — kontrola zaczyna działać od teraz; gdy już działa — jakość
+// przelicza się z nowego zakresu (gracz dołożył źródła albo reguły).
+function potwierdzZewnetrzne(k, kod) {
+  const l = ZWN.odczytaj(kod, k.opcje.zewnetrzne.klucze);
+  const [id, zad] = l.z.split('.');
+  k.zewn.uzyte.push(l.n);
+  k.zewn.wyniki[id] = { ...(k.zewn.wyniki[id] || {}), [zad]: l.w || {} };
+  k.historia.push({ m: k.st.m, t: 'zewn_potwierdzenie', id, zadanie: zad });
+  const o = k.obiekty[id], kon = S.kontrola[id], brak = ZWN.brakujace(k, id);
+  const opis = ZWN.ZW.kontrole[id].zadania[zad].opis;
+  if (o?.stan === 'konfiguracja' && !brak.length) {
+    k.st.aktywne[id] = k.st.m;
+    poWdrozeniu(k, id);
+    return `Potwierdzone: ${opis}. ${kon.nazwa} działa od teraz (jakość z tego, co skonfigurowano: ${Math.round(100 * ZWN.mnoznik(k, id))}%).`;
+  }
+  if (o?.stan === 'dziala' && o.jakoscSurowa !== undefined) {
+    const stara = o.jakoscBazowa;
+    o.jakoscBazowa = przytnij(o.jakoscSurowa * ZWN.mnoznik(k, id), 0.1, 1);
+    o.jakosc = przytnij(o.jakosc * (o.jakoscBazowa / stara), 0.05, 1);
+    przeliczKonf(k, id);
+    return `Potwierdzone: ${opis}. ${kon.nazwa}: zakres konfiguracji zaktualizowany.`;
+  }
+  return `Potwierdzone: ${opis}.${brak.length ? ` Do zrobienia jeszcze: ${brak.map(z => ZWN.ZW.kontrole[id].zadania[z].opis).join('; ')}.` : ''}${!o || o.stan === 'wycofany' ? ` (${kon.nazwa} nie jest jeszcze zamówiony — konfiguracja poczeka na wdrożenie.)` : ''}`;
 }
 
 module.exports = {

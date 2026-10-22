@@ -71,11 +71,45 @@ module.exports = {
     };
   },
 
-  // Gdzie żyją dzienniki — z kampanii gracza.
-  widocznosc: ctx => {
+  // Gdzie żyją dzienniki — z kampanii gracza. W grze z zewnętrznym SIEM-em decyduje to, które
+  // źródła gracz NAPRAWDĘ podłączył (flagi SIEM-a, data/zewnetrzne.js): bez „ad" nie ma blokad
+  // kont w SIEM-ie, choć SIEM działa. Bez systemu — wystarczy, że SIEM/MDR działa.
+  widocznosc: (ctx, zrodla) => {
     const przesyla = ctx.dziala('siem') || ctx.dziala('siem_os') || ctx.dziala('mdr');
-    const lok = przesyla ? 'siem' : 'lokalnie';
-    return { dc: lok, rdp: lok, fs: lok, edr: ctx.dziala('edr') ? 'siem' : 'brak', fw: ctx.dziala('ngfw') ? 'siem' : 'brak' };
+    const z = n => (przesyla && (!zrodla || zrodla.includes(n)) ? 'siem' : 'lokalnie');
+    return { dc: z('ad'), rdp: z('serwery'), fs: z('serwery'), edr: ctx.dziala('edr') ? 'siem' : 'brak',
+      fw: ctx.dziala('ngfw') && (!zrodla || zrodla.includes('zapora')) ? 'siem' : 'brak' };
+  },
+
+  hosty: { kontroler_domeny: H.dc, pulpit_zdalny: H.rdp, serwer_plikow: H.fs, zapora: 'UG-FW01', domena: DOMENA, urzednicy: URZEDNICY, konto_it: GRACZ },
+
+  // Przebieg dla generatora logów właściciela (lab.przebieg): CO się stało w świecie gry, bez formatu
+  // logu. Każde zdarzenie ma stabilne id; generator zamienia je na logi swojego SIEM-a.
+  przebieg: (s, L) => {
+    const { konto, ip, udzialy } = L.dane;
+    const e = (id, t, co, opis, dane = {}) => ({ id, t, co, opis, dane });
+    const z = [e('wypowiedzenie', T_WYPOWIEDZENIE, 'kadry', 'Wypowiedzenie umowy zlecenia doręczone (bez odebrania dostępów)', { konto })];
+    if (s.proba) {
+      z.push(e('wylaczone', T_WYPOWIEDZENIE + 0.5, 'konto_wylaczone', 'Konto zleceniobiorcy wyłączone w dniu wypowiedzenia', { konto }));
+      z.push(e('proby', -0.1, 'proby_logowania', 'Seria nieudanych logowań pulpitem zdalnym na wyłączone konto (ok. 1 h)', { konto, ip, host: H.rdp }));
+      return z;
+    }
+    z.push(e('wejscie_pt', L.dane.pierwsze_t, 'logowanie_zdalne', 'Pierwsze wejście sprawcy po wypowiedzeniu; rozpoznanie grup administratorów', { konto, ip, host: H.rdp }));
+    z.push(e('wejscie_nd', L.dane.niedziela_t, 'logowanie_zdalne', 'Drugie wejście; eksport listy kont', { konto, ip, host: H.rdp }));
+    z.push(e('blokada', -0.05, 'masowe_wylaczenie_kont', 'Wyłączenie kont wszystkich urzędników z konta sprawcy', { konto, ip, cele: URZEDNICY }));
+    if (s.odblokowano_h !== undefined) {
+      z.push(e('odblokowanie1', s.odblokowano_h, 'konta_wlaczone', 'Gracz włącza konta, choć sprawca ma dostęp', { kto: GRACZ }));
+      z.push(e('blokada2', s.ponowna_blokada_h, 'masowe_wylaczenie_kont', 'Sprawca wyłącza konta ponownie', { konto, ip, cele: URZEDNICY }));
+    }
+    if (s.dane_usuniete) z.push(e('kasowanie', s.usuniete_h, 'usuniecie_danych', 'Usunięcie udziałów sieciowych', { konto, host: H.fs, udzialy }));
+    if (s.logi_usuniete) z.push(e('czyszczenie', s.logi_usuniete_h, 'czyszczenie_dziennika', 'Wyczyszczenie dziennika zabezpieczeń kontrolera domeny', { konto, host: H.dc }));
+    if (s.dostep_odebrany && s.kiedy.odbierz_dostep !== undefined) {
+      z.push(e('odebranie', s.kiedy.odbierz_dostep, 'dostep_odebrany', 'Konto sprawcy wyłączone, hasła administratorów zmienione', { konto, kto: GRACZ }));
+      z.push(e('powroty', s.kiedy.odbierz_dostep + 0.42, 'proby_logowania', 'Sprawca próbuje wrócić co ok. 25 minut', { konto, ip, host: H.rdp }));
+    }
+    if (!s.obsluga_stoi && s.kiedy.odblokuj_konta !== undefined && s.dostep_odebrany) z.push(e('odblokowanie', s.kiedy.odblokuj_konta, 'konta_wlaczone', 'Konta urzędników włączone', { kto: GRACZ }));
+    if (s.dane_przywrocone) z.push(e('przywrocenie', s.kiedy.przywroc_dane, 'przywrocenie_danych', 'Udziały przywrócone z kopii', { host: H.fs, udzialy }));
+    return z;
   },
 
   // Szum tła: zwykły piątek w urzędzie, nocne kopie, skanery z internetu. Bez niego „szukanie"

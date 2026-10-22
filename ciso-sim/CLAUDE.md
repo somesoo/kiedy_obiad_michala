@@ -93,6 +93,12 @@ można przejrzeć, przetestować i wycofać (`docs/18-…`).
   w `scenariusze/<id>-*.lab.js`. Silnik incydentu się nie zmienia; lab woła `K.incydent*`. Sesja =
   parametry + operacje (odtwarzalna), strumień losowości labu osobny. Prawda (konto, adres) nigdy
   w `/gra/*` — tylko trener (`/admin`). Serwer bez sekretów ze środowiska nie wstaje.
+- **Forma CTF — flagi** (`proto/zewnetrzne.js`, `data/zewnetrzne.js`, `docs/21-…`, 21.11): w grze połączonej
+  z systemem (`opcje.zewnetrzne`, CLI `--tenant --klucz`) wdrożenie SIEM/SOAR/MDR po projekcie czeka
+  w stanie „konfiguracja" na flagi `LO{…}` z tenanta gracza, a incydent z plikiem `.lab.js` prowadzi się
+  tylko w labie (sesja z zapisu gracza → flaga wyniku → `K.wynikLabu`). Flaga = podpis Ed25519 (gra ma
+  tylko klucz publiczny), przypięta do tenanta, jednorazowa, w zapisie (`flaga`, `inc_lab`). Bez
+  `opcje.zewnetrzne` nic się nie zmienia — testy i automaty grają jak dotąd.
 
 ## Narzędzia
 
@@ -106,6 +112,8 @@ node ciso-sim/proto/brzegowe.js [N] [--kampania=gmina]     # strategie-prowokacj
 node ciso-sim/proto/cennik.js [N] [--kampania=gmina]  # koszt JEDNEGO odstępstwa w dobrej grze (→ docs/17-…, 17.10)
 LAB_ADMIN_TOKEN=… LAB_SIEM_TOKEN=… LAB_SOAR_SECRET=… node ciso-sim/lab/serwer.js   # lab SIEM/SOAR (docs/21-…)
 LAB_URL=… LAB_TOKEN=<token gracza> node ciso-sim/lab/gracz.js                         # gracz w terminalu
+node ciso-sim/lab/flaga.js klucze|wydaj|sprawdz                                    # flagi CTF (docs/21-…, 21.11)
+node ciso-sim/proto/kampania.js --tenant=ala --klucz=flagi.pub.pem --zapis=ala.json   # gra połączona z SIEM/SOAR
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 

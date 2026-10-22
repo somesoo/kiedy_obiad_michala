@@ -222,3 +222,70 @@ albo UTC, ±10 min), usunięte udziały. Podpowiedzi 10/20/45/90 min zegara, zł
 3. Gracz w przeglądarce zamiast terminala (po szkielecie aplikacji z logowaniem, `13-…`, etap C).
 4. Wynik labu w kampanii: dziś lab gra incydent na przygotowanym stanie (`kontrole`, `naprawione`);
    następny krok — sesja ze stanu kampanii gracza (zapis = lista akcji, więc to tylko odtworzenie).
+
+## 21.11. Forma CTF: wychodzisz do SIEM-a / SOAR-a, wracasz z flagą (22.10.2026)
+
+Właściciel: „jak się połączę z SIEM-em i jak będę generował logi i alerty — to inna bajka;
+zależy mi, żeby incydenty i wdrożenia SIEM/SOAR miały **obowiązek wejścia** w samego SIEM-a/SOAR-a
+w systemie hostowanym gdzie indziej, gdzie będę miał generator logów"; „zróbmy formę CTF-a —
+wychodząc do SIEM-a, muszę wrócić do gry z odpowiednikiem flagi".
+
+**Zasada:** gra nie wierzy na słowo. Wdrożenie SIEM/SOAR i incydent z wersją labową kończą się
+tylko flagą, którą gracz przynosi z zewnętrznego systemu. Generowanie logów i alertów należy do
+systemu właściciela. Gra mówi mu, CO się stało (scenariusz i przebieg), i sprawdza, z czym gracz wraca.
+
+### Flaga
+`LO{<ładunek>.<podpis>}`, gdzie ładunek to base64url(JSON) `{ tn: tenant, z: zadanie, w: wynik, n: jednorazowy id, wyd }`,
+a podpis to Ed25519 nad `LO1.<ładunek>` (`proto/zewnetrzne.js`).
+- **Ed25519, nie HMAC**, bo gracz może mieć grę u siebie. Gra zna tylko klucz publiczny, a podpisuje
+  system właściciela albo serwer labu, więc flagi nie da się podrobić.
+- **Przypięta do tenanta**, więc nie przepiszesz jej od kolegi. **Jednorazowa**, więc nie użyjesz jej
+  dwa razy. Zmiana ładunku (np. dopisanie źródeł) psuje podpis.
+- W grze jest jedna komenda: `flaga LO{…}`. Zapis gry trzyma flagę, a odtworzenie sprawdza ją ponownie.
+- Narzędzie dla systemu właściciela: `node ciso-sim/lab/flaga.js klucze|wydaj|sprawdz` (można je
+  wołać z playbooka albo z reguły po sprawdzeniu konfiguracji w tenancie gracza).
+
+### Gra połączona z systemem
+`node ciso-sim/proto/kampania.js --kampania=gmina --tenant=ala --klucz=flagi.pub.pem --zapis=ala.json`
+(klucze publiczne: systemu właściciela i serwera labu, po przecinku). Bez `--tenant` gra działa jak dotąd.
+
+### Wdrożenia z obowiązkiem wejścia (`data/zewnetrzne.js`)
+
+| Kontrola | Zadania w tenancie gracza (każde = jedna flaga) | Co niesie flaga |
+|---|---|---|
+| SIEM, SIEM open source | `zrodla`: podłączyć źródła logów; `reguly`: reguły wykrywania (≥ 3) | listę źródeł (`ad, serwery, stacje, poczta, zapora, ot`) i reguł |
+| MDR | `zrodla` | listę źródeł |
+| SOAR | `integracja`: alerty z SIEM-a tworzą sprawy; `playbooki` (≥ 3) | listę playbooków |
+
+Projekt kończy się po naszej stronie (godziny, pieniądze, przetarg — jak dotąd). Kontrola przechodzi
+w stan **„konfiguracja"**: nie działa, abonament leci, raport IT mówi, czego brakuje. Działać zaczyna
+po ostatniej fladze. **Jakość wynika z tego, co naprawdę skonfigurowano** (🔵): pokrycie źródeł
+daje 40–100% jakości, reguły i playbooki ±30%. Późniejsza flaga z większą listą podnosi jakość.
+Flagi można przynieść także przed końcem projektu, wtedy konfiguracja czeka na wdrożenie.
+
+### Incydenty z obowiązkiem wejścia
+Incydent, który ma plik `scenariusze/<id>-*.lab.js`, **nie da się poprowadzić w terminalu** gry
+połączonej z systemem. Prowadzący zakłada sesję labu **z zapisu gracza**
+(`POST /admin/sesje {incydent, zapis}`): tenant i stan biorą się z jego gry, a widoczność logów
+z jego flag SIEM-a. Bez źródła `ad` blokad kont nie ma w SIEM-ie, choć SIEM działa. Po końcu fazy
+ostrej `/gra/stan` daje `koniec.flaga`, a gracz wpisuje ją w kampanii. Gra odtwarza te same akcje
+silnika incydentu, więc wynik, zasady i debrief są identyczne. Flaga z innego stanu kampanii jest
+odrzucana. Nieprowadzony incydent toczy się sam przy zamknięciu miesiąca: obowiązek dotyczy
+miejsca, nie decyzji.
+
+W labie wiedza też jest flagą w sensie CTF: konto sprawcy, adres, czas, usunięte udziały. Gracz
+wpisuje je jako ustalenia, a jego tenant wydaje je w logach.
+
+### Dla generatora logów właściciela
+- `GET /generator/:sesja/scenariusz` (`Bearer LAB_GEN_TOKEN`): dane świata (konto, adres, udziały,
+  godziny), hosty, widoczność i źródła gracza, T+0.
+- `GET /generator/:sesja/przebieg?po=N`: co się stało w świecie gry, bez formatu logu (`co`:
+  `logowanie_zdalne`, `masowe_wylaczenie_kont`, `usuniecie_danych`, `czyszczenie_dziennika`,
+  `dostep_odebrany`, `proby_logowania`, `konta_wlaczone`, `przywrocenie_danych`…). Zdarzenia mają
+  stabilne `id` i `czas`, a w przebiegu nie ma przyszłości.
+- Wypychanie: `LAB_GEN_PUSH_URL` (pierwsza paczka niesie też scenariusz), z podpisem jak w 21.10.
+- Wbudowane logi wzorcowe (`/siem/:sesja/zdarzenia`) zostają jako przykład i do testów. Gdy masz
+  własny generator, po prostu ich nie pobierasz.
+
+Sesja z zapisu wymaga `LAB_KLUCZ_PRYWATNY` (plik PEM, `lab/flaga.js klucze`). Klucz publiczny
+z tej pary trafia do gry graczy (`--klucz=`).

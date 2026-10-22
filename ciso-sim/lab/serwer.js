@@ -5,7 +5,10 @@
 //   SIEM                  ── Bearer LAB_SIEM_TOKEN ──▶  /siem/:sesja/zdarzenia?po=N   (NDJSON, pobieranie)
 //   SOAR                  ── podpis HMAC ───────────▶  /soar/:sesja/{dokumenty,playbooki,playbook}
 //   trener / admin        ── Bearer LAB_ADMIN_TOKEN ─▶  /admin/sesje
-//   gra ──▶ SIEM/SOAR (opcjonalnie, wypychanie): LAB_SIEM_PUSH_URL, LAB_SOAR_PUSH_URL ({tenant} w adresie), podpis LAB_PUSH_SECRET
+//   generator logów       ── Bearer LAB_GEN_TOKEN ───▶  /generator/:sesja/{scenariusz,przebieg}   (opcjonalnie)
+//   gra ──▶ SIEM/SOAR/generator (opcjonalnie, wypychanie): LAB_SIEM_PUSH_URL, LAB_SOAR_PUSH_URL, LAB_GEN_PUSH_URL
+//           ({tenant} w adresie), podpis LAB_PUSH_SECRET
+//   flaga wyniku dla kampanii gracza: podpis Ed25519 kluczem LAB_KLUCZ_PRYWATNY (plik PEM, docs/21-…, 21.11)
 //
 // Gra o bezpieczeństwie musi być bezpieczna (CLAUDE.md): sekrety tylko ze zmiennych środowiska,
 // bez wartości domyślnych (serwer bez nich nie wstanie), tokeny graczy trzymane jako skrót,
@@ -20,6 +23,7 @@ const crypto = require('crypto');
 const LAB = require('./lab');
 
 const MAX_CIALO = 16 * 1024;
+const MAX_CIALO_ADMIN = 2 * 1024 * 1024;   // zapis kampanii gracza (lista akcji) bywa długi
 const OKNO_PODPISU_S = 300;
 const LIMIT_NA_MINUTE = 240;
 
@@ -36,8 +40,11 @@ function konfiguracja(env = process.env) {
     dane: env.LAB_DANE || path.join(__dirname, 'sesje'),
     siemPush: env.LAB_SIEM_PUSH_URL || null, soarPush: env.LAB_SOAR_PUSH_URL || null,
     push: env.LAB_PUSH_SECRET || null,
+    gen: env.LAB_GEN_TOKEN || null, genPush: env.LAB_GEN_PUSH_URL || null,
+    klucz: env.LAB_KLUCZ_PRYWATNY ? fs.readFileSync(env.LAB_KLUCZ_PRYWATNY, 'utf8') : null,
   };
-  if ((c.siemPush || c.soarPush) && (!c.push || c.push.length < 24)) brak.push('LAB_PUSH_SECRET (co najmniej 24 znaki) — wymagany przy wypychaniu');
+  if (c.gen && c.gen.length < 24) brak.push('LAB_GEN_TOKEN (co najmniej 24 znaki)');
+  if ((c.siemPush || c.soarPush || c.genPush) && (!c.push || c.push.length < 24)) brak.push('LAB_PUSH_SECRET (co najmniej 24 znaki) — wymagany przy wypychaniu');
   if (brak.length) throw new Error(`Brak konfiguracji:\n - ${brak.join('\n - ')}`);
   return c;
 }
@@ -56,7 +63,7 @@ function utworz(c) {
   for (const f of fs.readdirSync(c.dane).filter(n => /^[a-f0-9]{16}\.json$/.test(n))) {
     try {
       const d = JSON.parse(fs.readFileSync(path.join(c.dane, f), 'utf8'));
-      sesje.set(f.slice(0, 16), { L: LAB.odtworz(d.p, d.ops), tokenHash: d.tokenHash, wypchniete: d.wypchniete || { zd: 0, dok: 0 }, kolejka: Promise.resolve() });
+      sesje.set(f.slice(0, 16), { L: LAB.odtworz(d.p, d.ops), tokenHash: d.tokenHash, wypchniete: { zd: 0, dok: 0, gen: 0, ...d.wypchniete }, kolejka: Promise.resolve() });
     } catch (e) { console.error(`Sesja ${f} nie odtworzyła się: ${e.message}`); }
   }
 
@@ -71,7 +78,7 @@ function utworz(c) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
   }
   function wypchnij(id, x) {
-    if (!c.siemPush && !c.soarPush) return;
+    if (!c.siemPush && !c.soarPush && !c.genPush) return;
     x.kolejka = x.kolejka.then(async () => {
       const L = x.L, tenant = L.p.tenant;
       try {
@@ -84,6 +91,12 @@ function utworz(c) {
           const nowe = L.wydaneDok.slice(x.wypchniete.dok);
           await wyslij(c.soarPush, id, tenant, JSON.stringify({ tenant, sesja: id, incydent: LAB.stan(L).incydent, dokumenty: nowe }), 'application/json');
           x.wypchniete.dok += nowe.length;
+        }
+        const pb = LAB.przebieg(L);
+        if (c.genPush && x.wypchniete.gen < pb.length) {
+          const nowe = pb.slice(x.wypchniete.gen);
+          await wyslij(c.genPush, id, tenant, JSON.stringify({ tenant, sesja: id, ...(x.wypchniete.gen ? {} : { scenariusz: LAB.scenariusz(L) }), przebieg: nowe }), 'application/json');
+          x.wypchniete.gen += nowe.length;
         }
         zapisz(id, x);
       } catch (e) { console.error(`Wypychanie sesji ${id} (${tenant}): ${e.message} — ponowię przy następnym ruchu`); }
@@ -102,10 +115,10 @@ function utworz(c) {
   };
   const blad = (kod, tekst) => Object.assign(new Error(tekst), { kod });
   const bearer = req => (req.headers.authorization || '').replace(/^Bearer /, '');
-  function czytaj(req) {
+  function czytaj(req, max = MAX_CIALO) {
     return new Promise((ok, nie) => {
       let n = 0; const cz = [];
-      req.on('data', b => { n += b.length; if (n > MAX_CIALO) { nie(blad(413, 'za duże ciało żądania')); req.destroy(); } else cz.push(b); });
+      req.on('data', b => { n += b.length; if (n > max) { nie(blad(413, 'za duże ciało żądania')); req.destroy(); } else cz.push(b); });
       req.on('end', () => ok(Buffer.concat(cz).toString('utf8')));
       req.on('error', nie);
     });
@@ -121,6 +134,8 @@ function utworz(c) {
   const sesjaGracza = req => { const t = bearer(req); for (const [id, x] of sesje) if (t && rowne(hash(t).toString('hex'), x.tokenHash)) return [id, x]; throw blad(401, 'zły token gracza'); };
   const sesjaPo = id => { const x = /^[a-f0-9]{16}$/.test(id) && sesje.get(id); if (!x) throw blad(404, 'nie ma takiej sesji'); return x; };
   const operacja = (id, x, op, dane) => { const r = LAB.wykonaj(x.L, op, dane); zapisz(id, x); wypchnij(id, x); return r; };
+  // Stan dla gracza + flaga wyniku, gdy incydent z zapisu kampanii się zakończył (wraca z nią do gry).
+  const stanGracza = x => { const st = LAB.stan(x.L); const f = LAB.flagaWyniku(x.L, c.klucz); if (st.koniec && f) st.koniec.flaga = f; return st; };
 
   // ── TRASY ──
   async function obsluz(req, res) {
@@ -128,8 +143,8 @@ function utworz(c) {
     const klucz = `${req.socket.remoteAddress}`;
     const n = (liczniki.get(klucz) || 0) + 1; liczniki.set(klucz, n);
     if (n > LIMIT_NA_MINUTE) throw blad(429, 'za dużo żądań — spróbuj za minutę');
-    const surowe = req.method === 'POST' ? await czytaj(req) : '';
     const [, a, b, cc] = u.pathname.split('/');
+    const surowe = req.method === 'POST' ? await czytaj(req, a === 'admin' ? MAX_CIALO_ADMIN : MAX_CIALO) : '';
 
     if (u.pathname === '/zdrowie') return odp(res, 200, { ok: true });
 
@@ -137,9 +152,18 @@ function utworz(c) {
       if (!rowne(bearer(req), c.admin)) throw blad(401, 'zły token admina');
       if (b === 'sesje' && !cc && req.method === 'POST') {
         const d = json(surowe);
+        // Sesja z zapisu kampanii gracza: tenant z jego gry (flaga wyniku wróci do tej samej kampanii).
+        const tz = d.zapis?.opcje?.zewnetrzne?.tenant;
+        if (d.zapis) {
+          if (!c.klucz) throw blad(400, 'sesja z zapisu wymaga LAB_KLUCZ_PRYWATNY (serwer podpisuje flagę wyniku)');
+          if (!tz) throw blad(400, 'zapis nie pochodzi z gry połączonej z systemem (uruchom kampanię z --tenant i --klucz)');
+          if (d.tenant && d.tenant !== tz) throw blad(400, `tenant (${d.tenant}) różni się od tenanta z zapisu (${tz})`);
+          d.tenant = tz;
+        }
         if (typeof d.tenant !== 'string' || !/^[\w.-]{1,64}$/.test(d.tenant)) throw blad(400, 'tenant: identyfikator tenanta gracza w SIEM/SOAR (litery, cyfry, . _ -)');
         const p = {
-          incydent: String(d.incydent || 'S07'), tenant: d.tenant, seed: Number.isInteger(d.seed) ? d.seed : crypto.randomInt(1, 2 ** 31),
+          incydent: String(d.incydent || 'S07'), tenant: d.tenant, seed: Number.isInteger(d.seed) ? d.seed : Number.isInteger(d.zapis?.seed) ? d.zapis.seed : crypto.randomInt(1, 2 ** 31),
+          ...(d.zapis ? { zapis: { kampania: String(d.zapis.kampania), seed: d.zapis.seed, akcje: d.zapis.akcje, opcje: d.zapis.opcje } } : {}),
           kontrole: Array.isArray(d.kontrole) ? d.kontrole.map(String) : [], naprawione: Array.isArray(d.naprawione) ? d.naprawione.map(String) : [],
           // T+0 = chwila założenia sesji: logi z „piątku" mają prawdziwe daty sprzed trzech dni.
           start: d.start || new Date(Math.floor(Date.now() / 60000) * 60000).toISOString(),
@@ -148,7 +172,7 @@ function utworz(c) {
         let L;
         try { L = LAB.nowaSesja(p); } catch (e) { throw blad(400, e.message); }
         const id = crypto.randomBytes(8).toString('hex'), token = crypto.randomBytes(24).toString('base64url');
-        const x = { L, tokenHash: hash(token).toString('hex'), wypchniete: { zd: 0, dok: 0 }, kolejka: Promise.resolve() };
+        const x = { L, tokenHash: hash(token).toString('hex'), wypchniete: { zd: 0, dok: 0, gen: 0 }, kolejka: Promise.resolve() };
         sesje.set(id, x); zapisz(id, x); wypchnij(id, x);
         return odp(res, 201, { sesja: id, token, tenant: p.tenant, seed: p.seed, start: p.start });
       }
@@ -156,7 +180,7 @@ function utworz(c) {
       if (b === 'sesje' && cc && req.method === 'GET') {
         const x = sesjaPo(cc), L = x.L;
         // Trener widzi też odpowiedzi — gracz nigdy (mgła wojny).
-        return odp(res, 200, { ...LAB.stan(L), lab: LAB.podsumowanie(L), odpowiedzi: Object.fromEntries(Object.entries(L.lab.ustalenia).map(([k, v]) => [k, v.prawda(L)])) });
+        return odp(res, 200, { ...stanGracza(x), lab: LAB.podsumowanie(L), odpowiedzi: Object.fromEntries(Object.entries(L.lab.ustalenia).map(([k, v]) => [k, v.prawda(L)])) });
       }
       if (b === 'sesje' && cc && req.method === 'DELETE') { sesjaPo(cc); sesje.delete(cc); fs.rmSync(plik(cc), { force: true }); return odp(res, 200, { ok: true }); }
       throw blad(404, 'nie ma takiej trasy');
@@ -164,10 +188,22 @@ function utworz(c) {
 
     if (a === 'gra') {
       const [id, x] = sesjaGracza(req);
-      if (b === 'stan' && req.method === 'GET') return odp(res, 200, LAB.stan(x.L));
+      if (b === 'stan' && req.method === 'GET') return odp(res, 200, stanGracza(x));
       if (req.method === 'POST' && ['akcja', 'czekaj', 'ustalenie', 'podpowiedz', 'koniec'].includes(b)) {
         const d = json(surowe);
-        return odp(res, 200, { ...operacja(id, x, b, d), stan: LAB.stan(x.L) });
+        return odp(res, 200, { ...operacja(id, x, b, d), stan: stanGracza(x) });
+      }
+      throw blad(404, 'nie ma takiej trasy');
+    }
+
+    if (a === 'generator') {
+      if (!c.gen || !rowne(bearer(req), c.gen)) throw blad(401, 'zły token generatora');
+      const x = sesjaPo(b);
+      if (cc === 'scenariusz' && req.method === 'GET') return odp(res, 200, LAB.scenariusz(x.L));
+      if (cc === 'przebieg' && req.method === 'GET') {
+        const po = Math.max(0, Number(u.searchParams.get('po') || 0) | 0);
+        const pb = LAB.przebieg(x.L);
+        return odp(res, 200, { nastepny: pb.length, t: x.L.s.t, koniec: !!x.L.wynik, przebieg: pb.slice(po) });
       }
       throw blad(404, 'nie ma takiej trasy');
     }

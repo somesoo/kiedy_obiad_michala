@@ -28,6 +28,7 @@ const SP = require('./sprawy');
 const I = require('./incydent');
 const ZA = require('./zasady');
 const CY = require('./cykl');
+const ZWN = require('./zewnetrzne');
 const DR = require('./doradztwo');
 const DORADZTWO = require('../data/doradztwo');
 const CYKLICZNE = require('../data/cykliczne');
@@ -181,7 +182,13 @@ function pelnaDefinicja(defId) {
   return { ...baza, sprawy: { ...CYKLICZNE.sprawy, ...baza.sprawy } };
 }
 
-function nowaKampania(defId, seed) {
+// `opcje.zewnetrzne`: gra połączona z zewnętrznym SIEM-em/SOAR-em (tryb MSSP / CTF, docs/21-…, 21.11):
+// { tenant: tenant gracza, klucze: [klucze publiczne PEM systemu właściciela i serwera labu] }.
+function nowaKampania(defId, seed, opcje = {}) {
+  if (opcje.zewnetrzne) {
+    const z = opcje.zewnetrzne;
+    if (typeof z.tenant !== 'string' || !z.tenant || !Array.isArray(z.klucze) || !z.klucze.length) throw new Error('opcje.zewnetrzne: potrzebne tenant i klucze (publiczne, PEM)');
+  }
   const def = pelnaDefinicja(defId);
   const bledy = walidujKampanie(def);
   if (bledy.length) throw new Error(`Kampania ${defId} ma błędy w danych:\n - ${bledy.join('\n - ')}`);
@@ -202,6 +209,8 @@ function nowaKampania(defId, seed) {
     hKart: 0, koniec: false, akcje: [], kontrola: null, klamstwa: [], incydent: null, miesiaceNadgodzin: 0,
   };
   k.log = (kto, tekst) => k.rejestr.push({ m: k.st.m, kto, tekst });
+  k.opcje = opcje;
+  k.zewn = { wyniki: {}, uzyte: [] };   // co potwierdziły flagi z zewnętrznego systemu; użyte flagi
   // Kontrole działające od startu (profil firmy) dostają obiekt jak każde wdrożenie — inaczej
   // gracz nie mógłby ich przejrzeć, przetestować ani wycofać. Parametry z pliku kampanii
   // (gmina: szkolenie „odhaczane" e-learningiem).
@@ -283,6 +292,10 @@ function pokazObserwacje(k, id) {
 // ── INCYDENTY (tryb operacyjny) ──
 function rozpocznijIncydent(k, id) {
   if (k.incydent) throw blad('trwa inny incydent');
+  // Gra z zewnętrznym SIEM-em/SOAR-em: incydent z wersją labową prowadzi się TAM (docs/21-…, 21.11) —
+  // prowadzący zakłada sesję labu z tego zapisu, a wynik wraca flagą (komenda „flaga LO{…}").
+  // Nieprowadzony toczy się sam przy zamknięciu miesiąca, jak zawsze — obowiązek dotyczy miejsca, nie decyzji.
+  if (ZWN.wlaczone(k) && I.maLab(id) && !k.wLabie) throw blad(`incydent ${id} prowadzisz w swoim SIEM-ie i SOAR-ze (lab). Prowadzący zakłada sesję z Twojego zapisu; po incydencie wróć z flagą: flaga LO{…}`);
   const z = k.zdarzenia.find(x => x.typ === 'incydent' && x.id === id && !x.zagrane);
   if (!z) throw blad('ten incydent nie trwa w tym miesiącu');
   k.akcje.push({ t: 'inc_start', id });
@@ -290,6 +303,51 @@ function rozpocznijIncydent(k, id) {
   z.zagrane = true;
   return k.incydent;
 }
+// Skrót stanu kampanii (lista akcji): flaga wyniku z labu musi dotyczyć DOKŁADNIE tego stanu.
+const skrotStanu = k => require('crypto').createHash('sha256').update(JSON.stringify(k.akcje)).digest('hex').slice(0, 24);
+
+// Flaga wyniku incydentu z labu: odtwarza te same akcje silnika incydentu na tym samym stanie,
+// więc zasady, skutki i debrief liczą się tu tak samo jak w labie. W zapisie zostaje jedna akcja
+// { t: 'inc_lab', flaga } — odtworzenie ponownie sprawdza podpis i stan.
+function wynikLabu(k, flaga) {
+  if (!ZWN.wlaczone(k)) throw blad('ta gra nie jest połączona z zewnętrznym SIEM-em/SOAR-em');
+  if (k.incydent) throw blad('trwa incydent');
+  let l;
+  try { l = ZWN.odczytaj(flaga, k.opcje.zewnetrzne.klucze); } catch (e) { throw blad(e.message); }
+  if (l.tn !== k.opcje.zewnetrzne.tenant) throw blad(`flaga jest dla innego tenanta (${l.tn})`);
+  const m = /^incydent:(\w+)$/.exec(l.z);
+  if (!m || !Array.isArray(l.w?.akcje)) throw blad('to nie jest flaga wyniku incydentu');
+  if (k.zewn.uzyte.includes(l.n)) throw blad('ta flaga była już użyta');
+  const z = k.zdarzenia.find(x => x.typ === 'incydent' && x.id === m[1] && !x.zagrane);
+  if (!z) throw blad(`incydent ${m[1]} nie trwa w tym miesiącu`);
+  if (l.w.stan !== skrotStanu(k)) throw blad('flaga dotyczy innego stanu kampanii (w labie grano na innym zapisie)');
+  const n0 = k.akcje.length;
+  k.zewn.uzyte.push(l.n);
+  k.wLabie = true;
+  let w = null;
+  try {
+    for (const a of l.w.akcje) {
+      if (a.t === 'inc_start') rozpocznijIncydent(k, a.id);
+      else if (a.t === 'inc') w = incydentAkcja(k, a.a).koniec || w;
+      else if (a.t === 'inc_czekaj') w = incydentCzekaj(k, a.h).koniec || w;
+      else if (a.t === 'inc_koniec') w = incydentZakoncz(k);
+      else throw new Error(`nieznana akcja w wyniku labu: ${a.t}`);
+    }
+    if (k.incydent) w = incydentZakoncz(k);
+  } finally { k.wLabie = false; }
+  k.akcje.length = n0;
+  k.akcje.push({ t: 'inc_lab', flaga });
+  return w;
+}
+
+// Jedna komenda na każdą flagę: wynik incydentu z labu albo zadanie wdrożenia (SIEM/SOAR).
+function flaga(k, f) {
+  let l;
+  try { l = ZWN.odczytaj(f, k.opcje?.zewnetrzne?.klucze || []); } catch (e) { throw blad(e.message); }
+  if (l.z.startsWith('incydent:')) { const w = wynikLabu(k, f); return w ? `Wynik z labu: ${w.tytul}. ${w.opis}` : 'Wynik z labu wpisany.'; }
+  return RU.wykonaj(k, 'flaga', { flaga: f });
+}
+
 function incydentAkcja(k, aid) { const r = I.wykonaj(k, aid); if (r.koniec) zastosujWynikIncydentu(k, r.koniec); return r; }
 function incydentCzekaj(k, h) { const r = I.czekaj(k, h); if (r.koniec) zastosujWynikIncydentu(k, r.koniec); return r; }
 function incydentZakoncz(k) {
@@ -413,7 +471,9 @@ function zamknijMiesiac(k) {
   RU.poMiesiacu(k, st.ostatni.wdrozone);
   CY.koniecMiesiaca(k, RU.api(k));
   DR.koniecMiesiaca(k);
-  if (st.ostatni.wdrozone.length) k.raportIT.push(`Wdrożono: ${st.ostatni.wdrozone.map(id => S.kontrola[id].nazwa).join('; ')}.`);
+  // Czekające na konfigurację w zewnętrznym systemie mają własny wiersz (proto/ruchy.js → poMiesiacu).
+  const wdr = st.ostatni.wdrozone.filter(id => k.obiekty[id]?.stan !== 'konfiguracja');
+  if (wdr.length) k.raportIT.push(`Wdrożono: ${wdr.map(id => S.kontrola[id].nazwa).join('; ')}.`);
   if (st.ostatni.jakosc_ops < 0.8) k.raportIT.push(`Nie nadążamy z alertami — przejrzano ok. ${Math.round(st.ostatni.jakosc_ops * 100)}%.`);
   if (st.ostatni.utrzymanie_ulamek < 1) k.raportIT.push(`Brakuje godzin na utrzymanie zabezpieczeń (${Math.round(st.ostatni.utrzymanie_ulamek * 100)}% potrzeb).`);
   const niedok = st.projekty.map(p => `${S.kontrola[p.id].nazwa} (${Math.round(100 * p.h / (S.kontrola[p.id].wdrozenie.h * Math.max(0.4, st.skalaH) * (p.hMn ?? 1)))}%)`);
@@ -1038,14 +1098,15 @@ function wykonajAkcje(k, a) {
   if (a.t === 'ruch') return RU.wykonaj(k, a.id, a.p);
   if (a.t === 'sprawa') return SP.odpowiedz(k, a.id, a.v, a.p);
   if (a.t === 'inc_start') return rozpocznijIncydent(k, a.id);
+  if (a.t === 'inc_lab') return wynikLabu(k, a.flaga);
   if (a.t === 'inc') return incydentAkcja(k, a.a);
   if (a.t === 'inc_czekaj') return incydentCzekaj(k, a.h);
   if (a.t === 'inc_koniec') return incydentZakoncz(k);
   if (a.t === 'zamknij') return zamknijMiesiac(k);
   throw new Error(`nieznana akcja w zapisie: ${a.t}`);
 }
-async function odtworz(defId, seed, akcje) {
-  const k = nowaKampania(defId, seed);
+async function odtworz(defId, seed, akcje, opcje = {}) {
+  const k = nowaKampania(defId, seed, opcje);
   for (const a of akcje) wykonajAkcje(k, a);
   if (k.akcje.length !== akcje.length) throw new Error('zapis nie odtwarza się (różna liczba akcji)');
   return k;
@@ -1078,6 +1139,7 @@ Komendy (wszystko w dowolnej kolejności, ile chcesz w miesiącu):
   a <nr> <czasownik> [k=v …]   odpowiedz na sprawę (np. a 1 warunki warunki=brama,konta)
   m [kategoria|szukaj]  lista ruchów (kontrole, rozpoznanie, ot, ludzie, zarzad, prawo, audyt)
   x <ruch> [k=v …]      wykonaj ruch (np. x wdroz:edr zakres=biuro_serwery tryb=wykrywaj · x test:backup · x rozmowa dzial=produkcja)
+  flaga LO{…}           flaga z Twojego SIEM-a/SOAR-a (gra z --tenant): zadanie wdrożenia albo wynik incydentu z labu
   o                     Twoje wdrożenia: stan, parametry, co wiesz o skuteczności, usterki
   p                     doradztwo: cennik tematów, zlecenia w toku, raporty z rekomendacjami
   w                     co wiemy (zasoby, fakty, luki, status)
@@ -1086,16 +1148,17 @@ Komendy (wszystko w dowolnej kolejności, ile chcesz w miesiącu):
   n                     zamknij miesiąc
   q                     zapisz i wyjdź`;
 
-async function grajInteraktywnie(plikZapisu, defId = 'wodociagi') {
+async function grajInteraktywnie(plikZapisu, defId = 'wodociagi', opcje = {}) {
   let seed = Math.floor(Math.random() * 1e9);
   let zapisane = [];
   if (plikZapisu && fs.existsSync(plikZapisu)) {
     const z = JSON.parse(fs.readFileSync(plikZapisu, 'utf8'));
     seed = z.seed; zapisane = z.akcje; defId = z.kampania || 'wodociagi';   // stare zapisy: Wodnik
+    opcje = z.opcje || opcje;
   }
-  const k = await odtworz(defId, seed, zapisane);
+  const k = await odtworz(defId, seed, zapisane, opcje);
   const { pytaj, zamknij } = wejscie();
-  const zapisz = () => { if (plikZapisu) fs.writeFileSync(plikZapisu, JSON.stringify({ kampania: defId, seed, akcje: k.akcje })); };
+  const zapisz = () => { if (plikZapisu) fs.writeFileSync(plikZapisu, JSON.stringify({ kampania: defId, seed, akcje: k.akcje, ...(Object.keys(opcje).length ? { opcje } : {}) })); };
   const sprobuj = fn => { try { const t = fn(); if (t) console.log(typeof t === 'string' ? t : t.tekst || ''); zapisz(); } catch (e) { if (!e.niedostepny) throw e; console.log(`Nie da się: ${e.message}.`); } };
   console.log(naglowek(k)); console.log(briefing(k)); console.log(POMOC);
 
@@ -1126,6 +1189,7 @@ async function grajInteraktywnie(plikZapisu, defId = 'wodociagi') {
     else if (cmd === 'w') console.log(coWiemy(k));
     else if (cmd === 'd') for (const r of k.rejestr.filter(x => x.m === k.st.m)) console.log(`  [${r.kto}] ${r.tekst}`);
     else if (cmd === 'x') sprobuj(() => RU.wykonaj(k, tok[1] || '', parametry(tok.slice(2))));
+    else if (cmd === 'flaga') sprobuj(() => flaga(k, tok[1] || ''));
     else if (cmd === 'a') {
       const s = k.sprawy[Number(tok[1]) - 1];
       if (!s) { console.log('Nie ma takiej sprawy (s — lista).'); continue; }
@@ -1154,13 +1218,17 @@ async function main() {
   if (auto) {
     if (!AUTO[auto]) { console.error(`Strategie: ${Object.keys(AUTO).join(', ')}`); process.exit(1); }
     await grajAuto(auto, Number(arg('seed') || 7), process.argv.includes('--szczegoly'), console.log, true, arg('kampania') || 'wodociagi');
-  } else await grajInteraktywnie(arg('zapis'), arg('kampania') || 'wodociagi');
+  } else {
+    // --tenant=ala --klucz=publiczny.pem[,drugi.pem]: gra połączona z zewnętrznym SIEM-em/SOAR-em.
+    const opcje = arg('tenant') ? { zewnetrzne: { tenant: arg('tenant'), klucze: (arg('klucz') || '').split(',').filter(Boolean).map(f => fs.readFileSync(f, 'utf8')) } } : {};
+    await grajInteraktywnie(arg('zapis'), arg('kampania') || 'wodociagi', opcje);
+  }
 }
 
 module.exports = {
   walidujKampanie, pelnaDefinicja, nowaKampania, zamknijMiesiac, rozpocznijIncydent, incydentAkcja, incydentCzekaj, incydentZakoncz,
   ujawnij, ocenaKontroli, indeksOdpornosci, ekspozycja, coJesli, jakoscDecyzji, BRAMKI, KLUCZOWE, podsumowanie, widokRuchow, widokSpraw,
-  sprawyOdstepstwa, apiAuto, najlepszeWarunki, madraSprawa, odpowiedzStylu, pierwszaDostepna, madreRuchy, madryIncydent, planIncydentu, AUTO, grajAuto, wykonajAkcje, odtworz,
+  sprawyOdstepstwa, flaga, wynikLabu, skrotStanu, apiAuto, najlepszeWarunki, madraSprawa, odpowiedzStylu, pierwszaDostepna, madreRuchy, madryIncydent, planIncydentu, AUTO, grajAuto, wykonajAkcje, odtworz,
 };
 
 // Po module.exports: moduły ładowane leniwie (doradztwo → kampania.coJesli) muszą widzieć eksporty,

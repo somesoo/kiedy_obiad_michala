@@ -22,6 +22,7 @@ const I = require('../proto/incydent');
 const K = require('../proto/kampania');
 const S = require('../proto/silnik');
 const { przygotuj } = require('../proto/rozegraj');
+const ZWN = require('../proto/zewnetrzne');
 
 // Drabina podpowiedzi (docs/21-…, 21.3): pytanie śledcze → źródło → filtr → odpowiedź. Minuty zegara.
 const CENY_MIN = [10, 20, 45, 90];
@@ -57,23 +58,43 @@ function walidujLab(lab, inc = I.wczytaj(lab.id)) {
 const skrot = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
 
 // ── SESJA ──
-// p: { incydent, kampania?, seed, kontrole[], naprawione[], start (ISO: chwila T+0), tenant }
+// Stan kampanii gracza z zapisu ({ kampania, seed, akcje, opcje }): ten sam stan, na którym
+// incydent zaczął się w jego grze. Incydent musi w nim trwać (miesiąc, w którym wypadł).
+function zZapisu(p) {
+  const z = p.zapis;
+  if (!z || !Array.isArray(z.akcje) || !z.kampania) throw new Error('zapis: { kampania, seed, akcje, opcje } z pliku zapisu gry');
+  const k = K.nowaKampania(z.kampania, z.seed, z.opcje || {});
+  for (const a of z.akcje) K.wykonajAkcje(k, a);
+  if (k.akcje.length !== z.akcje.length) throw new Error('zapis się nie odtwarza');
+  if (k.incydent) throw new Error('w zapisie trwa już incydent');
+  const stan = K.skrotStanu(k), n0 = k.akcje.length;
+  k.wLabie = true;   // ta sesja JEST labem — gra przepuszcza start incydentu
+  K.rozpocznijIncydent(k, p.incydent);
+  return { k, stan, n0 };
+}
+
+// p: { incydent, tenant, start (ISO: chwila T+0), seed, i ALBO kontrole[], naprawione[], kampania? (stan
+// przygotowany ręcznie) ALBO zapis (stan z kampanii gracza — wtedy wynik wraca do niej flagą) }
 function nowaSesja(p) {
   const lab = wczytajLab(p.incydent);
   const bledy = walidujLab(lab);
   if (bledy.length) throw new Error(`Lab ${p.incydent} ma błędy:\n - ${bledy.join('\n - ')}`);
-  const k = przygotuj(p.incydent, { seed: p.seed, kontrole: p.kontrole || [], naprawione: p.naprawione || [], ...(p.kampania ? { kampania: p.kampania } : {}) });
+  let k, zapis = null;
+  if (p.zapis) { const r = zZapisu(p); k = r.k; zapis = { stan: r.stan, n0: r.n0 }; }
+  else k = przygotuj(p.incydent, { seed: p.seed, kontrole: p.kontrole || [], naprawione: p.naprawione || [], ...(p.kampania ? { kampania: p.kampania } : {}) });
   const ctx = I.kontekst(k);
   // Osobny strumień: dane labu (konto, adres, godziny) i szum tła nie mogą przesunąć losowań silnika.
   const rnd = S.mulberry32((p.seed ^ 0x6c616221) >>> 0);
   const L = {
-    p, k, lab, s: k.incydent.s, t0: Date.parse(p.start), ops: [], wynik: null,
+    p, k, lab, s: k.incydent.s, t0: Date.parse(p.start), ops: [], wynik: null, zapis,
     ustalenia: {}, podpowiedzi: {}, bledne: {}, chybione: 0, zebrane: null,
     wydaneZd: [], wydaneDok: [], idZd: new Set(),
   };
   if (Number.isNaN(L.t0)) throw new Error('start: nieprawidłowa data');
   L.dane = lab.dane(rnd, ctx);
-  L.widocznosc = lab.widocznosc(ctx);
+  // Źródła potwierdzone flagami SIEM-a w kampanii gracza (null = gra bez zewnętrznego systemu).
+  L.zrodla = ZWN.zrodlaSiem(k);
+  L.widocznosc = lab.widocznosc(ctx, L.zrodla);
   L.ma = id => ctx.dziala(id);
   L.tlo = lab.tlo(rnd, L);
   wydaj(L);
@@ -256,7 +277,27 @@ function podsumowanie(L) {
   };
 }
 
+// Flaga wyniku dla kampanii gracza (tylko sesja z zapisu, po końcu fazy ostrej). Niesie akcje
+// silnika incydentu i skrót stanu, na którym grano — kampania odtworzy je u siebie (K.wynikLabu).
+// Identyfikator jednorazowy z treści sesji: ta sama sesja = ta sama flaga (odtwarzalne).
+function flagaWyniku(L, kluczPrywatny) {
+  if (!L.zapis || !L.wynik || !kluczPrywatny) return null;
+  const akcje = L.k.akcje.slice(L.zapis.n0);
+  const n = skrot(JSON.stringify([L.p, L.ops]));
+  return ZWN.podpisz({ tn: L.p.tenant, z: `incydent:${L.p.incydent}`, w: { stan: L.zapis.stan, akcje }, n, wyd: new Date().toISOString().slice(0, 10) }, kluczPrywatny);
+}
+
+// Dla generatora logów właściciela: scenariusz (dane świata, hosty, widoczność, kalendarz) i przebieg —
+// zdarzenia ze świata gry, które już zaszły (zależne od decyzji gracza). Generator robi z nich logi
+// w swoim formacie; gra zostaje źródłem prawdy, więc ustalenia (konto, adres) się zgadzają.
+const scenariusz = L => ({ incydent: L.p.incydent, tenant: L.p.tenant, start: new Date(L.t0).toISOString(), dane: L.dane, widocznosc: L.widocznosc, zrodla: L.zrodla, hosty: L.lab.hosty || null });
+function przebieg(L) {
+  const s = L.s;
+  return (L.lab.przebieg ? L.lab.przebieg(s, L) : []).filter(e => e.t <= s.t + 1e-9).sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : 1))
+    .map(e => ({ ...e, czas: znacznik(L, e.t) }));
+}
+
 // Dla SOAR-a: katalog playbooków (nazwa, opis, pola) — bez stanu gry.
 const playbooki = L => Object.entries(L.lab.soar).map(([id, x]) => ({ id, opis: x.opis, pola: x.pola || {} }));
 
-module.exports = { wczytajLab, walidujLab, nowaSesja, wykonaj, odtworz, stan, podsumowanie, playbooki, CENY_MIN, BLAD_MIN, OPERACJE };
+module.exports = { wczytajLab, walidujLab, nowaSesja, wykonaj, odtworz, stan, podsumowanie, playbooki, flagaWyniku, scenariusz, przebieg, CENY_MIN, BLAD_MIN, OPERACJE };

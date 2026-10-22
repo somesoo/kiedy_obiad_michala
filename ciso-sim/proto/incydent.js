@@ -27,6 +27,9 @@ const S = require('./silnik');
 
 const KROK_H = 0.5;   // dynamika w półgodzinnych krokach — akcje trwają od 15 minut do 8 godzin
 
+// Czy incydent ma wersję labową (SIEM/SOAR, lab/ i scenariusze/<id>-*.lab.js, docs/21-…).
+const maLab = id => fs.readdirSync(path.join(__dirname, '..', 'scenariusze')).some(f => f.startsWith(id) && f.endsWith('.lab.js'));
+
 function wczytaj(id) {
   const dir = path.join(__dirname, '..', 'scenariusze');
   const plik = fs.readdirSync(dir).find(f => f.startsWith(id) && f.endsWith('.incydent.js'));
@@ -169,4 +172,4 @@ function zegary(inc) {
   }).filter(Boolean);
 }
 
-module.exports = { wczytaj, waliduj, kontekst, rozpocznij, akcje, dostepnaAkcja, wykonaj, czekaj, zakoncz, zegary };
+module.exports = { wczytaj, maLab, waliduj, kontekst, rozpocznij, akcje, dostepnaAkcja, wykonaj, czekaj, zakoncz, zegary };
