@@ -58,6 +58,7 @@ tym, jak się skończyło.
 | [`docs/17-przypadki-brzegowe.md`](docs/17-przypadki-brzegowe.md) | „test penetracyjny" gry: strategie-prowokacje, fuzzer, znalezione absurdy, poprawki, cennik złych decyzji |
 | [`docs/19-kampania-gmina.md`](docs/19-kampania-gmina.md) | druga kampania: urząd gminy — co wnosi do silnika, oś, S07, wyniki |
 | [`docs/20-nowa-kampania.md`](docs/20-nowa-kampania.md) | **jak dodać kampanię**: lista kontrolna pliku (kontrakt pilnowany przez walidator i testy), plik incydentu, cennik z trzech źródeł |
+| [`docs/21-siem-soar-ctf.md`](docs/21-siem-soar-ctf.md) | **odnoga `ciso-siem-soar`**: SIEM i SOAR w grze (CTF + symulator CISO) — czy prowadzić za rączkę, drabina podpowiedzi, telemetria z decyzji gracza, plan MVP, pytania |
 | [`docs/18-silnik-ruchow.md`](docs/18-silnik-ruchow.md) | silnik bez quizu: obiekty i cykl życia kontroli, ruchy, sprawy, incydent bez drzewa, zasady, komendy gry, wyniki, skończone zasoby, decyzje cykliczne, doradztwo |
 | [`scenariusze/`](scenariusze/README.md) | format scenariusza, 12 pełnych scenariuszy, 32 zalążki, S01 i S03 jako incydenty (`*.incydent.js`) |
 | [`data/`](data/) | liczby: kontrole, zagrożenia, firmy, inicjatywy działów, kampanie (`data/kampanie/`) |
