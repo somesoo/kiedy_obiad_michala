@@ -86,6 +86,13 @@ można przejrzeć, przetestować i wycofać (`docs/18-…`).
   musi przechodzić przez `RU.wykonaj`/`SP.odpowiedz`/funkcje incydentu w `proto/kampania.js`
   i trafiać do `k.akcje`, inaczej zapis przestanie odtwarzać stan. Nowe losowanie — tylko
   z właściwego strumienia `k.rnd.*`. Plik zapisu pamięta kampanię (`kampania`).
+- **Lab SIEM/SOAR** (`lab/`, `docs/21-…`, odnoga `ciso-siem-soar`): incydent obsługiwany w zewnętrznym
+  SIEM-ie i SOAR-ze właściciela, każdy gracz = tenant (MSSP). Akcje techniczne tylko jako playbooki
+  (podpisane HMAC wywołania), wiedza tylko w SIEM-ie (ustalenia wpisywane, nie wybierane), podpowiedzi
+  kosztują zegar. Co trafia do tenanta (logi, dokumenty) **wynika z kampanii** — widoczność źródeł
+  w `scenariusze/<id>-*.lab.js`. Silnik incydentu się nie zmienia; lab woła `K.incydent*`. Sesja =
+  parametry + operacje (odtwarzalna), strumień losowości labu osobny. Prawda (konto, adres) nigdy
+  w `/gra/*` — tylko trener (`/admin`). Serwer bez sekretów ze środowiska nie wstaje.
 
 ## Narzędzia
 
@@ -97,6 +104,8 @@ node ciso-sim/proto/kampania.js [--kampania=gmina] [--zapis=plik.json] | --auto=
 node ciso-sim/proto/porownaj-style.js [--kampania=gmina]   # 4 style gry × 20 ziaren (wyniki → docs/16-…, 19-…)
 node ciso-sim/proto/brzegowe.js [N] [--kampania=gmina]     # strategie-prowokacje + niezmienniki (→ docs/17-…)
 node ciso-sim/proto/cennik.js [N] [--kampania=gmina]  # koszt JEDNEGO odstępstwa w dobrej grze (→ docs/17-…, 17.10)
+LAB_ADMIN_TOKEN=… LAB_SIEM_TOKEN=… LAB_SOAR_SECRET=… node ciso-sim/lab/serwer.js   # lab SIEM/SOAR (docs/21-…)
+LAB_URL=… LAB_TOKEN=<token gracza> node ciso-sim/lab/gracz.js                         # gracz w terminalu
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 

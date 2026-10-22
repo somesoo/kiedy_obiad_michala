@@ -68,7 +68,7 @@ module.exports = {
     if (s.dostep_odebrany) return;
     // Ostrzeżony (telefon, „pogadamy") nie czeka — zaciera ślady od razu.
     if (!s.dane_usuniete && (s.t + dt >= KASUJE_DANE_H || s.ostrzezony)) { s.dane_usuniete = true; s.usuniete_h = s.t + dt; }
-    if (!s.logi_usuniete && !s.dowody && (s.t + dt >= CZYSCI_LOGI_H || s.ostrzezony)) s.logi_usuniete = true;
+    if (!s.logi_usuniete && !s.dowody && (s.t + dt >= CZYSCI_LOGI_H || s.ostrzezony)) { s.logi_usuniete = true; s.logi_usuniete_h = s.t + dt; }
   },
 
   akcje: {
@@ -87,7 +87,8 @@ module.exports = {
       nazwa: 'Odblokować konta urzędników i zresetować ich hasła', czas_h: 2, h: 3, raz: false,
       dostepna: s => (s.proba ? 'nic nie jest zablokowane' : !s.obsluga_stoi ? 'konta działają' : null),
       efekt: s => {
-        if (!s.dostep_odebrany) { s.zablokowane_ponownie = true; return 'Odblokowane… a po godzinie znowu zablokowane z tego samego konta administratora.'; }
+        // Znaczniki czasu tylko dla telemetrii labu (lab/, docs/21-…) — zasady ich nie czytają.
+        if (!s.dostep_odebrany) { s.odblokowano_h ??= s.t; s.ponowna_blokada_h ??= s.t + 1; s.zablokowane_ponownie = true; return 'Odblokowane… a po godzinie znowu zablokowane z tego samego konta administratora.'; }
         s.obsluga_stoi = false; return 'Urzędnicy pracują. Kolejka przy okienkach znika do południa.';
       },
     },

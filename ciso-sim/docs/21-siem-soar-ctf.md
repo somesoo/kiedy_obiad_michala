@@ -152,3 +152,73 @@ kont, JML, PAM) realnie zmienia to, co widać.
 6. Czy CTF ma być **częścią kampanii** (incydent z osi gra się w SIEM-ie) czy osobnym trybem
    „zagraj incydent na stanie z mojej kampanii"? Proponuję zacząć od drugiego — prościej, a
    połączenie z 21.4 i tak działa.
+
+## 21.10. Decyzja (22.10.2026): incydent obsługuje się w SIEM-ie i SOAR-ze — model MSSP
+
+Właściciel: „dodać do obsługi incydentu wymagane akcje w SOAR i SIEM — człowiek sam przechodzi do
+SIEM-a / SOAR-a hostowanego gdzie indziej (po HTTP)"; „zrobię MSSP w SOAR i SIEM dla każdego
+gracza"; „każdy gracz będzie miał w trakcie incydentu importowane do swojego tenanta wymagane
+dokumenty, na podstawie których podejmuje działania".
+
+**Jak to pogodzić z „bez quizu":** „wymagane" jest **gdzie** robi się akcję, nie **czy** i **kiedy**.
+Akcje techniczne (wyłączenie konta, zebranie dzienników, odblokowanie, przywrócenie, przegląd kont)
+istnieją w labie wyłącznie jako playbooki w SOAR-ze; decyzje ludzi (wójt, komunikat, papier,
+zgłoszenia, zawiadomienie) zostają w grze. Kolejność dowolna, zegar płynie, bezczynność toczy
+incydent jak dotąd. Wiedzy (konto, adres, czas, co usunięto) nie podaje gra — jest w SIEM-ie.
+
+**Co dostaje tenant gracza** (wynika z jego kampanii — 21.4):
+
+| Kampania | SIEM na starcie | Dokumenty w sprawie |
+|---|---|---|
+| bez SIEM/MDR | **pusto** — dzienniki leżą na serwerach; playbook „zbierz-dzienniki" je wysyła; dziennik DC wyczyszczony wcześniej (po ok. 8 h) jest stracony | zgłoszenie, wypowiedzenie umowy, formularz CSIRT |
+| z SIEM, EDR, zaporą | blokady, logowania, polecenia sprawcy (EDR bez alertu — martwe pole), ruch na 3389 | + plan ciągłości (z BCP), rejestr kopii (z kopiami) |
+| po playbooku przeglądu kont | — | + eksport kont uprzywilejowanych |
+
+Przykład (ziarno 3): ta sama gra techniczna kosztuje 46 tys. zł bez kopii i 3,9 tys. zł z kopiami
+i BCP; bez SIEM-a pierwsza godzina idzie na zdobycie logów.
+
+**Pliki:** `lab/lab.js` (rdzeń, sesja = parametry + operacje, odtwarzalna), `scenariusze/S07-konto.lab.js`
+(co trafia do tenanta: dane, widoczność, szum tła, zdarzenia, dokumenty, ustalenia, playbooki),
+`lab/serwer.js` (HTTP), `lab/gracz.js` (klient terminalowy), `test/lab.test.js`. Silnik incydentu
+bez zmian w zachowaniu (S07 zapisuje tylko dwa znaczniki czasu dla telemetrii).
+
+### Kontrakt integracji (to, co konfigurujesz po stronie SIEM-a i SOAR-a)
+
+Sekrety tylko ze zmiennych środowiska, min. 24 znaki, bez wartości domyślnych: `LAB_ADMIN_TOKEN`,
+`LAB_SIEM_TOKEN`, `LAB_SOAR_SECRET`; przy wypychaniu także `LAB_PUSH_SECRET`. Serwer słucha na
+`LAB_HOST` (domyślnie 127.0.0.1) i `LAB_PORT` (31600) — TLS i adres publiczny daje reverse proxy.
+
+| Kto | Wywołanie | Uwierzytelnienie | Co |
+|---|---|---|---|
+| prowadzący | `POST /admin/sesje` `{tenant, incydent?, seed?, kontrole?, naprawione?, kampania?, start?}` | `Bearer LAB_ADMIN_TOKEN` | zakłada sesję gracza → `{sesja, token}` (token gracza pokazywany raz) |
+| prowadzący | `GET /admin/sesje`, `GET /admin/sesje/:id` (z odpowiedziami), `DELETE …` | jw. | podgląd trenera |
+| gracz | `GET /gra/stan`, `POST /gra/{akcja,czekaj,ustalenie,podpowiedz,koniec}` | `Bearer <token gracza>` | decyzje w grze, ustalenia z SIEM-a, podpowiedzi |
+| SIEM (pobieranie) | `GET /siem/:sesja/zdarzenia?po=N` | `Bearer LAB_SIEM_TOKEN` | NDJSON, pola zbliżone do ECS, `organization.id` = tenant; nagłówek `X-Lab-Nastepny` = kursor |
+| SIEM (wypychanie) | gra → `POST LAB_SIEM_PUSH_URL` (`{tenant}` w adresie) | podpis gry (niżej) | NDJSON nowych zdarzeń po każdym ruchu |
+| SOAR (wypychanie) | gra → `POST LAB_SOAR_PUSH_URL` | podpis gry | `{tenant, sesja, incydent, dokumenty[]}` — nowe dokumenty sprawy |
+| SOAR | `GET /soar/:sesja/dokumenty?po=N`, `GET /soar/:sesja/playbooki` | podpis SOAR-a | dokumenty i katalog playbooków (nazwa, opis, pola) |
+| SOAR | `POST /soar/:sesja/playbook` `{playbook, pola}` | podpis SOAR-a | wykonanie playbooka w grze → `{ok, tekst}` |
+
+**Podpis** (w obie strony ten sam schemat): nagłówki `X-Lab-Czas` (sekundy unixowe) i
+`X-Lab-Podpis: sha256=<hex>` = HMAC-SHA256(sekret, `"{czas}.{sesja}.{ciało}"`), ciało puste dla GET.
+Okno czasu ±300 s, powtórzony podpis odrzucany (409). Gra przy wypychaniu dodaje `X-Lab-Sesja`
+i `X-Lab-Tenant`. Zdarzenia mają stabilne `event.id` — wolno deduplikować.
+
+**Playbooki S07:** `wylacz-konto {konto}` (zły cel = czas mija, nic się nie dzieje; konto urzędnika
+jest nazwane), `zbierz-dzienniki`, `odblokuj-konta`, `przeglad-kont-uprzywilejowanych`,
+`przywroc-z-kopii`. **Ustalenia:** konto sprawcy, adres źródłowy, pierwsze wejście (czas polski
+albo UTC, ±10 min), usunięte udziały. Podpowiedzi 10/20/45/90 min zegara, zła odpowiedź 5 min.
+
+### Uproszczenia (🔵)
+- Zebranie dzienników „włącza przekazywanie" od tej chwili (w życiu to osobna konfiguracja).
+- T+0 = chwila założenia sesji (logi z „wieczorów przed" mają prawdziwe daty sprzed ~3 dni);
+  prowadzący może podać `start`, żeby wszyscy grali na tym samym kalendarzu.
+- Jedno źródło prawdy o czasie: zegar incydentu. Gracz „przesuwa" czas swoimi akcjami, a SIEM
+  dostaje logi do bieżącej chwili gry — nie płyną w czasie rzeczywistym.
+
+### Dalej
+1. Twój adapter: format zdarzeń/dokumentów pod Twój SIEM i SOAR (mapowanie pól, jeśli nie ECS).
+2. S01 i S03 w labie (poczta i bank; HMI/OT — zapora, EDR na stacjach inżynierskich).
+3. Gracz w przeglądarce zamiast terminala (po szkielecie aplikacji z logowaniem, `13-…`, etap C).
+4. Wynik labu w kampanii: dziś lab gra incydent na przygotowanym stanie (`kontrole`, `naprawione`);
+   następny krok — sesja ze stanu kampanii gracza (zapis = lista akcji, więc to tylko odtworzenie).
