@@ -722,7 +722,7 @@ function poMiesiacu(k, wdrozone) {
       delete st.aktywne[id];
       k.obiekty[id].stan = 'konfiguracja';
       k.historia.push({ m: st.m, t: 'czeka_na_konfiguracje', id, brak });
-      k.raportIT?.push(`${S.kontrola[id].nazwa}: wdrożone po naszej stronie — czeka na konfigurację w Twoim tenancie (${brak.map(z => ZWN.ZW.kontrole[id].zadania[z].opis).join('; ')}). Po zrobieniu wróć z flagą: flaga LO{…}`);
+      k.raportIT?.push(`${S.kontrola[id].nazwa}: wdrożone po naszej stronie — czeka na konfigurację w Twoim tenancie (${brak.map(z => ZWN.ZW.kontrole[id].zadania[z].opis).join('; ')}). Po zrobieniu: ${k.opcje.zewnetrzne.walidator ? `sprawdz ${id} (walidator sprawdzi Twój tenant i da flagi) albo ` : ''}flaga LO{…}`);
       continue;
     }
     poWdrozeniu(k, id);

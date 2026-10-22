@@ -1,0 +1,28 @@
+{
+  "_opis": "Wzór konfiguracji walidatora dla Twojego SIEM-a i SOAR-a (adapter http-json). Podmień ścieżki i nazwy pól na swoje API. Sekrety tylko przez ${ENV:NAZWA}.",
+  "adapter": "http-json",
+  "test_na_zywo": true,
+  "progi": { "zrodlo_swieze_h": 24, "alert_s": 90, "sprawa_s": 120, "odpytywanie_ms": 2000, "odstep_s": 20, "zatwierdzenie": true },
+  "siem": {
+    "url": "https://siem.example.local/api",
+    "naglowki": { "Authorization": "Bearer ${ENV:SIEM_API_TOKEN}" },
+    "typy": { "windows-dc": "ad", "windows-server": "serwery", "windows-workstation": "stacje", "exchange": "poczta", "firewall": "zapora", "vpn": "zapora", "ics": "ot" },
+    "zasoby": {
+      "zrodla":     { "sciezka": "/tenants/{tenant}/sources", "lista": "data", "pola": { "nazwa": "name", "typ": "type", "ostatnie": "last_event_at" } },
+      "reguly":     { "sciezka": "/tenants/{tenant}/rules", "lista": "data", "pola": { "nazwa": "name", "wlaczona": "enabled", "techniki": "mitre.techniques" } },
+      "wstrzyknij": { "sciezka": "/tenants/{tenant}/ingest", "metoda": "POST", "format": "ndjson" },
+      "alerty":     { "sciezka": "/tenants/{tenant}/alerts?since={od}", "lista": "data" }
+    }
+  },
+  "soar": {
+    "url": "https://soar.example.local/api",
+    "naglowki": { "X-Api-Key": "${ENV:SOAR_API_KEY}" },
+    "typy": { "disable-account": "wylaczenie_konta", "collect-logs": "zebranie_dziennikow", "isolate-host": "izolacja_hosta" },
+    "kroki_zatwierdzenia": ["approval", "manual-approval"],
+    "zasoby": {
+      "integracje": { "sciezka": "/tenants/{tenant}/integrations", "lista": "data", "pola": { "z": "source", "wlaczona": "enabled" } },
+      "sprawy":     { "sciezka": "/tenants/{tenant}/cases?since={od}", "lista": "data", "pola": { "zrodlo": "source", "utworzona": "created_at" } },
+      "playbooki":  { "sciezka": "/tenants/{tenant}/playbooks", "lista": "data", "pola": { "nazwa": "name", "typ": "kind", "wlaczony": "active", "kroki": "steps" } }
+    }
+  }
+}

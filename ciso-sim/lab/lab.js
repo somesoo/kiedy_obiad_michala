@@ -87,6 +87,9 @@ function nowaSesja(p) {
   const rnd = S.mulberry32((p.seed ^ 0x6c616221) >>> 0);
   const L = {
     p, k, lab, s: k.incydent.s, t0: Date.parse(p.start), ops: [], wynik: null, zapis,
+    // Tryb „flagi" (forma CTF, docs/21-…, 21.12): playbook i analiza w SOAR-ze oddają flagę w swoim
+    // wyniku, a skutek w grze następuje dopiero, gdy gracz z nią wróci. „bezposredni": SOAR działa od razu.
+    tryb: p.tryb === 'flagi' ? 'flagi' : 'bezposredni', zuzyte: new Set(), odcisk: skrot(JSON.stringify(p)),
     ustalenia: {}, podpowiedzi: {}, bledne: {}, chybione: 0, zebrane: null,
     wydaneZd: [], wydaneDok: [], idZd: new Set(),
   };
@@ -168,6 +171,7 @@ const OPERACJE = {
   // i niczego o niej nie zdradza poza „zgadza się / nie zgadza się".
   ustalenie(L, { id, odpowiedz }) {
     trwa(L);
+    if (L.tryb === 'flagi') throw blad('Analizę zapisujesz w sprawie w SOAR-ze — jeśli się zgadza, wynik analizy da Ci flagę. Wróć z nią: flaga LO{…}.');
     const u = L.lab.ustalenia[id];
     if (!u || (u.kiedy && !u.kiedy(L.s, L))) throw blad('nie ma takiego pytania w tym incydencie', 404);
     if (L.ustalenia[id]) throw blad('już ustalone');
@@ -197,7 +201,9 @@ const OPERACJE = {
     return { szczebel: 4, tekst: `Odpowiedź: ${u.prawda(L)}` };
   },
   // Playbook z SOAR-a (wywołanie podpisane — sprawdza serwer). Zły cel = czas mija, nic się nie dzieje.
-  soar(L, { playbook, pola = {} }) {
+  // W trybie „flagi" dobry playbook nie zmienia jeszcze gry: oddaje flagę w wyniku (to widzi gracz
+  // w SOAR-ze), a akcja dzieje się, gdy gracz ją przyniesie (`flaga`). Czas akcji płynie wtedy.
+  soar(L, { playbook, pola = {} }, ctx = {}) {
     trwa(L);
     const pb = L.lab.soar[playbook];
     if (!pb) throw blad(`nieznany playbook „${playbook}"`, 404);
@@ -208,18 +214,75 @@ const OPERACJE = {
       czekajMin(L, L.k.incydent.def.akcje[pb.akcja].czas_h * 60);
       return { ok: false, tekst: pb.chybiony ? pb.chybiony(pola, L) : 'Playbook wykonany, ale nie na tym celu — nic się nie zmieniło.' };
     }
+    if (L.tryb === 'flagi') return { ok: true, tekst: `Playbook „${playbook}" przeszedł. Wynik: flaga — wróć z nią do gry.`, flaga: wydajFlage(L, ctx, `lab.playbook:${playbook}`, { pola }) };
     const r = K.incydentAkcja(L.k, pb.akcja);
     pb.po?.(L);
     poRuchu(L, r);
     return { ok: true, tekst: r.tekst };
   },
+  // Wynik analizy z SOAR-a (tryb „flagi"): gracz zapisuje ustalenie w sprawie, SOAR je przysyła.
+  // Zgadza się → flaga w wyniku analizy; nie zgadza się → fałszywy trop kosztuje zegar.
+  analiza(L, { id, odpowiedz }, ctx = {}) {
+    trwa(L);
+    if (L.tryb !== 'flagi') throw blad('analiza z SOAR-a jest w trybie „flagi"; tu ustalenia wpisuje się w grze', 400);
+    const u = L.lab.ustalenia[id];
+    if (!u || (u.kiedy && !u.kiedy(L.s, L))) throw blad('nie ma takiego pytania w tym incydencie', 404);
+    if (L.ustalenia[id]) throw blad('już ustalone');
+    if (typeof odpowiedz !== 'string' || !odpowiedz.trim() || odpowiedz.length > 300) throw blad('odpowiedź: krótki tekst', 400);
+    if (u.sprawdz(odpowiedz, L)) return { zgadza: true, tekst: 'Analiza potwierdzona. Wynik: flaga — wróć z nią do gry.', flaga: wydajFlage(L, ctx, `lab.ustalenie:${id}`, {}) };
+    L.bledne[id] = (L.bledne[id] || 0) + 1;
+    czekajMin(L, BLAD_MIN);
+    return { zgadza: false, tekst: `Analiza się nie potwierdza (−${BLAD_MIN} min na fałszywy trop).` };
+  },
+  // Gracz wraca do gry z flagą (z wyniku playbooka albo analizy). Flaga jest przypięta do tej sesji
+  // (`odcisk`) i jednorazowa. Przy odtworzeniu sesji podpis sprawdzono już raz — w zapisie jest ładunek.
+  flaga(L, dane, ctx = {}) {
+    trwa(L);
+    let l = dane.l;
+    if (!l) {
+      if (!ctx.klucze?.length) throw blad('serwer labu nie ma klucza flag', 500);
+      try { l = ZWN.odczytaj(dane.flaga, ctx.klucze); } catch (e) { throw blad(e.message, 400); }
+    }
+    if (l.tn !== L.p.tenant || l.w?.s !== L.odcisk) throw blad('ta flaga jest z innej sesji albo innego tenanta', 400);
+    if (L.zuzyte.has(l.n)) throw blad('ta flaga była już użyta');
+    const [rodzaj, nazwa] = l.z.split(':');
+    let tekst;
+    if (rodzaj === 'lab.playbook') {
+      const pb = L.lab.soar[nazwa];
+      const powod = pb && I.dostepnaAkcja(L.k, pb.akcja);
+      if (!pb) throw blad('nieznany playbook we fladze', 400);
+      if (powod) throw blad(powod);           // flaga zostaje ważna: można ją wnieść, gdy akcja znów ma sens
+      L.zuzyte.add(l.n);
+      const r = K.incydentAkcja(L.k, pb.akcja);
+      pb.po?.(L);
+      poRuchu(L, r);
+      tekst = r.tekst;
+    } else if (rodzaj === 'lab.ustalenie') {
+      if (!L.lab.ustalenia[nazwa] || L.ustalenia[nazwa]) throw blad('to ustalenie już jest albo go nie ma');
+      L.zuzyte.add(l.n);
+      L.ustalenia[nazwa] = { t: L.s.t, podpowiedzi: L.podpowiedzi[nazwa] || 0 };
+      wydaj(L);
+      const u = L.lab.ustalenia[nazwa];
+      tekst = u.po_ustaleniu ? u.po_ustaleniu(L) : 'Ustalenie przyjęte.';
+    } else throw blad('to nie jest flaga z tego incydentu', 400);
+    dane.l = l;   // do zapisu sesji (L.ops)
+    return { tekst };
+  },
 };
 
-function wykonaj(L, op, dane = {}) {
+// Flaga labu: podpis kluczem serwera, przypięta do tenanta i do tej sesji (odcisk parametrów).
+function wydajFlage(L, ctx, z, w) {
+  if (!ctx.klucz) throw blad('serwer labu nie ma klucza flag (LAB_KLUCZ_PRYWATNY)', 500);
+  return ZWN.podpisz({ tn: L.p.tenant, z, w: { ...w, s: L.odcisk }, n: crypto.randomBytes(9).toString('base64url') }, ctx.klucz);
+}
+
+// ctx: { klucz (prywatny, do wydawania flag), klucze (publiczne, do sprawdzania) } — od serwera.
+function wykonaj(L, op, dane = {}, ctx = {}) {
   const f = OPERACJE[op];
   if (!f) throw blad(`nieznana operacja ${op}`, 400);
-  const r = f(L, dane);
-  L.ops.push({ op, ...dane });
+  const d = { ...dane };
+  const r = f(L, d, ctx);
+  L.ops.push({ op, ...(op === 'flaga' ? { l: d.l } : d) });
   return r;
 }
 
@@ -228,7 +291,7 @@ function odtworz(p, ops) {
   const L = nowaSesja(p);
   for (const o of ops) {
     const { op, ...dane } = o;
-    try { wykonaj(L, op, dane); } catch (e) { if (!e.niedostepny) throw e; L.ops.push(o); }
+    try { wykonaj(L, op, dane); } catch (e) { if (!e.niedostepny) throw e; L.ops.push(o); }   // flaga: ładunek z zapisu
   }
   return L;
 }
@@ -240,7 +303,7 @@ function stan(L) {
   const s = L.s, def = I.wczytaj(L.p.incydent);
   const playbook = id => Object.entries(L.lab.soar).find(([, x]) => x.akcja === id)?.[0] || null;
   const out = {
-    incydent: { id: def.id, tytul: def.tytul }, tenant: L.p.tenant, t: s.t, czas: znacznik(L, s.t),
+    incydent: { id: def.id, tytul: def.tytul }, tenant: L.p.tenant, tryb: L.tryb, t: s.t, czas: znacznik(L, s.t),
     widok: L.lab.widok(s, L),
     zegary: inc ? I.zegary(inc) : [],
     akcje: inc ? I.akcje(k).map(a => ({ ...a, kanal: playbook(a.id) ? 'soar' : 'gra', playbook: playbook(a.id) })) : [],

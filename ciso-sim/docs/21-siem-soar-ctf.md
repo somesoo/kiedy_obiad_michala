@@ -289,3 +289,58 @@ wpisuje je jako ustalenia, a jego tenant wydaje je w logach.
 
 Sesja z zapisu wymaga `LAB_KLUCZ_PRYWATNY` (plik PEM, `lab/flaga.js klucze`). Klucz publiczny
 z tej pary trafia do gry graczy (`--klucz=`).
+
+## 21.12. Walidator wdrożeń i flagi z wyników SOAR-a (22.10.2026)
+
+Właściciel: „muszę mieć skrypty — walidacje wyzwalane z gry i odpalane na SIEM/SOAR: gracz mówi
+«wdrożone», sprawdź, czy poprawnie, i jak tak, to dostaje flagę"; „obsługa incydentu powinna dać
+flagę w jakimś logu / wyniku analizy w SOAR".
+
+### Wdrożenia: „wdrożone — sprawdź" → walidator → flaga
+```
+gra: sprawdz siem ──POST /sprawdz {tenant, kontrola}──▶ walidator (przy SIEM-ie/SOAR-ze)
+                                                          ├─ skrypty sprawdzenia/ → adapter → API tenanta
+                                                          └─ zaliczone: flaga (Ed25519) / niezaliczone: powody
+gra ◀── { wyniki: [{ zadanie, ok, powody, flaga? }] } ── gra wnosi flagi sama (ruch `flaga`, w zapisie)
+```
+Gra: `node ciso-sim/proto/kampania.js --tenant=ala --klucz=flagi.pub.pem --walidator=https://walidator… --zapis=ala.json`,
+w grze `sprawdz [kontrola]` (token opcjonalny: zmienna `LO_WALIDATOR_TOKEN`, nie trafia do zapisu).
+Walidator: `WAL_KONFIG=konfig.json WAL_KLUCZ_PRYWATNY=flagi.pem node ciso-sim/walidator/serwer.js`.
+
+**Skrypty** (`walidator/sprawdzenia/`, jedno zadanie gry = jeden skrypt; test pilnuje, że każde
+zadanie z `data/zewnetrzne.js` ma skrypt):
+
+| Zadanie | Co znaczy „poprawnie" | Wynik we fladze |
+|---|---|---|
+| `siem.zrodla` (`siem_os`, `mdr`) | źródło przysłało zdarzenie w ostatnich 24 h, zegar się zgadza; typ zmapowany na źródło gry | lista żywych źródeł (jakość SIEM-a w grze i logi w labie) |
+| `siem.reguly` (`siem_os`) | ≥ 3 włączone reguły z techniką z incydentów gry (`TECHNIKI`: T1531, T1110, T1078, T1070.001, T1485, T1486, T1114, T1133); **na żywo**: walidator wstrzykuje oznaczoną próbkę zdarzeń (`walidator/proby.js`) i czeka na alert ze znacznikiem — reguła, która milczy, nie przechodzi | nazwy działających reguł |
+| `soar.integracja` | na żywo: próbka → alert w SIEM-ie → sprawa w SOAR-ze ze znacznikiem; bez tego: włączona integracja i sprawa z SIEM-a z ostatnich 7 dni | — |
+| `soar.playbooki` | wyłączenie konta, zebranie dzienników, izolacja hosta: włączone, ≥ 2 kroki, **krok zatwierdzenia przez człowieka** przy działaniach, które mogą zatrzymać pracę (`progi.zatwierdzenie`) | nazwy playbooków |
+
+Każde niezaliczenie ma powód po polsku („UG-DC01: podłączone, ale nie przysyła logów", „reguła X
+na próbce nie wystawiła alertu", „brak kroku zatwierdzenia"), więc gracz wie, co poprawić.
+
+**Adaptery** (`walidator/adaptery/`): `http-json` — Twoje API opisane w konfiguracji (ścieżki z
+`{tenant}`, `{od}`, nazwy pól, mapowania typów, sekrety tylko `${ENV:…}`; wzór: `walidator/konfig.przyklad.json`);
+`atrapa` — SIEM i SOAR w pamięci do testów i demo (`walidator/atrapa.przyklad.json`: tenant „ala" dobrze,
+„bob" z typowymi błędami — to też wzór kształtu danych). Bez zasobów `wstrzyknij` i `alerty` walidator
+nie robi testu na żywo i mówi to w powodach. Własny adapter = plik z `{ siem, soar }` o tych samych metodach.
+
+**Ochrona SIEM-a:** jedno sprawdzenie naraz na tenanta, odstęp między sprawdzeniami (`progi.odstep_s`),
+próbki jawnie oznaczone (`event.dataset: lo.proba`, `labels.lo_proba`), fikcyjne konta i adresy.
+
+### Incydent: flaga w wyniku playbooka i analizy w SOAR-ze (tryb „flagi")
+Sesja labu w trybie **„flagi"** (domyślny, gdy serwer labu ma `LAB_KLUCZ_PRYWATNY`):
+- **Playbook** (`POST /soar/:sesja/playbook`, podpis HMAC jak w 21.10): dobry cel → `{ ok, tekst, flaga }`.
+  Flagę widać w wyniku playbooka w SOAR-ze. Gra się jeszcze nie zmienia. Zły cel → bez flagi, czas mija.
+- **Analiza** (`POST /soar/:sesja/analiza {ustalenie, odpowiedz}`): gracz zapisuje ustalenie z SIEM-a
+  w sprawie, a SOAR wysyła je do labu. Zgadza się → flaga w wyniku analizy. Nie zgadza się → −5 min.
+  W grze ustaleń nie da się już wpisać.
+- **Powrót do gry:** `flaga LO{…}` (klient `lab/gracz.js`: `f LO{…}`; HTTP: `POST /gra/flaga`). Dopiero
+  wtedy dzieje się akcja (czas płynie) albo zapisuje się ustalenie. Flaga jest przypięta do tenanta
+  **i do tej sesji** (odcisk parametrów), działa raz, a odrzucona przez stan („nie zdążysz",
+  „już odebrany") zostaje ważna.
+- 🔵 Uproszczenie: w życiu playbook działa od razu. Tu skutek czeka na powrót gracza z flagą,
+  żeby ten „wyszedł do SOAR-a i wrócił" — zegar incydentu i tak liczy czas akcji.
+
+Po końcu fazy ostrej flaga wyniku wraca do kampanii jak w 21.11.

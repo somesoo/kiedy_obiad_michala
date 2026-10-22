@@ -43,6 +43,8 @@ function konfiguracja(env = process.env) {
     gen: env.LAB_GEN_TOKEN || null, genPush: env.LAB_GEN_PUSH_URL || null,
     klucz: env.LAB_KLUCZ_PRYWATNY ? fs.readFileSync(env.LAB_KLUCZ_PRYWATNY, 'utf8') : null,
   };
+  // Klucz publiczny z tej samej pary: lab sprawdza flagi, które sam wydał (wynik playbooka/analizy).
+  c.kluczPub = c.klucz ? crypto.createPublicKey(c.klucz).export({ type: 'spki', format: 'pem' }) : null;
   if (c.gen && c.gen.length < 24) brak.push('LAB_GEN_TOKEN (co najmniej 24 znaki)');
   if ((c.siemPush || c.soarPush || c.genPush) && (!c.push || c.push.length < 24)) brak.push('LAB_PUSH_SECRET (co najmniej 24 znaki) — wymagany przy wypychaniu');
   if (brak.length) throw new Error(`Brak konfiguracji:\n - ${brak.join('\n - ')}`);
@@ -133,7 +135,8 @@ function utworz(c) {
   }
   const sesjaGracza = req => { const t = bearer(req); for (const [id, x] of sesje) if (t && rowne(hash(t).toString('hex'), x.tokenHash)) return [id, x]; throw blad(401, 'zły token gracza'); };
   const sesjaPo = id => { const x = /^[a-f0-9]{16}$/.test(id) && sesje.get(id); if (!x) throw blad(404, 'nie ma takiej sesji'); return x; };
-  const operacja = (id, x, op, dane) => { const r = LAB.wykonaj(x.L, op, dane); zapisz(id, x); wypchnij(id, x); return r; };
+  const ctx = { klucz: c.klucz, klucze: c.kluczPub ? [c.kluczPub] : [] };
+  const operacja = (id, x, op, dane) => { const r = LAB.wykonaj(x.L, op, dane, ctx); zapisz(id, x); wypchnij(id, x); return r; };
   // Stan dla gracza + flaga wyniku, gdy incydent z zapisu kampanii się zakończył (wraca z nią do gry).
   const stanGracza = x => { const st = LAB.stan(x.L); const f = LAB.flagaWyniku(x.L, c.klucz); if (st.koniec && f) st.koniec.flaga = f; return st; };
 
@@ -164,6 +167,8 @@ function utworz(c) {
         const p = {
           incydent: String(d.incydent || 'S07'), tenant: d.tenant, seed: Number.isInteger(d.seed) ? d.seed : Number.isInteger(d.zapis?.seed) ? d.zapis.seed : crypto.randomInt(1, 2 ** 31),
           ...(d.zapis ? { zapis: { kampania: String(d.zapis.kampania), seed: d.zapis.seed, akcje: d.zapis.akcje, opcje: d.zapis.opcje } } : {}),
+          // Forma CTF domyślnie, gdy serwer ma klucz flag: SOAR oddaje flagi, gra przyjmuje tylko flagi.
+          tryb: d.tryb === 'bezposredni' || !c.klucz ? 'bezposredni' : 'flagi',
           kontrole: Array.isArray(d.kontrole) ? d.kontrole.map(String) : [], naprawione: Array.isArray(d.naprawione) ? d.naprawione.map(String) : [],
           // T+0 = chwila założenia sesji: logi z „piątku" mają prawdziwe daty sprzed trzech dni.
           start: d.start || new Date(Math.floor(Date.now() / 60000) * 60000).toISOString(),
@@ -189,7 +194,7 @@ function utworz(c) {
     if (a === 'gra') {
       const [id, x] = sesjaGracza(req);
       if (b === 'stan' && req.method === 'GET') return odp(res, 200, stanGracza(x));
-      if (req.method === 'POST' && ['akcja', 'czekaj', 'ustalenie', 'podpowiedz', 'koniec'].includes(b)) {
+      if (req.method === 'POST' && ['akcja', 'czekaj', 'ustalenie', 'podpowiedz', 'koniec', 'flaga'].includes(b)) {
         const d = json(surowe);
         return odp(res, 200, { ...operacja(id, x, b, d), stan: stanGracza(x) });
       }
@@ -231,6 +236,12 @@ function utworz(c) {
         if (typeof d.playbook !== 'string') throw blad(400, 'playbook: nazwa playbooka');
         const pola = d.pola && typeof d.pola === 'object' ? Object.fromEntries(Object.entries(d.pola).map(([k, v]) => [k, String(v).slice(0, 200)])) : {};
         return odp(res, 200, operacja(b, x, 'soar', { playbook: d.playbook, pola }));
+      }
+      // Wynik analizy ze sprawy w SOAR-ze (tryb „flagi"): { ustalenie, odpowiedz } → { zgadza, tekst, flaga? }.
+      if (cc === 'analiza' && req.method === 'POST') {
+        const d = json(surowe);
+        if (typeof d.ustalenie !== 'string' || typeof d.odpowiedz !== 'string') throw blad(400, 'analiza: { ustalenie, odpowiedz }');
+        return odp(res, 200, operacja(b, x, 'analiza', { id: d.ustalenie, odpowiedz: d.odpowiedz.slice(0, 300) }));
       }
       throw blad(404, 'nie ma takiej trasy');
     }

@@ -28,6 +28,7 @@ function pokaz(st) {
   if (st.koniec) {
     const k = st.koniec;
     console.log(`\n══ ${k.tytul} ══\n${k.opis}`);
+    if (k.flaga) console.log(`\nFlaga wyniku do Twojej kampanii (komenda „flaga" w grze):\n${k.flaga}`);
     for (const o of k.oceny) console.log(`${o.wynik === 'spelniona' ? '✅' : '❌'} ${o.opis}\n   ${o.dlaczego}`);
     console.log('\nLab:', k.lab);
     console.log('\nDebrief:'); for (const z of k.debrief) console.log(`  – ${z}`);
@@ -35,9 +36,11 @@ function pokaz(st) {
   }
   console.log('\nAkcje:');
   for (const a of st.akcje) console.log(`  ${a.kanal === 'soar' ? '[SOAR]' : '      '} ${a.id.padEnd(28)} ${a.nazwa} [${a.czas_h} h]${a.kanal === 'soar' ? ` → playbook „${a.playbook}"` : ''}${a.powod ? `   ✗ ${a.powod}` : ''}`);
-  console.log('\nPytania śledcze (odpowiedź z SIEM-a):');
+  console.log(st.tryb === 'flagi' ? '\nPytania śledcze (szukasz w SIEM-ie, analizę zapisujesz w SOAR-ze → flaga):' : '\nPytania śledcze (odpowiedź z SIEM-a):');
   for (const u of st.ustalenia) console.log(`  ${u.ustalone ? (u.podane ? '◐' : '●') : '○'} ${u.id.padEnd(20)} ${u.pytanie}${u.ustalone ? '' : `   (podpowiedź: ${u.nastepna_podpowiedz_min ?? '—'} min)`}`);
-  console.log('\nKomendy: a <akcja> · c <godziny> · u <pytanie> <odpowiedź> · p <pytanie> · s (stan) · k (koniec fazy ostrej) · q');
+  console.log(st.tryb === 'flagi'
+    ? '\nKomendy: a <akcja> · f LO{…} (flaga z wyniku playbooka/analizy w SOAR-ze) · c <godziny> · p <pytanie> (podpowiedź) · s · k (koniec fazy ostrej) · q'
+    : '\nKomendy: a <akcja> · c <godziny> · u <pytanie> <odpowiedź> · p <pytanie> · s (stan) · k (koniec fazy ostrej) · q');
 }
 
 (async () => {
@@ -61,6 +64,7 @@ function pokaz(st) {
       else if (kom === 'u') r = await api('POST', '/gra/ustalenie', { id: arg, odpowiedz: reszta.join(' ') });
       else if (kom === 'p') r = await api('POST', '/gra/podpowiedz', { id: arg });
       else if (kom === 'k') r = await api('POST', '/gra/koniec', {});
+      else if (kom === 'f' || kom === 'flaga') r = await api('POST', '/gra/flaga', { flaga: arg });
       else { console.log('Nie znam tej komendy.'); rl.prompt(); continue; }
       if (r.tekst) console.log(`→ ${r.tekst}`);
       st = r.stan; pokaz(st);

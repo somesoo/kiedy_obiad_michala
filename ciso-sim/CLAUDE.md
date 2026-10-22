@@ -99,6 +99,12 @@ można przejrzeć, przetestować i wycofać (`docs/18-…`).
   tylko w labie (sesja z zapisu gracza → flaga wyniku → `K.wynikLabu`). Flaga = podpis Ed25519 (gra ma
   tylko klucz publiczny), przypięta do tenanta, jednorazowa, w zapisie (`flaga`, `inc_lab`). Bez
   `opcje.zewnetrzne` nic się nie zmienia — testy i automaty grają jak dotąd.
+- **Walidator wdrożeń** (`walidator/`, `docs/21-…`, 21.12): gra (`sprawdz`, `--walidator=URL`) prosi, walidator przy
+  SIEM-ie/SOAR-ze odpala skrypt na zadanie (`walidator/sprawdzenia/`, test: każde zadanie z `data/zewnetrzne.js`
+  ma skrypt) przez adapter (`http-json` z konfiguracji albo `atrapa`) i daje flagę tylko za to, co działa
+  (reguły — test na żywo próbką, gdy adapter umie). Nowe zadanie wdrożenia = wpis w `data/zewnetrzne.js`
+  + skrypt + mapowanie w `SPRAWDZENIA`. W labie tryb „flagi": playbook i analiza w SOAR-ze oddają flagę,
+  skutek w grze dopiero po `flaga` (przypięta do sesji, jednorazowa).
 
 ## Narzędzia
 
@@ -113,7 +119,8 @@ node ciso-sim/proto/cennik.js [N] [--kampania=gmina]  # koszt JEDNEGO odstępstw
 LAB_ADMIN_TOKEN=… LAB_SIEM_TOKEN=… LAB_SOAR_SECRET=… node ciso-sim/lab/serwer.js   # lab SIEM/SOAR (docs/21-…)
 LAB_URL=… LAB_TOKEN=<token gracza> node ciso-sim/lab/gracz.js                         # gracz w terminalu
 node ciso-sim/lab/flaga.js klucze|wydaj|sprawdz                                    # flagi CTF (docs/21-…, 21.11)
-node ciso-sim/proto/kampania.js --tenant=ala --klucz=flagi.pub.pem --zapis=ala.json   # gra połączona z SIEM/SOAR
+node ciso-sim/proto/kampania.js --tenant=ala --klucz=flagi.pub.pem --walidator=URL --zapis=ala.json   # gra połączona z SIEM/SOAR
+WAL_KONFIG=konfig.json WAL_KLUCZ_PRYWATNY=flagi.pem node ciso-sim/walidator/serwer.js         # walidator wdrożeń (21.12)
 node --test ciso-sim/test/*.test.js              # testy (uruchamiaj po KAŻDEJ zmianie proto/ i data/)
 ```
 

@@ -42,4 +42,25 @@ module.exports = {
   },
   // Mnożniki jakości (🔵): pokrycie źródeł waży najwięcej — czego nie zbierasz, tego nie wykryjesz.
   MIN_REGUL: 3, MIN_PLAYBOOKOW: 3,
+
+  // ── DLA WALIDATORA (walidator/, docs/21-…, 21.12) ──
+  // Techniki ataku z incydentów gry (MITRE ATT&CK) — reguła SIEM-a „liczy się", gdy deklaruje jedną
+  // z nich, a w teście na żywo (próbka zdarzeń) naprawdę wystawia alert.
+  TECHNIKI: {
+    T1531: 'odebranie dostępu do kont (masowe wyłączanie kont — S07)',
+    T1110: 'zgadywanie haseł (seria nieudanych logowań)',
+    T1078: 'logowanie ważnym kontem z nietypowego miejsca albo po odejściu (S07)',
+    'T1070.001': 'czyszczenie dziennika zdarzeń (S07)',
+    T1485: 'niszczenie danych (usuwanie udziałów — S07)',
+    T1486: 'szyfrowanie danych (ransomware)',
+    T1114: 'przejęcie skrzynki, reguły przekierowania poczty (S01)',
+    T1133: 'zdalny dostęp z zewnątrz: VPN, pulpit zdalny, narzędzia zdalne (S03, S07)',
+  },
+  // Playbooki, bez których SOAR nie obsłuży incydentów gry. `zatwierdzenie`: krok decyzji człowieka
+  // przed działaniem, które może zatrzymać pracę (wyłączenie konta prezesa w trakcie przelewu).
+  PLAYBOOKI: {
+    wylaczenie_konta: { opis: 'wyłączenie konta i reset haseł', zatwierdzenie: true },
+    zebranie_dziennikow: { opis: 'zabezpieczenie dzienników z sumami kontrolnymi', zatwierdzenie: false },
+    izolacja_hosta: { opis: 'odcięcie hosta od sieci', zatwierdzenie: true },
+  },
 };

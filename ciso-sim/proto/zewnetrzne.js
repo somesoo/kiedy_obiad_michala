@@ -78,4 +78,16 @@ function zrodlaSiem(k) {
   return [...z];
 }
 
-module.exports = { PREFIKS, podpisz, odczytaj, kluczePary, wlaczone, wymaga, brakujace, sprawdzKod, mnoznik, zrodlaSiem, ZW };
+// Prośba do walidatora (walidator/serwer.js): „wdrożone — sprawdź". Zwraca { wyniki: [{ zadanie, ok, powody, flaga? }] }.
+// Token (opcjonalny) tylko ze zmiennej środowiska LO_WALIDATOR_TOKEN — nie trafia do pliku zapisu.
+async function zapytajWalidator(url, cialo, token = process.env.LO_WALIDATOR_TOKEN) {
+  const r = await fetch(`${String(url).replace(/\/$/, '')}/sprawdz`, {
+    method: 'POST', body: JSON.stringify(cialo), signal: AbortSignal.timeout(5 * 60000),
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  const x = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(x.blad || `walidator: HTTP ${r.status}`);
+  return x;
+}
+
+module.exports = { zapytajWalidator, PREFIKS, podpisz, odczytaj, kluczePary, wlaczone, wymaga, brakujace, sprawdzKod, mnoznik, zrodlaSiem, ZW };

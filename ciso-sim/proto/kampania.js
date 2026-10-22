@@ -1140,6 +1140,7 @@ Komendy (wszystko w dowolnej kolejności, ile chcesz w miesiącu):
   m [kategoria|szukaj]  lista ruchów (kontrole, rozpoznanie, ot, ludzie, zarzad, prawo, audyt)
   x <ruch> [k=v …]      wykonaj ruch (np. x wdroz:edr zakres=biuro_serwery tryb=wykrywaj · x test:backup · x rozmowa dzial=produkcja)
   flaga LO{…}           flaga z Twojego SIEM-a/SOAR-a (gra z --tenant): zadanie wdrożenia albo wynik incydentu z labu
+  sprawdz [kontrola]    „wdrożone — sprawdź": walidator sprawdza Twój tenant i wnosi flagi (gra z --walidator=URL)
   o                     Twoje wdrożenia: stan, parametry, co wiesz o skuteczności, usterki
   p                     doradztwo: cennik tematów, zlecenia w toku, raporty z rekomendacjami
   w                     co wiemy (zasoby, fakty, luki, status)
@@ -1190,6 +1191,24 @@ async function grajInteraktywnie(plikZapisu, defId = 'wodociagi', opcje = {}) {
     else if (cmd === 'd') for (const r of k.rejestr.filter(x => x.m === k.st.m)) console.log(`  [${r.kto}] ${r.tekst}`);
     else if (cmd === 'x') sprobuj(() => RU.wykonaj(k, tok[1] || '', parametry(tok.slice(2))));
     else if (cmd === 'flaga') sprobuj(() => flaga(k, tok[1] || ''));
+    else if (cmd === 'sprawdz') {
+      // „Wdrożone — sprawdź": walidator przy SIEM-ie/SOAR-ze sprawdza tenant i oddaje flagi zaliczonych
+      // zadań; gra wnosi je sama (te same ruchy `flaga` co ręcznie — zapis się odtwarza).
+      const zw = k.opcje?.zewnetrzne;
+      if (!zw?.walidator) { console.log('Gra nie ma walidatora (uruchom z --walidator=URL).'); continue; }
+      const ids = tok[1] ? [tok[1]] : Object.keys(ZWN.ZW.kontrole).filter(id => ['konfiguracja', 'projekt', 'dziala'].includes(k.obiekty[id]?.stan));
+      if (!ids.length) { console.log(`Nie ma czego sprawdzać — wdrożenia z konfiguracją w systemie: ${Object.keys(ZWN.ZW.kontrole).join(', ')}.`); continue; }
+      for (const id of ids) {
+        try {
+          const r = await ZWN.zapytajWalidator(zw.walidator, { tenant: zw.tenant, kontrola: id });
+          for (const w of r.wyniki) {
+            console.log(`${w.ok ? '✅' : '❌'} ${id}.${w.zadanie}: ${w.opis || ''}`);
+            for (const p of w.powody) console.log(`     ${p}`);
+            if (w.flaga) sprobuj(() => flaga(k, w.flaga));
+          }
+        } catch (e) { console.log(`Walidator: ${e.message}`); }
+      }
+    }
     else if (cmd === 'a') {
       const s = k.sprawy[Number(tok[1]) - 1];
       if (!s) { console.log('Nie ma takiej sprawy (s — lista).'); continue; }
@@ -1220,7 +1239,8 @@ async function main() {
     await grajAuto(auto, Number(arg('seed') || 7), process.argv.includes('--szczegoly'), console.log, true, arg('kampania') || 'wodociagi');
   } else {
     // --tenant=ala --klucz=publiczny.pem[,drugi.pem]: gra połączona z zewnętrznym SIEM-em/SOAR-em.
-    const opcje = arg('tenant') ? { zewnetrzne: { tenant: arg('tenant'), klucze: (arg('klucz') || '').split(',').filter(Boolean).map(f => fs.readFileSync(f, 'utf8')) } } : {};
+    const opcje = arg('tenant') ? { zewnetrzne: { tenant: arg('tenant'), klucze: (arg('klucz') || '').split(',').filter(Boolean).map(f => fs.readFileSync(f, 'utf8')),
+      ...(arg('walidator') ? { walidator: arg('walidator') } : {}) } } : {};
     await grajInteraktywnie(arg('zapis'), arg('kampania') || 'wodociagi', opcje);
   }
 }

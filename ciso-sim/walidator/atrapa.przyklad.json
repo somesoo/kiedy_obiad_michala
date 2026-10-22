@@ -1,0 +1,33 @@
+{
+  "_opis": "Dane atrapy (adapter atrapa) — tenant „ala” wdrożony poprawnie, „bob” z typowymi błędami. Pokazuje też kształt danych, którego walidator oczekuje od adaptera.",
+  "tenanty": {
+    "ala": {
+      "zrodla": [
+        { "nazwa": "UG-DC01", "typ": "ad", "ostatnie": "TERAZ" },
+        { "nazwa": "UG-FS01", "typ": "serwery", "ostatnie": "TERAZ" },
+        { "nazwa": "UG-FW01", "typ": "zapora", "ostatnie": "TERAZ" }
+      ],
+      "reguly": [
+        { "nazwa": "Masowe wyłączanie kont", "wlaczona": true, "techniki": ["T1531"] },
+        { "nazwa": "Zgadywanie haseł", "wlaczona": true, "techniki": ["T1110"] },
+        { "nazwa": "Wyczyszczony dziennik", "wlaczona": true, "techniki": ["T1070.001"] }
+      ],
+      "integracje": [{ "z": "siem", "wlaczona": true }],
+      "playbooki": [
+        { "nazwa": "Wyłącz konto", "typ": "wylaczenie_konta", "wlaczony": true, "kroki": [{ "typ": "zatwierdzenie" }, { "typ": "ad.disable" }, { "typ": "ad.reset_admin" }] },
+        { "nazwa": "Zbierz dzienniki", "typ": "zebranie_dziennikow", "wlaczony": true, "kroki": [{ "typ": "export" }, { "typ": "hash" }] },
+        { "nazwa": "Izoluj host", "typ": "izolacja_hosta", "wlaczony": true, "kroki": [{ "typ": "zatwierdzenie" }, { "typ": "edr.isolate" }] }
+      ]
+    },
+    "bob": {
+      "zrodla": [{ "nazwa": "UG-DC01", "typ": "ad", "ostatnie": "2026-01-01T00:00:00Z" }],
+      "reguly": [
+        { "nazwa": "Masowe wyłączanie kont", "wlaczona": false, "techniki": ["T1531"] },
+        { "nazwa": "Coś podejrzanego", "wlaczona": true, "techniki": [] },
+        { "nazwa": "Zgadywanie haseł", "wlaczona": true, "techniki": ["T1110"], "nie_wykrywa": true }
+      ],
+      "integracje": [{ "z": "siem", "wlaczona": false }],
+      "playbooki": [{ "nazwa": "Wyłącz konto", "typ": "wylaczenie_konta", "wlaczony": true, "kroki": [{ "typ": "ad.disable" }, { "typ": "ad.reset_admin" }] }]
+    }
+  }
+}
