@@ -520,13 +520,13 @@
 /* Kupione skrzydła demona zostają krwiste także na moim pionku — za kolor się płaci,
    więc zielony „to ja" by go zjadał. Znacznikiem zostaje sama poświata. */
 .sl-pawn-me .sl-pawn-wing.w-demon_wings { fill: #A50E1C; stroke: #4A0309; }
-/* Skrzydła Klasyki — ten sam powód: kolor jest tym, za co się zapłaciło. */
-.sl-pawn-wing.w-angel_wings,
-.sl-pawn-me .sl-pawn-wing.w-angel_wings { fill: #F7F5EE; stroke: #A9A190; }
-.sl-pawn-wing.w-butterfly_wings,
-.sl-pawn-me .sl-pawn-wing.w-butterfly_wings { fill: #F28C28; stroke: #3A1A05; fill-rule: evenodd; }
-.sl-pawn-wing.w-hussar_wings,
-.sl-pawn-me .sl-pawn-wing.w-hussar_wings { fill: #F4F1EA; stroke: #9E1B22; stroke-width: .7; stroke-linejoin: round; }
+/* Malowane skrzydła (Klasyka): kolory siedzą w rysunku, a pióra husarii sterczą nad
+   głową, więc pudełko 40×24 nie może ich przycinać. Moje dalej poznać po poświacie. */
+/* fill/stroke: none, bo inaczej części bez własnego obrysu (kropki, nity) dziedziczyłyby
+   fioletowy obrys skrzydeł nietoperza z .sl-pawn-wing. */
+.sl-pawn-wing.is-painted,
+.sl-pawn-me .sl-pawn-wing.is-painted { overflow: visible; fill: none; stroke: none; }
+.sl-pawn-me .sl-pawn-wing.is-painted { filter: drop-shadow(0 0 3px rgba(200, 241, 53, 0.75)); }
 @keyframes sl-wing  { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(-16deg) scaleX(0.72); } }
 @keyframes sl-wing-r { 0%, 100% { transform: rotate(0deg) scaleX(1); } 50% { transform: rotate(16deg) scaleX(0.72); } }
 /* Uszka nietoperza — bez nich to „kółko ze skrzydłami". Czapka je chowa. */
@@ -568,21 +568,6 @@
 .c-horn { fill: #D8322A; stroke: #7A0E0E; stroke-width: 1; }
 .c-tophat { fill: #111; stroke: #444; stroke-width: .8; }
 .c-band-red { fill: #B3122B; }
-/* Czapki Klasyki */
-.c-beret { fill: #A3172E; stroke: #5E0B19; stroke-width: 1; }
-.c-beret-band { fill: #7A0F22; }
-.c-beret-stalk { fill: none; stroke: #5E0B19; stroke-width: 1.8; stroke-linecap: round; }
-.c-beanie { fill: #23407A; stroke: #13264D; stroke-width: 1; }
-.c-beanie-stripe { fill: #F2EEE4; }
-.c-beanie-cuff { fill: #1A2F5C; stroke: #13264D; stroke-width: .8; }
-.c-beanie-rib { stroke: #2E4F8F; stroke-width: 1.2; }
-.c-pompom { fill: #F2EEE4; stroke: #BDB6A4; stroke-width: .8; }
-.c-twig { fill: none; stroke: #6B4423; stroke-width: 1.6; stroke-linecap: round; }
-.c-aleaf-o { fill: #E07B28; stroke: #8A3E0B; stroke-width: .6; }
-.c-aleaf-r { fill: #C4342A; stroke: #6E140E; stroke-width: .6; }
-.c-aleaf-y { fill: #E8B23A; stroke: #8C6210; stroke-width: .6; }
-.c-maple { fill: #D2402B; stroke: #6E140E; stroke-width: .7; stroke-linejoin: round; }
-.c-acorn { fill: #8B5A2B; stroke: #4F3014; stroke-width: .6; }
 /* Skiny wsparcia: korony z poświatą i mrugającą iskierką. */
 .sl-costume-hat.h-supporter_crown    { filter: drop-shadow(0 0 3px rgba(255, 210, 80, 0.85)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
 .sl-costume-hat.h-pumpkin_king_crown { filter: drop-shadow(0 0 3px rgba(255, 138, 31, 0.85)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
@@ -599,18 +584,68 @@
 .c-sparkle { fill: #FFF6C8; transform-box: fill-box; transform-origin: center; animation: sl-sparkle 2.2s ease-in-out infinite; }
 @keyframes sl-sparkle { 0%, 60%, 100% { opacity: 0; transform: scale(0.4); } 75% { opacity: 1; transform: scale(1); } }
 .c-sparkle-late { animation-delay: 1.1s; }
-.c-laurel { fill: #FFC93C; stroke: #A8700A; stroke-width: .6; stroke-linejoin: round; }
-.c-laurel-stem { fill: none; stroke: #C8901A; stroke-width: 1.4; stroke-linecap: round; }
-.c-laurel-berry { fill: #FFE27A; stroke: #A8700A; stroke-width: .5; }
-/* Korona Łowcy Cukierków (nagroda za najwięcej 🍬 w Nocy Duchów). */
-.c-lolly-stick { stroke: #F4F1EA; stroke-width: 1.6; stroke-linecap: round; }
-.c-lolly-a { fill: #FF4FA3; stroke: #A3155E; stroke-width: .7; }
-.c-lolly-b { fill: #FFD23F; stroke: #A87F0A; stroke-width: .7; }
-.c-lolly-c { fill: #4FD2FF; stroke: #12708F; stroke-width: .7; }
-.c-swirl { fill: none; stroke: rgba(255, 255, 255, 0.9); stroke-width: 1; stroke-linecap: round; }
-.c-ccrown-band { fill: #FFF4F8; stroke: #C2185B; stroke-width: .9; }
-.c-ccrown-stripe { fill: #E0284B; }
-.c-wrapper { fill: #FFE27A; stroke: #A87F0A; stroke-width: .5; stroke-linejoin: round; }
+
+/* ── KOSTIUMY MALOWANE (Klasyka i dalej) ──
+   Gradienty i wzory (#slg-*, #slp-*) wstrzykuje raz art-costumes.js (SL_COSTUME_DEFS);
+   tu tylko przypisanie do części rysunku. Kreski mają zwykły kolor — gradient liczony od
+   pudełka znika na prostej kresce. */
+.c-sheen { fill: none; stroke: #fff; stroke-opacity: .4; stroke-width: 1.3; stroke-linecap: round; }
+.c-shine { fill: #fff; fill-opacity: .6; }
+.c-shade-line { fill: none; stroke: #000; stroke-opacity: .25; stroke-width: .7; }
+.c-crease { fill: none; stroke: #3A0610; stroke-opacity: .35; stroke-width: .8; stroke-linecap: round; }
+.c-beret { fill: url(#slg-wine); stroke: #4A0812; stroke-width: .5; }
+.c-beret-tab { fill: url(#slg-wine); stroke: #4A0812; stroke-width: .4; }
+.c-beret-band { fill: url(#slg-wine-band); }
+.c-felt { fill: url(#slp-felt); }
+.c-beanie { fill: url(#slg-mustard); stroke: #7E4F0A; stroke-width: .5; }
+.c-beanie-stripe { fill: url(#slg-cream); }
+.c-knit { fill: url(#slp-knit); }
+.c-beanie-cuff { fill: url(#slg-mustard-cuff); stroke: #6E4208; stroke-width: .5; }
+.c-rib { fill: url(#slp-rib); }
+.c-pompom { fill: url(#slg-cream); }
+.c-pompom-fluff { fill: none; stroke: #B8AA88; stroke-width: .35; stroke-linecap: round; }
+.c-twig { fill: none; stroke: #6B4423; stroke-width: .8; stroke-linecap: round; }
+.c-twig-thick { stroke: #5C3A1C; stroke-width: 1.5; }
+.c-aleaf { stroke-width: .3; stroke-linejoin: round; }
+.c-aleaf-red { fill: url(#slg-leaf-red); stroke: #6E140E; }
+.c-aleaf-orange { fill: url(#slg-leaf-orange); stroke: #7A3408; }
+.c-aleaf-yellow { fill: url(#slg-leaf-yellow); stroke: #7A5608; }
+.c-aleaf-gold { fill: url(#slg-gold); stroke: #7A4E06; }
+.c-vein { fill: none; stroke: #4A1A05; stroke-opacity: .45; stroke-width: .3; stroke-linecap: round; }
+.c-nut { fill: url(#slg-nut); }
+.c-acorn-cap { fill: url(#slg-cap); }
+.c-acorn-tex { fill: url(#slp-cap); }
+.c-berry { fill: url(#slg-berry); }
+.c-laurel-stem { fill: none; stroke: #B07A12; stroke-width: 1; stroke-linecap: round; }
+.c-gold-ring { fill: url(#slg-gold); stroke: #7A4E06; stroke-width: .4; }
+.c-gold-dot { fill: url(#slg-gold-dot); }
+.c-gold-tip { fill: url(#slg-gold); stroke: #7A4E06; stroke-width: .3; }
+.c-ruby { fill: url(#slg-ruby); stroke: #5A0716; stroke-width: .4; }
+.c-lolly-stick { fill: url(#slg-stick); stroke: #B0A898; stroke-width: .3; }
+.c-lolly { stroke-width: .4; }
+.c-lolly-pink { fill: url(#slg-lolly-pink); stroke: #8A1050; }
+.c-lolly-yellow { fill: url(#slg-lolly-yellow); stroke: #8A5E06; }
+.c-lolly-blue { fill: url(#slg-lolly-blue); stroke: #0A5470; }
+.c-swirl { fill: none; stroke: #fff; stroke-opacity: .85; stroke-width: .8; stroke-linecap: round; }
+.c-gloss { fill: url(#slg-gloss); }
+.c-cane { fill: url(#slp-cane); stroke: #9E1040; stroke-width: .6; }
+.c-wrapper { stroke-width: .3; stroke-linejoin: round; }
+.c-wrapper-violet { fill: #C9A2F2; stroke: #4E1A80; }
+.c-wrapper-green { fill: #A8E89A; stroke: #1E6A14; }
+.c-candy-violet { fill: url(#slg-candy-violet); }
+.c-candy-green { fill: url(#slg-candy-green); }
+.c-fold { fill: none; stroke: #000; stroke-opacity: .3; stroke-width: .3; }
+.c-feather { fill: url(#slg-feather); stroke: #8E99AD; stroke-opacity: .8; stroke-width: .3; }
+.c-feather-cream { fill: url(#slg-feather-cream); stroke: #7A6A4C; stroke-opacity: .8; stroke-width: .3; }
+.c-feather-shade { fill: none; stroke: #8E99AD; stroke-opacity: .5; stroke-width: .5; }
+.c-quill { fill: none; stroke: #8E8A80; stroke-opacity: .7; stroke-width: .3; }
+.c-monarch { fill: url(#slg-monarch); }
+.c-monarch-black { fill: #1A0E06; }
+.c-monarch-vein { fill: none; stroke: #1A0E06; stroke-width: .65; stroke-linecap: round; }
+.c-monarch-edge { fill: none; stroke: #1A0E06; stroke-width: 1.7; stroke-linejoin: round; }
+.c-monarch-dot { fill: #FFF6E6; }
+.c-hussar-frame { fill: none; stroke: #8E1018; stroke-width: 2.4; stroke-linecap: round; }
+.c-hussar-frame-hi { fill: none; stroke: #E35A62; stroke-width: .6; stroke-linecap: round; }
 
 /* Gadżet: w „ręce", czyli przy prawym dolnym boku. Pająk wisi z góry. */
 .sl-costume-gadget {
@@ -639,20 +674,24 @@
 .c-spider { fill: #111; }
 .c-legs { stroke: #111; stroke-width: 1.4; fill: none; stroke-linecap: round; }
 .c-eye { fill: #FF3B3B; }
-/* Gadżety Klasyki */
-.c-umbrella { fill: #D22F3A; stroke: #7A1118; stroke-width: .9; stroke-linejoin: round; }
-.c-umb-rib { fill: none; stroke: #7A1118; stroke-width: .7; }
-.c-umb-shaft { fill: none; stroke: #2A2A2A; stroke-width: 1.8; stroke-linecap: round; }
-.c-drop { fill: #7FC8FF; }
-.c-mug { fill: #F4F1EA; stroke: #8A8172; stroke-width: 1; stroke-linejoin: round; }
-.c-mug-handle { fill: none; stroke: #8A8172; stroke-width: 2.6; stroke-linecap: round; }
-.c-coffee { fill: #5A3418; }
-.c-mug-heart { fill: #D0142F; }
-.c-steam { fill: none; stroke: rgba(240, 240, 240, 0.75); stroke-width: 1.3; stroke-linecap: round; transform-box: fill-box; animation: sl-steam 2.6s ease-in-out infinite; }
-@keyframes sl-steam { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 0.9; transform: translateY(-6%); } }
-.c-rogal { fill: #D99A3A; stroke: #8B5A1F; stroke-width: .8; }
-.c-icing { fill: none; stroke: #FBF7EE; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.c-nut { fill: #7A4A1E; }
+.c-canopy-a { fill: url(#slg-canopy-a); stroke: #0B3324; stroke-width: .35; stroke-linejoin: round; }
+.c-canopy-b { fill: url(#slg-canopy-b); stroke: #0B3324; stroke-width: .35; stroke-linejoin: round; }
+.c-umb-shaft { stroke: #3A3A3A; stroke-width: 1.1; }
+.c-umb-handle { fill: none; stroke: #8B5A2B; stroke-width: 2.2; stroke-linecap: round; }
+.c-umb-handle-hi { fill: none; stroke: #D9A066; stroke-width: .5; stroke-linecap: round; }
+.c-drop { fill: url(#slg-drop); }
+.c-mug { fill: url(#slg-ceramic); stroke: #8A7C62; stroke-width: .45; }
+.c-mug-band { fill: url(#slg-terracotta); }
+.c-mug-inner { fill: #6B5A40; }
+.c-coffee { fill: url(#slg-crema); }
+.c-latte { fill: #F5E2C4; fill-opacity: .9; }
+.c-steam { fill: none; stroke: #fff; stroke-opacity: .55; stroke-width: 1.3; stroke-linecap: round; transform-box: fill-box; animation: sl-steam 2.6s ease-in-out infinite; }
+.c-steam-late { animation-delay: 1.3s; }
+@keyframes sl-steam { 0%, 100% { opacity: .2; transform: translateY(0); } 50% { opacity: .9; transform: translateY(-8%); } }
+.c-rogal { fill: url(#slg-bake); stroke: #8A4A12; stroke-width: .4; }
+.c-crust { fill: none; stroke: #7A3E0E; stroke-opacity: .5; stroke-width: .45; stroke-linecap: round; }
+.c-icing { fill: url(#slg-icing); stroke: #CFC3AE; stroke-width: .25; }
+.c-nut-bit { fill: #A86E36; stroke: #5A3412; stroke-width: .2; }
 @keyframes sl-spider { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(12%); } }
 
 /* Nakładki: filtr na zdjęciu + rysunek na wierzchu (sl-costume-overlay). */
@@ -670,10 +709,10 @@
 .ov-pumpkin_frame .sl-pawn-avatar { filter: sepia(1) saturate(2.6) hue-rotate(-12deg) brightness(1.05); }
 /* Szkielet jako prześwietlenie: negatyw w szarości — od razu widać, że to nie zwykłe zdjęcie. */
 .ov-skeleton .sl-pawn-avatar { filter: grayscale(1) invert(1) contrast(1.6) brightness(1.05); }
-.ov-film_noir .sl-pawn-avatar { filter: grayscale(1) contrast(1.4) brightness(0.95) sepia(0.15); }
-.ov-autumn_frame .sl-pawn-avatar { filter: sepia(0.55) saturate(1.6) hue-rotate(-10deg) brightness(1.05); }
-/* Szron: sepia przesunięta w błękit, rozjaśniona — zdjęcie jak za oszronioną szybą. */
-.ov-frost .sl-pawn-avatar { filter: sepia(0.6) hue-rotate(170deg) saturate(1.5) brightness(1.15); }
+.ov-film_noir .sl-pawn-avatar { filter: grayscale(1) contrast(1.35) brightness(.95) sepia(.18); }
+.ov-autumn_frame .sl-pawn-avatar { filter: sepia(.45) saturate(1.5) hue-rotate(-8deg) brightness(1.04); }
+/* Szron: sepia przesunięta w błękit — zdjęcie jak za oszronioną szybą. */
+.ov-frost .sl-pawn-avatar { filter: sepia(.5) hue-rotate(165deg) saturate(1.3) brightness(1.12); }
 .c-stitch { stroke: #1A1A1A; stroke-width: 1.8; fill: none; stroke-linecap: round; }
 .c-fang { fill: #FFFFFF; stroke: #B3122B; stroke-width: .6; }
 /* Nakładka z kształtem: zdjęcie przycina clip-path (inline w slPawnHtml), więc okrągła
@@ -688,9 +727,9 @@
 .ov-vampire { color: #D0142F; }
 .ov-zombie { color: #7FC241; }
 .ov-pumpkin_frame { color: #FF8A1F; }
-.ov-film_noir { color: #EDEDED; }
+.ov-film_noir { color: #D8D2C4; }
 .ov-autumn_frame { color: #E07B28; }
-.ov-frost { color: #9FDBFF; }
+.ov-frost { color: #A8E0FF; }
 .c-shape-line { fill: none; stroke: currentColor; stroke-width: 2.5px; stroke-linejoin: round; }
 .c-shape-glow { fill: none; stroke: currentColor; stroke-width: 8px; stroke-linejoin: round; opacity: 0.4; }
 .c-collar { fill: #140812; stroke: #D0142F; stroke-width: .8; stroke-linejoin: round; }
@@ -706,11 +745,17 @@
 .sl-pawn-me .c-shape-line { stroke: var(--accent); stroke-width: 3px; }
 .c-bone-crack { fill: none; stroke: #0A0A0A; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .c-pumpkin-rib { fill: none; stroke: rgba(150, 60, 0, 0.6); stroke-width: 1.5; }
-.c-film { fill: #141414; stroke: #3A3A3A; stroke-width: .5; }
-.c-film-hole { fill: #EDEDED; }
-.c-film-scratch { fill: none; stroke: rgba(255, 255, 255, 0.45); stroke-width: .5; }
-.c-ice { fill: rgba(220, 244, 255, 0.92); stroke: #7FC8FF; stroke-width: .6; stroke-linejoin: round; }
-.c-flake { fill: none; stroke: #E6F7FF; stroke-width: 1.1; stroke-linecap: round; }
+.c-film { fill: url(#slg-film); }
+.c-film-hole { fill: #E8E4DA; }
+.c-scratch { fill: none; stroke: #fff; stroke-opacity: .45; stroke-width: .3; }
+.c-dust { fill: #fff; fill-opacity: .6; }
+.c-grain { fill: url(#slp-grain); }
+.c-vignette { fill: url(#slg-vignette); }
+.c-vignette-warm { fill: url(#slg-vignette-warm); }
+.c-vignette-frost { fill: url(#slg-vignette-frost); }
+.c-ice { fill: url(#slg-ice); stroke: #7DBDE8; stroke-width: .3; stroke-linejoin: round; }
+.c-ice-shine { fill: none; stroke: #fff; stroke-opacity: .85; stroke-width: .35; stroke-linecap: round; }
+.c-flake { fill: none; stroke: #F4FCFF; stroke-width: .55; stroke-linecap: round; filter: drop-shadow(0 0 .6px rgba(90, 170, 240, .9)); }
 @media (prefers-reduced-motion: reduce) {
   .sl-pawn-wing, .sl-costume-gadget.g-spider, .c-steam { animation: none; }
   .c-sparkle { animation: none; opacity: 1; }
@@ -818,12 +863,7 @@
   border-color: rgba(255, 120, 190, 0.55);
   background: linear-gradient(180deg, rgba(255, 120, 190, 0.1), transparent 70%), var(--surface-alt);
 }
-.costume-item.is-award:not(.is-owned) {
-  border-color: rgba(255, 201, 60, 0.55);
-  background: linear-gradient(180deg, rgba(255, 201, 60, 0.1), transparent 70%), var(--surface-alt);
-}
 .costume-season { font-size: 11px; color: #FF9ACB; }
-.costume-season.is-award { color: var(--gold); }
 .costume-season.is-past { color: var(--text-muted); }
 .costume-price-pln { background: linear-gradient(180deg, #FF9ACB, #D2468C); color: #2A0016; }
 .supporter-howto { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }

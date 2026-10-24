@@ -496,9 +496,14 @@ function slPawnHtml(p, opts = {}) {
   // Każdy macha w innym rytmie (opóźnienie z player_id), żeby stado nie trzepotało jak jeden.
   const delay = `animation-delay:-${(Number(p.player_id) % 7) * 0.37}s`;
   const wingPath = wingKind ? SL_COSTUME_ART.wings[wingKind] : null;
+  // Skrzydło to albo sam kontur (Noc Duchów: kolor z CSS), albo malowany rysunek (Klasyka:
+  // zaczyna się od „<"). Rysunek odbija się w całości grupą i może wystawać poza pudełko.
+  const painted = !!wingPath && wingPath[0] === '<';
+  const wingSvg = (side, tf) => `<svg class="sl-pawn-wing is-${side} w-${wingKind}${painted ? ' is-painted' : ''}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}">`
+    + (painted ? `<g${tf ? ` transform="${tf}"` : ''}>${wingPath}</g>` : `<path${tf ? ` transform="${tf}"` : ''} d="${wingPath}"/>`) + '</svg>';
   const wings = wingPath ? `
-        <svg class="sl-pawn-wing is-left w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path d="${wingPath}"/></svg>
-        <svg class="sl-pawn-wing is-right w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path transform="matrix(-1 0 0 1 40 0)" d="${wingPath}"/></svg>` : '';
+        ${wingSvg('left', '')}
+        ${wingSvg('right', 'matrix(-1 0 0 1 40 0)')}` : '';
   const overlayArt = costume.overlay && !ghost ? (SL_COSTUME_ART.overlay[costume.overlay] || '') : '';
   // Obrys kształtu leży w tej samej warstwie co rysunek nakładki. Warstwa ma inset −8%,
   // więc pionek (0..1) zajmuje w jej viewBoxie 2,76..37,24 — stąd translate + scale.

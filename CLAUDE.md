@@ -303,6 +303,16 @@ czapka, skrzydła, gadżet, nakładka (overlay = filtr na zdjęciu + rysunek na 
 Pionek na planszy i podgląd w sklepie składa **jedna** funkcja `slPawnHtml`, więc podgląd
 nie może się rozjechać z tym, co widzą inni.
 
+**Kostiumy od Klasyki są „malowane"** (pierwsza, płaska wersja wyglądała jak z Painta):
+gradienty, faktury i połysk. Wspólne gradienty i wzory (`#slg-*`, `#slp-*`) siedzą RAZ
+w `SL_COSTUME_DEFS` w `art-costumes.js` i trafiają do niewidocznego `<svg>` w `<body>` —
+nie do kostiumu, bo definicje w schowanym elemencie (`display:none`, np. zamknięty sklep)
+Chrome pomija. Rysunki biorą je klasami `c-*` (`fill: url(#…)` w `snakes.css`); części
+składa się helperami „pędzla" (`slLeaf`, `slMaple`, `slAcorn`, `slFeather`, `slSnowflake`…).
+Skrzydło może być konturem (Noc Duchów) albo całym rysunkiem zaczynającym się od `<`
+(Klasyka, klasa `is-painted`, może wystawać poza pudełko). Uwaga na nazwy klas: `.c-stick`
+i `.c-leaf` należą do miotły i dyni — nowa klasa o tej samej nazwie przejmie ich kolor.
+
 **Nagrody sezonowe** (`award` w katalogu) nie są do kupienia; w zakładce „Golden Carrot"
 widzi je każdy w ich sezonie, a potem tylko właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
 gracza — tak.
