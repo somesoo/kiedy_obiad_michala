@@ -178,7 +178,10 @@
   padding: 5px 7px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Kostiumy (skrzydła, czapki, gadżety, pióra husarii) wystają poza pionek — i mają
+     wystawać poza pole, a nie być ucinane na jego krawędzi. Pionki leżą w .sl-pawns
+     (z-index 2), więc przykrywają sąsiednie pola, a nie odwrotnie. */
+  overflow: visible;
   min-width: 0;
   min-height: 0;
 }
@@ -390,9 +393,8 @@
   right: -6px;
   font-size: clamp(11px, 1.6vh, 16px);
 }
-.sl-board-free .sl-pawns { gap: 2px; flex-wrap: nowrap; }
-.sl-board-free .sl-pawn-wrap + .sl-pawn-wrap { margin-left: -13px; }
-.sl-board-free .sl-pawn-wrap + .sl-pawn-more { margin-left: -15px; }
+.sl-board-free .sl-pawns > .sl-pawn-wrap + .sl-pawn-wrap { margin-left: -13px; }
+.sl-board-free .sl-pawns > .sl-pawn-wrap + .sl-pawn-more { margin-left: -15px; }
 .sl-pawn-more {
   position: relative;
   z-index: 1;
@@ -964,10 +966,14 @@
   z-index: 2;
   margin: auto;
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: 4px;
+  /* Najwyżej dwa pionki na polu (reszta w „+N", renderCell) stoją obok siebie na zakładkę.
+     Gdyby się zawijały, drugi wypadałby razem z kostiumem pod pole. */
+  flex-wrap: nowrap;
+  gap: 2px;
 }
+.sl-pawns > .sl-pawn-wrap + .sl-pawn-wrap { margin-left: -10px; }
+.sl-pawns > .sl-pawn-wrap + .sl-pawn-more { margin-left: -12px; }
 .sl-pawn-wrap {
   position: relative;
   display: inline-flex;
@@ -1002,8 +1008,8 @@
 
 /* „Gdzie on jest?" — najechanie na wiersz rankingu (slSpotApply w sl/board.js). Reszta
    planszy przygasa, pole gracza dostaje poświatę, a jego pionek pulsuje. Gdy pionek jest
-   schowany za „+N" (tłok na małym polu), pulsuje licznik. Poświata idzie przez box-shadow,
-   bo .sl-cell ma overflow: hidden i powiększony pionek zostałby przycięty. */
+   schowany za „+N" (tłok na polu), pulsuje licznik. Poświata idzie przez box-shadow, a nie
+   przez powiększenie pionka. */
 .sl-cell { transition: opacity 0.15s, box-shadow 0.15s; }
 .sl-board.has-spot .sl-cell:not(.is-spot) { opacity: 0.35; }
 /* Selektor przez .has-spot, bo motywy (np. nagrobki Nocy Duchów) mają własne box-shadow

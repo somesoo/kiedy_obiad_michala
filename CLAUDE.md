@@ -149,9 +149,11 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
   Front rysuje jeden kafelek „6/26" z pionkami z obu numerów. Rozstaje mogą być tylko
   zwykłym polem albo bonusem o tej samej wartości na obu numerach (bez łączników, zdarzeń
   i cukierków), bo to jedno miejsce i musi działać tak samo z obu stron.
-- Pole w układzie 'free' jest małe: przy więcej niż 2 pionkach pokazuje jeden (mój,
-  jeśli tam stoję) i licznik „+N". To ważne zaraz po zmianie sezonu — wszyscy stoją
-  wtedy na starcie.
+- Pole (w każdym układzie) przy więcej niż 2 pionkach pokazuje jeden (mój, jeśli tam
+  stoję) i licznik „+N"; dwa pionki stoją obok siebie na zakładkę. To ważne zaraz po
+  zmianie sezonu — wszyscy stoją wtedy na starcie. Pola NIE przycinają zawartości
+  (`overflow: visible`): kostiumy mają wystawać poza pole. Dawniej siatka miała
+  `overflow: hidden`, który ucinał skrzydła i czapki, a przy okazji chował tłok.
 - **Telefon (≤700px albo niski ekran dotykowy): plansza jest schowana za przyciskiem
   „🗺️ Podgląd planszy"** i otwiera się na pełnym ekranie, a w pionie obrócona o 90°
   (`.board-sheet` w CSS, `slBoardPeek` w `snakes.js`). `#board-area` NIE jest kopiowana —

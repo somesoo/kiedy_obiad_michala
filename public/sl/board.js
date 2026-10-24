@@ -569,13 +569,15 @@ function renderCell(idx, sp, players, posStyle, board, ev = null, twin = null) {
   // Pionek = okrągłe zdjęcie profilowe; serwer zwraca w `players` WYŁĄCZNIE graczy,
   // którzy je wgrali (bez zdjęcia = nie widać na planszy), więc avatar_url zawsze jest.
   // Nick pojawia się po najechaniu myszką (natywny tooltip z title).
-  // Małe pole (układ 'free') mieści najwyżej dwa pionki. Po zmianie sezonu WSZYSCY stoją
-  // na starcie, więc bez limitu kilkanaście awatarów wylałoby się słupkiem na sąsiednie
-  // pola. Przy tłoku widać jeden awatar (mój, jeśli tu stoję) i licznik „+N" z nickami
-  // reszty w podpowiedzi — razem mieszczą się w szerokości pola.
+  // Pole mieści najwyżej dwa pionki (z kostiumami, które wystają poza pole). Po zmianie
+  // sezonu WSZYSCY stoją na starcie, więc bez limitu kilkanaście awatarów wylałoby się
+  // słupkiem na sąsiednie pola. Przy tłoku widać jeden awatar (mój, jeśli tu stoję)
+  // i licznik „+N" z nickami reszty w podpowiedzi — razem mieszczą się w szerokości pola.
+  // Dawniej limit był tylko w układzie 'free', bo pole w siatce przycinało nadmiar
+  // (overflow: hidden) — ale przycinało też skrzydła i czapki.
   let shown = players || [];
   let overflow = '';
-  if (free && shown.length > 2) {
+  if (shown.length > 2) {
     // Gracz wskazany z rankingu (slSpotPlayer) idzie przed mój pionek — ma go być widać.
     const rank = p => (p.player_id === slSpotPlayer ? 2 : 0) + (p.is_me ? 1 : 0);
     const ordered = [...shown].sort((a, b) => rank(b) - rank(a));
