@@ -8,8 +8,8 @@
 // następnego (×1,2, mniej czasu), przegrana go obniża (×0,9, więcej czasu), patrz
 // slCoopNextDifficulty w lib/boss.js. Bez `events`, więc nie ma kotła, drzwi ani cukierków.
 //
-// Kostiumy z Nocy Duchów są w sprzedaży także tutaj (`season` w katalogu lib/costumes.js),
-// a skin wsparcia to znów Złota korona z pierwszego sezonu.
+// Kostiumy: własny zestaw (po 3 w każdym slocie, `season: 'klasyka'` w lib/costumes.js)
+// i skin wsparcia Złoty wieniec laurowy. Kostiumy z Nocy Duchów da się nosić, ale nie kupić.
 //
 // EKONOMIA: 49 pól to ~10% rzadsze zbicia niż na 40 polach Nocy Duchów, a zbicie zostaje
 // przy 10 coins (SL_KNOCKBACK_COIN_STEAL), czyli taniej niż w pierwszym sezonie (20).

@@ -658,11 +658,38 @@ function slSupporterCard(i, c) {
       </div>`;
 }
 
+// Karta nagrody sezonowej (też w zakładce „Golden Carrot"): nie do kupienia, tylko do
+// zdobycia. W swoim sezonie widzi ją każdy, potem tylko ten, kto ją ma (filtr serwera).
+const SL_AWARD_HOW = {
+  candy: 'dostaje ten, kto na koniec sezonu ma najwięcej 🍬 (przy remisie — każdy z czołówki)'
+};
+function slAwardCard(i) {
+  const how = SL_AWARD_HOW[i.award] || 'nagroda za sezon';
+  let body;
+  if (i.owned) {
+    body = `<span class="costume-owned-tag">w szafie · zasłużona! 🏆</span>`
+      + (i.worn
+        ? `<button class="btn-ghost costume-off" data-slot="${i.slot}">Zdejmij</button>`
+        : `<button class="btn-primary costume-wear" data-slot="${i.slot}" data-item="${i.id}">Załóż</button>`);
+  } else {
+    body = `<span class="costume-missing">Do zdobycia — ${esc(how)}.</span>`;
+  }
+  return `
+      <div class="costume-item is-award${i.worn ? ' is-worn' : ''}${i.owned ? ' is-owned' : ''}">
+        <span class="costume-icon">${i.icon}</span>
+        <span class="costume-name">${esc(i.name)}</span>
+        <span class="costume-season is-award">🏆 Nagroda · ${esc(i.season_name || '')}</span>
+        ${body}
+      </div>`;
+}
+
 function renderCostumes(g) {
   const box = document.getElementById('costume-shop');
   if (!box || !g.costumes) return;
   const c = g.costumes;
-  const hasSupporter = c.items.some(i => i.supporter);
+  // Zakładka „Golden Carrot" = skiny wsparcia i nagrody sezonowe, czyli to, czego nie
+  // kupi się za coins.
+  const hasSupporter = c.items.some(i => i.supporter || i.award);
   if (slCostumeTab === 'supporter' && !hasSupporter) slCostumeTab = 'hat';
   // Podgląd = mój pionek złożony TĄ SAMĄ funkcją co na planszy (slPawnHtml), tylko duży —
   // wszystkie dodatki są w procentach boku pionka, więc skalują się razem z nim.
@@ -675,10 +702,16 @@ function renderCostumes(g) {
     + (hasSupporter ? `<button class="costume-tab costume-tab-supporter${slCostumeTab === 'supporter' ? ' is-active' : ''}" data-slot="supporter">Golden Carrot</button>` : '');
   // Skiny wsparcia mieszkają tylko w swojej zakładce (nie w „Czapce"), żeby nie mieszać
   // ceny w coins z ceną w złotówkach na jednej liście.
+  const supporters = c.items.filter(i => i.supporter);
+  const awards = c.items.filter(i => i.award);
   const items = slCostumeTab === 'supporter'
-    ? `<div class="supporter-intro">Skin za wsparcie twórcy gry — jeden na sezon, tylko wygląd, w grze nic nie daje.</div>`
-      + c.items.filter(i => i.supporter).map(i => slSupporterCard(i, c)).join('')
-    : c.items.filter(i => i.slot === slCostumeTab && !i.supporter).map(i => {
+    ? (supporters.length
+      ? `<div class="supporter-intro">Skin za wsparcie twórcy gry — jeden na sezon, tylko wygląd, w grze nic nie daje.</div>`
+        + supporters.map(i => slSupporterCard(i, c)).join('') : '')
+      + (awards.length
+        ? `<div class="supporter-intro">🏆 Nagrody sezonowe — nie do kupienia, tylko do zdobycia.</div>`
+          + awards.map(slAwardCard).join('') : '')
+    : c.items.filter(i => i.slot === slCostumeTab && !i.supporter && !i.award).map(i => {
     let btn;
     // Kostium to rzecz, na którą się ODKŁADA — zamiast samego wyszarzonego przycisku
     // pokazujemy, ile już uzbierałeś i ile brakuje.

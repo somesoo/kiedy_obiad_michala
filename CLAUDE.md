@@ -187,9 +187,9 @@ Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woł
   zamknięcia. Pamięć jest na serwerze, a nie w localStorage — raz na osobę, nie na urządzenie.
   Front: `slMaybeCrown` w `public/sl/ranking.js`, nakładka w `<body>` (poza `#board-area`).
 - **Kostiumy mają `season`** w katalogu — kupić można tylko te z aktywnego sezonu (albo bez
-  `season`), a kupione wcześniej dalej się nosi. `season` może być listą (pierwszy = sezon
-  pochodzenia): zestaw z Nocy Duchów ma `['halloween', 'klasyka']`, a Złota korona (skin
-  wsparcia) `['default', 'klasyka']`. Na samej planszy `default` zestaw nie jest w sprzedaży.
+  `season`), a kupione wcześniej dalej się nosi. Zestawy: Noc Duchów (`'halloween'`) i Klasyka
+  (`'klasyka'`, 12 sztuk + skin wsparcia Złoty wieniec laurowy). Katalog stoi w kolejności
+  sklepu, więc zestaw bieżącego sezonu idzie na początek.
 - Reset gry **nie** rusza archiwum (to historia). Wyczyszczenie gracza kasuje jego wiersze
   wyników, ale miejsc innych nie przenumerowuje.
 
@@ -281,8 +281,9 @@ dwóch rzeczy naraz.
 - **Nagroda za polowanie**: `events.candy.prize` = id kostiumu z `award` w katalogu.
   `slCloseSeasonAndInstall` rozdaje go (przed `seasonal.resetAll`) wszystkim z najwyższą
   liczbą 🍬, nie zakłada go od razu i pisze wpis do dziennika. Noc Duchów:
-  `candy_hunter_prize`, na razie „❓", bo kostium **czeka na zaprojektowanie** (podmień
-  rysunek w `SL_COSTUME_ART.hat`, nazwę, ikonę i ewentualnie slot; id zostaw).
+  `candy_hunter_prize` = 🍭 Korona Łowcy Cukierków (czapka). Nagrody siedzą w sklepie w
+  zakładce „Golden Carrot" obok skinów wsparcia (`slAwardCard` w `snakes.js`): w swoim
+  sezonie widzi je każdy jako „do zdobycia", potem tylko właściciel.
 - Zasady mechanik składa `slRenderSeasonRules` (`snakes.js`) ze stawek w payloadzie,
   do punktu `#rules-season` w regulaminie. Sezon bez `events` go chowa.
 - Drzwi bez `weekdays` są otwarte codziennie (tak jest na Nocy Duchów). Z `weekdays`
@@ -302,8 +303,8 @@ czapka, skrzydła, gadżet, nakładka (overlay = filtr na zdjęciu + rysunek na 
 Pionek na planszy i podgląd w sklepie składa **jedna** funkcja `slPawnHtml`, więc podgląd
 nie może się rozjechać z tym, co widzą inni.
 
-**Nagrody sezonowe** (`award` w katalogu) nie są do kupienia i w sklepie widzi je tylko
-właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
+**Nagrody sezonowe** (`award` w katalogu) nie są do kupienia; w zakładce „Golden Carrot"
+widzi je każdy w ich sezonie, a potem tylko właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
 gracza — tak.
 
 **Okienko „Promocja w sklepie z ubraniami"** (`slRenderShopPromo` w `snakes.js`) wyskakuje
