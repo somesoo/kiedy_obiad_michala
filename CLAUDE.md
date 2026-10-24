@@ -104,7 +104,10 @@ go odpalić ponownie. Admin przełącza sezon w panelu (`POST /api/snakes/admin/
 a aktywny siedzi w `sl_meta.active_board`.
 
 **Stan wdrożenia (30.09.2026):** produkcja gra na **Nocy Duchów** (`halloween`); pierwszy
-sezon „Snakes Game" (`default`, klasyczna 7×7) jest zamknięty. Flaga `testing` w
+sezon „Snakes Game" (`default`, klasyczna 7×7) jest zamknięty. Na listopad czeka **sezon 3
+„Klasyka"** (`boards/klasyka.js`, `testing: true`): ten sam układ co `default` (przepisany,
+nie przez `require`), bez `special_boss` i bez `events` — wraca zwykła rotacja bossów
+z eskalacją po wygranej i ulgą po przegranej. Po przełączeniu produkcji: `testing: false`. Flaga `testing` w
 `boards/halloween.js` stoi na `false`, więc każda zmiana liczby pól albo numerów to
 ruszanie żywej gry (pozycje, cukierki na polach, historia ruchów) — potrzebna migracja.
 Nowy sezon w przygotowaniu dostaje `testing: true`, dopóki nikt na nim naprawdę nie gra. Serwer przy starcie krzyczy
@@ -184,8 +187,9 @@ Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woł
   zamknięcia. Pamięć jest na serwerze, a nie w localStorage — raz na osobę, nie na urządzenie.
   Front: `slMaybeCrown` w `public/sl/ranking.js`, nakładka w `<body>` (poza `#board-area`).
 - **Kostiumy mają `season`** w katalogu — kupić można tylko te z aktywnego sezonu (albo bez
-  `season`), a kupione wcześniej dalej się nosi. Obecny zestaw jest oznaczony `'halloween'`,
-  więc na planszy `default` nie jest w sprzedaży.
+  `season`), a kupione wcześniej dalej się nosi. `season` może być listą (pierwszy = sezon
+  pochodzenia): zestaw z Nocy Duchów ma `['halloween', 'klasyka']`, a Złota korona (skin
+  wsparcia) `['default', 'klasyka']`. Na samej planszy `default` zestaw nie jest w sprzedaży.
 - Reset gry **nie** rusza archiwum (to historia). Wyczyszczenie gracza kasuje jego wiersze
   wyników, ale miejsc innych nie przenumerowuje.
 
