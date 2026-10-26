@@ -211,6 +211,8 @@ async function pollState() {
     // albo odbiera go na innym urządzeniu, a reszta stanu może stać w miejscu.
     state.officeBonus = g.office_bonus || null;
     slRenderOfficeBonus();
+    // Wordle rozwiązuje się w innej karcie — po powrocie tutaj ma się od razu pojawić.
+    slRenderWordleBonus(g);
     slRenderShopPromo();
     const prev = state.game;
     if (!prev || stateSignature(g) === stateSignature(prev)) return;
@@ -417,6 +419,7 @@ async function loadState() {
     state.officeBonus = state.game.office_bonus || null;
     renderAll();
     slRenderOfficeBonus();
+    slRenderWordleBonus(state.game);
     slRenderShopPromo();
     updateCountdown();
   } catch (e) {
@@ -507,6 +510,54 @@ document.getElementById('btn-office-later').addEventListener('click', () => {
   slRenderShopPromo();
 });
 
+// ── RZUT ZA WORDLE ── (lib/wordle.js → slWordleReward w server.js)
+// Nagroda wpada SAMA w chwili odgadnięcia hasła, więc tu nie ma czego „odbierać" — przycisk
+// przy kostce mówi, co dziś z rzutem (i prowadzi do Wordle), a okienko raz dziennie (na
+// urządzenie, localStorage z datą serwera) mówi, że rzut już czeka. Bez localStorage
+// okienko wróci przy każdym wejściu — tylko wygoda, nie stan gry.
+const WORDLE_SEEN_KEY = 'sl_wordle_bonus_seen';
+
+function slRenderWordleBonus(g) {
+  const w = g && g.wordle;
+  const chip = document.getElementById('btn-wordle-chip');
+  chip.hidden = !w;
+  if (!w) return;
+  const back = w.resumes_at
+    ? new Date(w.resumes_at).toLocaleDateString('pl-PL', { timeZone: 'Europe/Warsaw', day: 'numeric', month: 'numeric' })
+    : '';
+  const look = {
+    paused:  ['🟩 Wordle wraca ' + back, true, `Wordle ma przerwę — od ${back} każde odgadnięte hasło da dodatkowy rzut tutaj`],
+    off:     ['🟩 Wordle', true, 'Dziś nie ma hasła Wordle — wraca w dzień roboczy o 8:00'],
+    todo:    ['🟩 Odgadnij Wordle → +1 rzut', false, 'Odgadnij dzisiejsze hasło w Wordle, a dostaniesz tu dodatkowy rzut'],
+    playing: ['🟩 Dokończ Wordle → +1 rzut', false, 'Masz zaczęte dzisiejsze Wordle — odgadnij hasło, a dostaniesz tu dodatkowy rzut'],
+    won:     ['✅ Rzut za Wordle dodany', true, w.bonus === 'item'
+      ? 'Za dzisiejsze Wordle Extra Move czeka w ekwipunku' : 'Za dzisiejsze Wordle masz dodatkowy rzut na dziś'],
+    lost:    ['🟩 Wordle: dziś bez rzutu', true, 'Dzisiejszego hasła nie udało się odgadnąć — kolejna szansa jutro'],
+  }[w.state] || ['🟩 Wordle', true, ''];
+  chip.textContent = look[0];
+  chip.classList.toggle('is-off', look[1]);
+  chip.title = look[2];
+
+  // Okienko tylko po wygranej z nagrodą, raz dziennie, i nigdy na okienku Rzutu od Prezesa.
+  const overlay = document.getElementById('wordle-overlay');
+  if (w.state !== 'won' || !w.bonus || overlay.style.display === 'flex') return;
+  if (document.getElementById('office-overlay').style.display === 'flex') return;
+  let seen = null;
+  try { seen = localStorage.getItem(WORDLE_SEEN_KEY); } catch (e) { /* bez pamięci: pokaże się znowu */ }
+  if (seen === g.server_date) return;
+  document.getElementById('wordle-overlay-text').innerHTML = w.bonus === 'item'
+    ? 'Za dzisiejsze hasło dostajesz <strong>Extra Move</strong> — czeka w ekwipunku, użyj go, kiedy chcesz.'
+    : 'Za dzisiejsze hasło masz <strong>dodatkowy rzut na dziś</strong> — już dodany, możesz rzucać.';
+  overlay.style.display = 'flex';
+}
+
+document.getElementById('btn-wordle-chip').addEventListener('click', () => { location.href = '/wordle'; });
+document.getElementById('btn-wordle-ok').addEventListener('click', () => {
+  try { localStorage.setItem(WORDLE_SEEN_KEY, state.game && state.game.server_date); } catch (e) { /* tylko wygoda */ }
+  document.getElementById('wordle-overlay').style.display = 'none';
+  slRenderShopPromo();
+});
+
 // ── PROMOCJA W GARDEROBIE ──
 // Po obniżce kostiumów do 50–100 coins (październik 2026) nikt o niej nie wiedział, więc
 // okienko przypomina o niej raz dziennie, przy pierwszym wejściu. „Raz dziennie" liczy się
@@ -528,6 +579,7 @@ function slRenderShopPromo() {
   const overlay = document.getElementById('promo-overlay');
   if (!PROMO_ACTIVE || !g || overlay.style.display === 'flex') return;
   if (document.getElementById('office-overlay').style.display === 'flex') return;
+  if (document.getElementById('wordle-overlay').style.display === 'flex') return;
   let seen = null;
   try { seen = localStorage.getItem(PROMO_SEEN_KEY); } catch (e) { /* bez pamięci: pokaże się przy każdym wejściu */ }
   if (seen === g.server_date) return;

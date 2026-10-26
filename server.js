@@ -1402,6 +1402,9 @@ function slBuildState(playerId) {
     // Zamknięte sezony (zakładki w rankingu) i podium do obejrzenia raz po zamknięciu.
     seasons_archive: crowning.closures(),
     crowning: crowning.crowningFor(playerId),
+    // Dzisiejsze Wordle (odgadnięte hasło = Extra Move, patrz slWordleReward): przycisk przy
+    // kostce i okienko „masz rzut za Wordle". null = Wordle wyłączone na stałe.
+    wordle: wordle.todayStatus(playerId),
     server_date: today
   };
 }

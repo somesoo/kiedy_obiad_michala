@@ -2282,3 +2282,7 @@
 .office-card .btn-ghost { margin-top: 10px; }
 .office-chip { border-color: var(--accent); color: var(--accent); white-space: nowrap; }
 .office-chip.is-off { border-color: var(--muted); color: var(--text-muted); opacity: 0.55; cursor: default; filter: grayscale(1); }
+/* Wordle: ten sam kształt co Rzut od Prezesa, ale zawsze klikalny (prowadzi do Wordle),
+   więc szary stan nie wyłącza kursora. */
+.wordle-chip { border-color: #6AAA64; color: #8FD17F; }
+.wordle-chip.is-off { cursor: pointer; }

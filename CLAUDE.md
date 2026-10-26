@@ -367,14 +367,24 @@ Extra Move w Snakes**, raz na hasło (gra `(player, word)` jest unikalna). Przeg
 - **Przerwa**, nie koniec: `gameHasEnded()` = między `GAME_END_AT` a `GAME_RESUME_AT` (env
   `WORDLE_GAME_END_AT` / `WORDLE_RESUME_AT`, puste = brak). W przerwie faza `'ended'`,
   `resumes_at` w stanie, front pisze „Wordle wraca …", a sezon stoi na miesiącu końca.
-- **Zestaw na miesiąc powrotu wczytuje się SAM** przy starcie w czasie przerwy
-  (`autoloadResumeSet`). Ręczny przycisk w panelu dopiero w dniu powrotu po 8:00 ominąłby ten
-  dzień (hasło dnia bieżącego jest zamrożone), więc dzień powrotu zostałby bez hasła.
+- **Zestaw wczytuje się SAM przy starcie** (`autoloadSet`): w przerwie — na miesiąc powrotu,
+  a gdy gra trwa i na dziś nie ma hasła — na bieżący miesiąc, od dziś. `frozenThroughIndex`
+  zamraża dzień bieżący tylko wtedy, gdy ma hasło (ktoś może być w trakcie); pusty dzień wolno
+  obsadzić, także przyciskiem w panelu. Raz wczytany zestaw nie tasuje się od nowa.
+- **Hasła nie są nigdzie wypisywane** poza `sets/*.json` (właściciel też gra): nie w commitach,
+  opisach PR ani odpowiedziach. Sprawdzaj zestawy skryptem, który pokazuje same statystyki.
+- **Lokalny test w dowolny dzień:** świeża baza + `WORDLE_GAME_END_AT=` (bez przerwy) — zestaw
+  na bieżący miesiąc wczyta się sam od dziś.
 - **Nagroda**: `lib/wordle.js` woła `deps.onWin` WEWNĄTRZ transakcji zgadywania → hoistowana
   `slWordleReward` w `server.js` (fabryka Wordle stoi przed Snakes, TDZ) → `office.grantExtraMove`
   (ta sama funkcja co Rzut od Prezesa; nie otwiera transakcji). Slot na dziś, gdy jest miejsce
   pod sufitem i okno rzutów jeszcze trwa; inaczej sztuka do ekwipunku — Wordle gra się do
   północy, a slot po 16:00 przepadłby. Wynik (`'roll'`/`'item'`) siedzi w `games.snakes_bonus`.
+- **W Snakes widać to przy kostce**: `wordle` w stanie (`wordle.todayStatus`: `paused` / `off` /
+  `todo` / `playing` / `won`+`bonus` / `lost`, bez hasła) rysuje przycisk „🟩 Wordle"
+  (`slRenderWordleBonus`, prowadzi do `/wordle`), a po wygranej raz dziennie wyskakuje okienko
+  „Wordle odgadnięte!" (localStorage z datą serwera; nigdy na okienku Rzutu od Prezesa,
+  promocja garderoby czeka na oba). Nic się tam nie „odbiera" — rzut jest już przyznany.
 - Wpis w dzienniku Snakes: typ `wordle_bonus` (🟩), bez hasła. Bez punktów i coins Snakes,
   więc ścieżek cofania nie dotyczy (jak Rzut od Prezesa).
 

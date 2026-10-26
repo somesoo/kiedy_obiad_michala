@@ -86,6 +86,15 @@
     </div>
   </div>
 
+  <!-- RZUT ZA WORDLE — raz dziennie po odgadnięciu hasła (patrz slRenderWordleBonus) -->
+  <div class="overlay" id="wordle-overlay" style="display:none">
+    <div class="login-card office-card">
+      <h2>🟩 Wordle odgadnięte!</h2>
+      <p class="login-sub" id="wordle-overlay-text"></p>
+      <button class="btn-primary" id="btn-wordle-ok">Super, gramy!</button>
+    </div>
+  </div>
+
   <!-- PROMOCJA W GARDEROBIE — raz dziennie (patrz slRenderShopPromo) -->
   <div class="overlay" id="promo-overlay" style="display:none">
     <div class="login-card office-card">
@@ -191,6 +200,8 @@
         <!-- Rzut od Prezesa (bonus za biuro) — widoczny zawsze, gdy funkcja jest włączona:
              szary poza biurem, aktywny w biurze (patrz slRenderOfficeBonus). -->
         <button class="btn-ghost office-chip" id="btn-office-chip" hidden>🏢 Rzut od Prezesa</button>
+        <!-- Wordle → Extra Move: co dziś z rzutem za hasło (patrz slRenderWordleBonus). -->
+        <button class="btn-ghost office-chip wordle-chip" id="btn-wordle-chip" hidden>🟩 Wordle</button>
         <div class="roll-result" id="roll-result"></div>
         <!-- Garderoba z paska — tylko na planszach bez chatki na planszy (view.shop_at). -->
         <button class="btn-ghost game-bar-wardrobe" id="btn-wardrobe" hidden>🪞 Garderoba</button>
