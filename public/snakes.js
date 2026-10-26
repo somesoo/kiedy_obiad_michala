@@ -459,11 +459,17 @@ function slOfficeLaterToday() {
 function slRenderOfficeBonus() {
   const ob = state.officeBonus;
   const available = !!(ob && ob.available);
-  // Przycisk stoi zawsze, gdy funkcja jest włączona (ob != null): aktywny w biurze, szary
-  // poza nim i po odebraniu — żeby było widać, że jest o co przyjść.
+  // Przycisk stoi ZAWSZE, obok „🟩 Wordle": aktywny w biurze, szary poza nim, po odebraniu
+  // i wtedy, gdy funkcja jest wyłączona (ob == null, brak adresów biura w panelu) — żeby było
+  // widać, że jest o co przyjść. Dawniej bez adresów znikał i wyglądało to na brak funkcji.
   const chip = document.getElementById('btn-office-chip');
-  chip.hidden = !ob;
-  if (ob) {
+  chip.hidden = false;
+  if (!ob) {
+    chip.disabled = true;
+    chip.classList.add('is-off');
+    chip.textContent = '🏢 Rzut od Prezesa';
+    chip.title = 'Rzut od Prezesa jest wyłączony — admin nie ustawił jeszcze adresów biura w panelu';
+  } else {
     chip.disabled = !available;
     chip.classList.toggle('is-off', !available);
     chip.textContent = ob.claimed_today ? '✅ Rzut od Prezesa odebrany' : '🏢 Rzut od Prezesa';

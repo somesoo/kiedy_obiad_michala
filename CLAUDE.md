@@ -355,8 +355,8 @@ adresu gracza leci do konsoli (`Snakes/biuro:` w `pm2 logs`) i na listę „osta
 w karcie (w pamięci, od restartu).
 
 W UI bonus nazywa się **„Rzut od Prezesa za przyjście do biura"** (decyzja właściciela).
-Przycisk przy kostce stoi zawsze, gdy lista adresów nie jest pusta: szary poza biurem
-i po odebraniu, aktywny w biurze.
+Przycisk przy kostce stoi ZAWSZE, obok „🟩 Wordle": aktywny w biurze, szary poza biurem,
+po odebraniu i przy pustej liście adresów (wtedy z opisem, że funkcja jest wyłączona).
 
 ## Wordle → Extra Move (od 26.10.2026)
 

@@ -1223,6 +1223,9 @@ hr.dim {
   margin-top: -4px;
 }
 .review-speed.muted { color: var(--text-muted); font-weight: 400; }
+/* Linki udające przyciski (np. „🐍 Węże" w nagłówku Wordle) — bez podkreślenia, jak w Snakes. */
+a.btn-ghost { text-decoration: none; display: inline-flex; align-items: center; }
+
 /* Nagroda w wężach za odgadnięte hasło — link prowadzi od razu na planszę. */
 .review-snakes a {
   display: inline-block;
