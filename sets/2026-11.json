@@ -8,21 +8,21 @@
     "PROTOKÓŁ",
     "KOMPILATOR",
     "DEBUGGER",
-    "PIKSEL",
     "KONTENER",
     "PRZEGLĄDARKA",
     "SZYFROWANIE",
-    "ROBOT",
     "PAMIĘĆ",
-    "KURSOR",
     "LOGOWANIE",
     "ZMIENNA",
     "FUNKCJA",
     "PĘTLA",
-    "TABLICA",
     "SERWEROWNIA",
-    "WTYCZKA",
     "TERMINAL",
-    "PAKIET"
+    "ŻYRAFA",
+    "KOMETA",
+    "LABIRYNT",
+    "PIRAMIDA",
+    "BURSZTYN",
+    "ŻAGLÓWKA"
   ]
 }
