@@ -1223,6 +1223,18 @@ hr.dim {
   margin-top: -4px;
 }
 .review-speed.muted { color: var(--text-muted); font-weight: 400; }
+/* Nagroda w wężach za odgadnięte hasło — link prowadzi od razu na planszę. */
+.review-snakes a {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.review-snakes a:hover { background: rgba(200, 241, 53, 0.12); }
 
 .review-stats {
   display: flex;
