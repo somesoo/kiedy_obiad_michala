@@ -81,7 +81,7 @@ starej wersji.
 | **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
 | **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/sl/art-costumes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/sl/boss.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
-| **Wordle po polsku** | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **przerwa 2026-08-31 → 2026-11-02 8:00** (`GAME_END_AT` → `GAME_RESUME_AT`), potem gra jak dawniej, a **wygrana daje Extra Move w Snakes** (patrz „Wordle → Extra Move"). Strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). |
+| **Wordle po polsku** | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **przerwa 2026-08-31 → 2026-10-26 8:00** (`GAME_END_AT` → `GAME_RESUME_AT`), potem gra jak dawniej, a **wygrana daje Extra Move w Snakes** (patrz „Wordle → Extra Move"). Strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
 
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
@@ -358,7 +358,7 @@ W UI bonus nazywa się **„Rzut od Prezesa za przyjście do biura"** (decyzja w
 Przycisk przy kostce stoi zawsze, gdy lista adresów nie jest pusta: szary poza biurem
 i po odebraniu, aktywny w biurze.
 
-## Wordle → Extra Move (od listopada 2026)
+## Wordle → Extra Move (od 26.10.2026)
 
 Wordle wrócił po przerwie i działa jak dawniej (hasło dnia pon–pt od 8:00 do północy, sezon =
 miesiąc, zestawy w `sets/<RRRR-MM>.json`). Nowe jest tylko to, że **odgadnięte hasło daje
@@ -367,14 +367,15 @@ Extra Move w Snakes**, raz na hasło (gra `(player, word)` jest unikalna). Przeg
 - **Przerwa**, nie koniec: `gameHasEnded()` = między `GAME_END_AT` a `GAME_RESUME_AT` (env
   `WORDLE_GAME_END_AT` / `WORDLE_RESUME_AT`, puste = brak). W przerwie faza `'ended'`,
   `resumes_at` w stanie, front pisze „Wordle wraca …", a sezon stoi na miesiącu końca.
-- **Zestaw wczytuje się SAM przy starcie** (`autoloadSet`): w przerwie — na miesiąc powrotu,
-  a gdy gra trwa i na dziś nie ma hasła — na bieżący miesiąc, od dziś. `frozenThroughIndex`
-  zamraża dzień bieżący tylko wtedy, gdy ma hasło (ktoś może być w trakcie); pusty dzień wolno
-  obsadzić, także przyciskiem w panelu. Raz wczytany zestaw nie tasuje się od nowa.
+- **Zestawy wczytują się SAME przy starcie** (`autoloadSets`, poza przerwą): każdy plik z
+  `sets/`, którego przyszłe dni są w bazie PUSTE, po kolei od najwcześniejszego — jeden restart
+  obsadza bieżący miesiąc (od dziś) i kolejne, na które są pliki. „Puste", a nie
+  „niewczytane", żeby restart nie nadpisał haseł poprawionych w panelu ani nie przetasował
+  wczytanego zestawu. `frozenThroughIndex` zamraża dzień bieżący tylko wtedy, gdy ma hasło
+  (ktoś może być w trakcie); pusty dzień wolno obsadzić, także przyciskiem w panelu.
 - **Hasła nie są nigdzie wypisywane** poza `sets/*.json` (właściciel też gra): nie w commitach,
   opisach PR ani odpowiedziach. Sprawdzaj zestawy skryptem, który pokazuje same statystyki.
-- **Lokalny test w dowolny dzień:** świeża baza + `WORDLE_GAME_END_AT=` (bez przerwy) — zestaw
-  na bieżący miesiąc wczyta się sam od dziś.
+- **Lokalny test:** świeża baza i zwykły start — zestawy wczytają się same od dziś.
 - **Nagroda**: `lib/wordle.js` woła `deps.onWin` WEWNĄTRZ transakcji zgadywania → hoistowana
   `slWordleReward` w `server.js` (fabryka Wordle stoi przed Snakes, TDZ) → `office.grantExtraMove`
   (ta sama funkcja co Rzut od Prezesa; nie otwiera transakcji). Slot na dziś, gdy jest miejsce
