@@ -21,6 +21,8 @@
       </div>
       <div class="header-user" id="header-user">
         <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">?</button>
+        <!-- Przejście do węży zawsze, także bez odgadniętego hasła (jak „🟩 Wordle" w Snakes). -->
+        <a class="btn-ghost" id="btn-snakes" href="/snakes" title="Snakes Game — odgadnięte hasło daje tam dodatkowy rzut">🐍 Węże</a>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
         <span class="user-nick" id="user-nick-display"></span>
         <span class="user-balance" id="user-points-display"></span>
@@ -60,6 +62,7 @@
         <li><strong>Gramy w dni robocze.</strong> Nowe hasło pojawia się w każdy dzień roboczy o <strong>8:00</strong> (czasu polskiego) i możesz je odgadywać <strong>do północy</strong> tego dnia. Między północą a 8:00 wisi jeszcze wczorajsze hasło, ale bez możliwości wpisywania. W weekend robimy przerwę — seria (🔥) przechodzi z piątku na poniedziałek bez zerowania.</li>
         <li><strong>Sezon = miesiąc.</strong> Rywalizacja trwa w obrębie jednego miesiąca. 1. dnia nowego miesiąca <strong>leaderboard, punkty i seria zerują się</strong> — każdy zaczyna od nowa. Wyniki poprzednich miesięcy zostają dostępne jako historia w tabeli liderów. Lipiec to okres testowy, konkurs rusza od sierpnia.</li>
         <li><strong>Rywalizacja.</strong> <strong>Ranking dnia</strong> pokazuje, kto dziś trafił najlepiej (liczy się najmniejsza liczba prób). <strong>Tabela liderów</strong> sumuje punkty — z widokiem All-Time, tygodniowym i miesięcznym.</li>
+        <li><strong>Extra Move w wężach 🎲.</strong> Każde odgadnięte hasło dnia daje dodatkowy ruch w <a href="/snakes">Snakes Game</a>. Wygrasz w godzinach rzutów i masz jeszcze miejsce na dodatkowy ruch — dostajesz <strong>+1 ruch na dziś</strong>. Wygrasz później (np. wieczorem) albo masz już dwa dołożone ruchy — Extra Move ląduje w ekwipunku i użyjesz go, kiedy chcesz. Nieodgadnięte hasło nie daje nic.</li>
         <li><strong>Pochwal się wynikiem.</strong> Po grze kliknij „Udostępnij wynik" — do schowka trafi siatka emoji 🟩🟨⬛ (bez zdradzania liter), gotowa do wklejenia na Slacku czy Teams.</li>
       </ol>
     </div>
@@ -80,6 +83,7 @@
           <li><span><strong>Zielony</strong> = litera na miejscu, <strong>żółty</strong> = jest w haśle, ale gdzie indziej, <strong>szary</strong> = nie ma jej wcale.</span></li>
           <li><span>Punkty rosną, im szybciej zgadniesz. Bonus za <strong>długie hasła</strong> i za <strong>serię dni 🔥</strong>. Przegrana zeruje serię.</span></li>
           <li><span><strong>⚡ Kto pierwszy, ten lepszy:</strong> pierwsze 5 osób z odgadniętym hasłem dnia dostaje bonus <strong>+5 / +4 / +3 / +2 / +1 pkt</strong>.</span></li>
+          <li><span><strong>🎲 Extra Move w wężach:</strong> odgadnięte hasło daje dodatkowy ruch w <a href="/snakes">Snakes Game</a> — na dziś, a po zamknięciu rzutów do ekwipunku.</span></li>
           <li><span>Grasz <strong>raz dziennie</strong>, postęp zapisuje się sam. Nowe hasło o <strong>północy</strong>.</span></li>
           <li><span>Ścigaj się w <strong>rankingu dnia</strong> i <strong>tabeli liderów</strong>. Podziel się wynikiem na Slacku 🟩🟨⬛.</span></li>
         </ol>

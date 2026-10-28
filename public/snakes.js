@@ -211,6 +211,8 @@ async function pollState() {
     // albo odbiera go na innym urządzeniu, a reszta stanu może stać w miejscu.
     state.officeBonus = g.office_bonus || null;
     slRenderOfficeBonus();
+    // Wordle rozwiązuje się w innej karcie — po powrocie tutaj ma się od razu pojawić.
+    slRenderWordleBonus(g);
     slRenderShopPromo();
     const prev = state.game;
     if (!prev || stateSignature(g) === stateSignature(prev)) return;
@@ -417,6 +419,7 @@ async function loadState() {
     state.officeBonus = state.game.office_bonus || null;
     renderAll();
     slRenderOfficeBonus();
+    slRenderWordleBonus(state.game);
     slRenderShopPromo();
     updateCountdown();
   } catch (e) {
@@ -456,11 +459,17 @@ function slOfficeLaterToday() {
 function slRenderOfficeBonus() {
   const ob = state.officeBonus;
   const available = !!(ob && ob.available);
-  // Przycisk stoi zawsze, gdy funkcja jest włączona (ob != null): aktywny w biurze, szary
-  // poza nim i po odebraniu — żeby było widać, że jest o co przyjść.
+  // Przycisk stoi ZAWSZE, obok „🟩 Wordle": aktywny w biurze, szary poza nim, po odebraniu
+  // i wtedy, gdy funkcja jest wyłączona (ob == null, brak adresów biura w panelu) — żeby było
+  // widać, że jest o co przyjść. Dawniej bez adresów znikał i wyglądało to na brak funkcji.
   const chip = document.getElementById('btn-office-chip');
-  chip.hidden = !ob;
-  if (ob) {
+  chip.hidden = false;
+  if (!ob) {
+    chip.disabled = true;
+    chip.classList.add('is-off');
+    chip.textContent = '🏢 Rzut od Prezesa';
+    chip.title = 'Rzut od Prezesa jest wyłączony — admin nie ustawił jeszcze adresów biura w panelu';
+  } else {
     chip.disabled = !available;
     chip.classList.toggle('is-off', !available);
     chip.textContent = ob.claimed_today ? '✅ Rzut od Prezesa odebrany' : '🏢 Rzut od Prezesa';
@@ -507,6 +516,54 @@ document.getElementById('btn-office-later').addEventListener('click', () => {
   slRenderShopPromo();
 });
 
+// ── RZUT ZA WORDLE ── (lib/wordle.js → slWordleReward w server.js)
+// Nagroda wpada SAMA w chwili odgadnięcia hasła, więc tu nie ma czego „odbierać" — przycisk
+// przy kostce mówi, co dziś z rzutem (i prowadzi do Wordle), a okienko raz dziennie (na
+// urządzenie, localStorage z datą serwera) mówi, że rzut już czeka. Bez localStorage
+// okienko wróci przy każdym wejściu — tylko wygoda, nie stan gry.
+const WORDLE_SEEN_KEY = 'sl_wordle_bonus_seen';
+
+function slRenderWordleBonus(g) {
+  const w = g && g.wordle;
+  const chip = document.getElementById('btn-wordle-chip');
+  chip.hidden = !w;
+  if (!w) return;
+  const back = w.resumes_at
+    ? new Date(w.resumes_at).toLocaleDateString('pl-PL', { timeZone: 'Europe/Warsaw', day: 'numeric', month: 'numeric' })
+    : '';
+  const look = {
+    paused:  ['🟩 Wordle wraca ' + back, true, `Wordle ma przerwę — od ${back} każde odgadnięte hasło da dodatkowy rzut tutaj`],
+    off:     ['🟩 Wordle', true, 'Dziś nie ma hasła Wordle — wraca w dzień roboczy o 8:00'],
+    todo:    ['🟩 Odgadnij Wordle → +1 rzut', false, 'Odgadnij dzisiejsze hasło w Wordle, a dostaniesz tu dodatkowy rzut'],
+    playing: ['🟩 Dokończ Wordle → +1 rzut', false, 'Masz zaczęte dzisiejsze Wordle — odgadnij hasło, a dostaniesz tu dodatkowy rzut'],
+    won:     ['✅ Rzut za Wordle dodany', true, w.bonus === 'item'
+      ? 'Za dzisiejsze Wordle Extra Move czeka w ekwipunku' : 'Za dzisiejsze Wordle masz dodatkowy rzut na dziś'],
+    lost:    ['🟩 Wordle: dziś bez rzutu', true, 'Dzisiejszego hasła nie udało się odgadnąć — kolejna szansa jutro'],
+  }[w.state] || ['🟩 Wordle', true, ''];
+  chip.textContent = look[0];
+  chip.classList.toggle('is-off', look[1]);
+  chip.title = look[2];
+
+  // Okienko tylko po wygranej z nagrodą, raz dziennie, i nigdy na okienku Rzutu od Prezesa.
+  const overlay = document.getElementById('wordle-overlay');
+  if (w.state !== 'won' || !w.bonus || overlay.style.display === 'flex') return;
+  if (document.getElementById('office-overlay').style.display === 'flex') return;
+  let seen = null;
+  try { seen = localStorage.getItem(WORDLE_SEEN_KEY); } catch (e) { /* bez pamięci: pokaże się znowu */ }
+  if (seen === g.server_date) return;
+  document.getElementById('wordle-overlay-text').innerHTML = w.bonus === 'item'
+    ? 'Za dzisiejsze hasło dostajesz <strong>Extra Move</strong> — czeka w ekwipunku, użyj go, kiedy chcesz.'
+    : 'Za dzisiejsze hasło masz <strong>dodatkowy rzut na dziś</strong> — już dodany, możesz rzucać.';
+  overlay.style.display = 'flex';
+}
+
+document.getElementById('btn-wordle-chip').addEventListener('click', () => { location.href = '/wordle'; });
+document.getElementById('btn-wordle-ok').addEventListener('click', () => {
+  try { localStorage.setItem(WORDLE_SEEN_KEY, state.game && state.game.server_date); } catch (e) { /* tylko wygoda */ }
+  document.getElementById('wordle-overlay').style.display = 'none';
+  slRenderShopPromo();
+});
+
 // ── PROMOCJA W GARDEROBIE ──
 // Po obniżce kostiumów do 50–100 coins (październik 2026) nikt o niej nie wiedział, więc
 // okienko przypomina o niej raz dziennie, przy pierwszym wejściu. „Raz dziennie" liczy się
@@ -528,6 +585,7 @@ function slRenderShopPromo() {
   const overlay = document.getElementById('promo-overlay');
   if (!PROMO_ACTIVE || !g || overlay.style.display === 'flex') return;
   if (document.getElementById('office-overlay').style.display === 'flex') return;
+  if (document.getElementById('wordle-overlay').style.display === 'flex') return;
   let seen = null;
   try { seen = localStorage.getItem(PROMO_SEEN_KEY); } catch (e) { /* bez pamięci: pokaże się przy każdym wejściu */ }
   if (seen === g.server_date) return;
@@ -658,11 +716,38 @@ function slSupporterCard(i, c) {
       </div>`;
 }
 
+// Karta nagrody sezonowej (też w zakładce „Golden Carrot"): nie do kupienia, tylko do
+// zdobycia. W swoim sezonie widzi ją każdy, potem tylko ten, kto ją ma (filtr serwera).
+const SL_AWARD_HOW = {
+  candy: 'dostaje ten, kto na koniec sezonu ma najwięcej 🍬 (przy remisie — każdy z czołówki)'
+};
+function slAwardCard(i) {
+  const how = SL_AWARD_HOW[i.award] || 'nagroda za sezon';
+  let body;
+  if (i.owned) {
+    body = `<span class="costume-owned-tag">w szafie · zasłużona! 🏆</span>`
+      + (i.worn
+        ? `<button class="btn-ghost costume-off" data-slot="${i.slot}">Zdejmij</button>`
+        : `<button class="btn-primary costume-wear" data-slot="${i.slot}" data-item="${i.id}">Załóż</button>`);
+  } else {
+    body = `<span class="costume-missing">Do zdobycia — ${esc(how)}.</span>`;
+  }
+  return `
+      <div class="costume-item is-award${i.worn ? ' is-worn' : ''}${i.owned ? ' is-owned' : ''}">
+        <span class="costume-icon">${i.icon}</span>
+        <span class="costume-name">${esc(i.name)}</span>
+        <span class="costume-season is-award">🏆 Nagroda · ${esc(i.season_name || '')}</span>
+        ${body}
+      </div>`;
+}
+
 function renderCostumes(g) {
   const box = document.getElementById('costume-shop');
   if (!box || !g.costumes) return;
   const c = g.costumes;
-  const hasSupporter = c.items.some(i => i.supporter);
+  // Zakładka „Golden Carrot" = skiny wsparcia i nagrody sezonowe, czyli to, czego nie
+  // kupi się za coins.
+  const hasSupporter = c.items.some(i => i.supporter || i.award);
   if (slCostumeTab === 'supporter' && !hasSupporter) slCostumeTab = 'hat';
   // Podgląd = mój pionek złożony TĄ SAMĄ funkcją co na planszy (slPawnHtml), tylko duży —
   // wszystkie dodatki są w procentach boku pionka, więc skalują się razem z nim.
@@ -675,10 +760,16 @@ function renderCostumes(g) {
     + (hasSupporter ? `<button class="costume-tab costume-tab-supporter${slCostumeTab === 'supporter' ? ' is-active' : ''}" data-slot="supporter">Golden Carrot</button>` : '');
   // Skiny wsparcia mieszkają tylko w swojej zakładce (nie w „Czapce"), żeby nie mieszać
   // ceny w coins z ceną w złotówkach na jednej liście.
+  const supporters = c.items.filter(i => i.supporter);
+  const awards = c.items.filter(i => i.award);
   const items = slCostumeTab === 'supporter'
-    ? `<div class="supporter-intro">Skin za wsparcie twórcy gry — jeden na sezon, tylko wygląd, w grze nic nie daje.</div>`
-      + c.items.filter(i => i.supporter).map(i => slSupporterCard(i, c)).join('')
-    : c.items.filter(i => i.slot === slCostumeTab && !i.supporter).map(i => {
+    ? (supporters.length
+      ? `<div class="supporter-intro">Skin za wsparcie twórcy gry — jeden na sezon, tylko wygląd, w grze nic nie daje.</div>`
+        + supporters.map(i => slSupporterCard(i, c)).join('') : '')
+      + (awards.length
+        ? `<div class="supporter-intro">🏆 Nagrody sezonowe — nie do kupienia, tylko do zdobycia.</div>`
+          + awards.map(slAwardCard).join('') : '')
+    : c.items.filter(i => i.slot === slCostumeTab && !i.supporter && !i.award).map(i => {
     let btn;
     // Kostium to rzecz, na którą się ODKŁADA — zamiast samego wyszarzonego przycisku
     // pokazujemy, ile już uzbierałeś i ile brakuje.

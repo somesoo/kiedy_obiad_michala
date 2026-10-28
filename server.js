@@ -127,7 +127,8 @@ app.use('/api', (req, res, next) => {
   res.set('X-App-Version', ASSET_VERSION);
   next();
 });
-// Serwis to dziś Snakes — Wordle skończył się 2026-08-31 i przeniósł pod /wordle (lib/wordle.js).
+// Serwis to dziś Snakes — Wordle żyje pod /wordle (lib/wordle.js): miał przerwę 1.09–1.11.2026
+// i wrócił jako dodatek do Snakes (odgadnięte hasło = Extra Move, patrz slWordleReward).
 // Stare adresy przekierowujemy, żeby zakładki i linki z Discorda dalej gdzieś prowadziły.
 app.get(['/', '/index.html'], (req, res) => res.redirect(302, '/snakes'));
 app.get(['/admin', '/admin.html'], (req, res) => res.redirect(302, '/wordle/admin'));
@@ -209,11 +210,13 @@ function checkAdmin(req, res) {
   return true;
 }
 
-// ── OFFICE WORDLE (archiwum) — cały w lib/wordle.js ──
+// ── OFFICE WORDLE — cały w lib/wordle.js ──
 // Musi stać PO express.json() (trasy POST czytają req.body) i przed schematem Snakes —
-// tu dawniej leżał kod Wordle, więc kolejność startu się nie zmienia.
+// tu dawniej leżał kod Wordle, więc kolejność startu się nie zmienia. Nagroda w Snakes idzie
+// przez hoistowaną slWordleReward: Snakes (i lib/office.js) powstają dopiero niżej.
 const wordle = require('./lib/wordle')({
-  app, db, transaction, ensureColumn, authPlayer, checkAdmin, sendPage, APP_URL
+  app, db, transaction, ensureColumn, authPlayer, checkAdmin, sendPage, APP_URL,
+  onWin: slWordleReward
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1399,6 +1402,9 @@ function slBuildState(playerId) {
     // Zamknięte sezony (zakładki w rankingu) i podium do obejrzenia raz po zamknięciu.
     seasons_archive: crowning.closures(),
     crowning: crowning.crowningFor(playerId),
+    // Dzisiejsze Wordle (odgadnięte hasło = Extra Move, patrz slWordleReward): przycisk przy
+    // kostce i okienko „masz rzut za Wordle". null = Wordle wyłączone na stałe.
+    wordle: wordle.todayStatus(playerId),
     server_date: today
   };
 }
@@ -1421,6 +1427,25 @@ const office = require('./lib/office')({
   slMetaGet, slMetaSet, slBuildState, slAddPowerup, todayWaw, isWeekendStr, slPlayHours,
   SL_MAX_EXTRA_ROLLS
 });
+
+// ── WORDLE → SNAKES: odgadnięte hasło dnia = Extra Move ──
+// Działa jak Rzut od Prezesa (office.grantExtraMove): +1 ruch na dziś, a gdy dzisiejsze sloty
+// są zajęte — sztuka do ekwipunku. Wordle gra się do północy, a rzuty tylko w oknie gry, więc
+// wygrana poza oknem (po 16:00, w dzień bez gry) od razu idzie do ekwipunku, zamiast dać slot,
+// który przepadłby o północy. Woła ją lib/wordle.js WEWNĄTRZ transakcji zgadywania.
+// Hoistowana funkcja, bo fabryka Wordle jest podpinana przed Snakes (TDZ), a woła ją dopiero
+// trasa — wtedy `office` już istnieje.
+function slWordleReward(playerId) {
+  const today = todayWaw();
+  const hours = slPlayHours();
+  const playDay = !(isWeekendStr(today) && !hours.weekends);
+  const slotToday = playDay && Number(warsawParts().h) < hours.end;
+  const granted = office.grantExtraMove(playerId, today, slotToday);
+  slLogActivity(playerId, 'wordle_bonus', granted === 'roll'
+    ? '🟩 rozwiązuje Wordle dnia (+1 ruch na dziś)'
+    : '🟩 rozwiązuje Wordle dnia (Extra Move do ekwipunku)');
+  return granted;
+}
 
 // ── ENDPOINTY — SNAKES & LADDERS ──
 

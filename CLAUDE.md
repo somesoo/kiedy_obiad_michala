@@ -3,7 +3,8 @@
 Biurowe gry dla ~15 osób. Express + SQLite (`node:sqlite`), front to czysty JS/HTML/CSS
 w `public/` — **bez bundlera i bez kroku budowania**. Wdrożenie: pm2 na małym VPS-ie,
 właściciel przeładowuje ręcznie. Serwis to dziś **Snakes Game** pod `/snakes` (`/`
-przekierowuje); zakończony Wordle żyje jako archiwum pod `/wordle`.
+przekierowuje); Wordle wrócił po przerwie pod `/wordle` jako dodatek: odgadnięte hasło dnia
+= Extra Move w Snakes.
 
 ## Mapa modułów
 
@@ -80,7 +81,7 @@ starej wersji.
 | **Mechaniki sezonowe** | `lib/seasonal.js`, `events` w pliku planszy | kocioł, cukierek albo psikus, polowanie na cukierki |
 | **Kostiumy** | `lib/costumes.js`, `SL_COSTUME_ART` w `public/sl/art-costumes.js` | kosmetyka pionka za coins, działa w każdym sezonie |
 | **Walka z bossem** (co-op) | `lib/boss.js`, panel w `public/sl/boss.js` | wydzielona z `server.js`; przebudowana mechanika nagród |
-| **Wordle po polsku** (archiwum) | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **zakończony 2026-08-31** przez `GAME_END_AT`, trwale zablokowany i już nie wróci. Kod zostaje: strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). W rdzeniu zostało tylko to, czego używa też Snakes: `players`, `/api/register`, `/api/me`. Nie inwestuj tu czasu bez wyraźnej prośby. |
+| **Wordle po polsku** | `lib/wordle.js`, `public/app.js`, `wordle.html`, `wordle-admin.html` | **przerwa 2026-08-31 → 2026-10-26 8:00** (`GAME_END_AT` → `GAME_RESUME_AT`), potem gra jak dawniej, a **wygrana daje Extra Move w Snakes** (patrz „Wordle → Extra Move"). Strona pod `/wordle`, panel pod `/wordle/admin`, API pod `/api/wordle/*`. `/` i stare `/admin` przekierowują (na `/snakes` i `/wordle/admin`). |
 | bukmacherka mundialowa | — | usunięta, został tylko `DROP TABLE` i ~540 linii martwego CSS w `style.css` |
 
 Baza: `db/michal.db` z **`ATTACH`** `db/snakes.db` jako schemat `snakes`. Katalog `db/`
@@ -104,7 +105,11 @@ go odpalić ponownie. Admin przełącza sezon w panelu (`POST /api/snakes/admin/
 a aktywny siedzi w `sl_meta.active_board`.
 
 **Stan wdrożenia (30.09.2026):** produkcja gra na **Nocy Duchów** (`halloween`); pierwszy
-sezon „Snakes Game" (`default`, klasyczna 7×7) jest zamknięty. Flaga `testing` w
+sezon „Snakes Game" (`default`, klasyczna 7×7) jest zamknięty. Na listopad czeka **sezon 3
+„Klasyka"** (`boards/klasyka.js`, już `testing: false` — gotowy, właściciel przełącza go sam
+na koniec października): ten sam układ co `default` (przepisany, nie przez `require`), bez
+`special_boss` i bez `events` — wraca zwykła rotacja bossów z eskalacją po wygranej i ulgą
+po przegranej. Flaga `testing` w
 `boards/halloween.js` stoi na `false`, więc każda zmiana liczby pól albo numerów to
 ruszanie żywej gry (pozycje, cukierki na polach, historia ruchów) — potrzebna migracja.
 Nowy sezon w przygotowaniu dostaje `testing: true`, dopóki nikt na nim naprawdę nie gra. Serwer przy starcie krzyczy
@@ -146,9 +151,11 @@ minimalnego odstępu środków (`FREE_MIN_GAP`) zamiast unikalnej kratki.
   Front rysuje jeden kafelek „6/26" z pionkami z obu numerów. Rozstaje mogą być tylko
   zwykłym polem albo bonusem o tej samej wartości na obu numerach (bez łączników, zdarzeń
   i cukierków), bo to jedno miejsce i musi działać tak samo z obu stron.
-- Pole w układzie 'free' jest małe: przy więcej niż 2 pionkach pokazuje jeden (mój,
-  jeśli tam stoję) i licznik „+N". To ważne zaraz po zmianie sezonu — wszyscy stoją
-  wtedy na starcie.
+- Pole (w każdym układzie) przy więcej niż 2 pionkach pokazuje jeden (mój, jeśli tam
+  stoję) i licznik „+N"; dwa pionki stoją obok siebie na zakładkę. To ważne zaraz po
+  zmianie sezonu — wszyscy stoją wtedy na starcie. Pola NIE przycinają zawartości
+  (`overflow: visible`): kostiumy mają wystawać poza pole. Dawniej siatka miała
+  `overflow: hidden`, który ucinał skrzydła i czapki, a przy okazji chował tłok.
 - **Telefon (≤700px albo niski ekran dotykowy): plansza jest schowana za przyciskiem
   „🗺️ Podgląd planszy"** i otwiera się na pełnym ekranie, a w pionie obrócona o 90°
   (`.board-sheet` w CSS, `slBoardPeek` w `snakes.js`). `#board-area` NIE jest kopiowana —
@@ -184,8 +191,9 @@ Przełączenie sezonu w panelu z zaznaczonym „zamknij sezon" (domyślnie) woł
   zamknięcia. Pamięć jest na serwerze, a nie w localStorage — raz na osobę, nie na urządzenie.
   Front: `slMaybeCrown` w `public/sl/ranking.js`, nakładka w `<body>` (poza `#board-area`).
 - **Kostiumy mają `season`** w katalogu — kupić można tylko te z aktywnego sezonu (albo bez
-  `season`), a kupione wcześniej dalej się nosi. Obecny zestaw jest oznaczony `'halloween'`,
-  więc na planszy `default` nie jest w sprzedaży.
+  `season`), a kupione wcześniej dalej się nosi. Zestawy: Noc Duchów (`'halloween'`) i Klasyka
+  (`'klasyka'`, 12 sztuk + skin wsparcia Złoty wieniec laurowy). Katalog stoi w kolejności
+  sklepu, więc zestaw bieżącego sezonu idzie na początek.
 - Reset gry **nie** rusza archiwum (to historia). Wyczyszczenie gracza kasuje jego wiersze
   wyników, ale miejsc innych nie przenumerowuje.
 
@@ -277,8 +285,9 @@ dwóch rzeczy naraz.
 - **Nagroda za polowanie**: `events.candy.prize` = id kostiumu z `award` w katalogu.
   `slCloseSeasonAndInstall` rozdaje go (przed `seasonal.resetAll`) wszystkim z najwyższą
   liczbą 🍬, nie zakłada go od razu i pisze wpis do dziennika. Noc Duchów:
-  `candy_hunter_prize`, na razie „❓", bo kostium **czeka na zaprojektowanie** (podmień
-  rysunek w `SL_COSTUME_ART.hat`, nazwę, ikonę i ewentualnie slot; id zostaw).
+  `candy_hunter_prize` = 🍭 Korona Łowcy Cukierków (czapka). Nagrody siedzą w sklepie w
+  zakładce „Golden Carrot" obok skinów wsparcia (`slAwardCard` w `snakes.js`): w swoim
+  sezonie widzi je każdy jako „do zdobycia", potem tylko właściciel.
 - Zasady mechanik składa `slRenderSeasonRules` (`snakes.js`) ze stawek w payloadzie,
   do punktu `#rules-season` w regulaminie. Sezon bez `events` go chowa.
 - Drzwi bez `weekdays` są otwarte codziennie (tak jest na Nocy Duchów). Z `weekdays`
@@ -298,8 +307,18 @@ czapka, skrzydła, gadżet, nakładka (overlay = filtr na zdjęciu + rysunek na 
 Pionek na planszy i podgląd w sklepie składa **jedna** funkcja `slPawnHtml`, więc podgląd
 nie może się rozjechać z tym, co widzą inni.
 
-**Nagrody sezonowe** (`award` w katalogu) nie są do kupienia i w sklepie widzi je tylko
-właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
+**Kostiumy od Klasyki są „malowane"** (pierwsza, płaska wersja wyglądała jak z Painta):
+gradienty, faktury i połysk. Wspólne gradienty i wzory (`#slg-*`, `#slp-*`) siedzą RAZ
+w `SL_COSTUME_DEFS` w `art-costumes.js` i trafiają do niewidocznego `<svg>` w `<body>` —
+nie do kostiumu, bo definicje w schowanym elemencie (`display:none`, np. zamknięty sklep)
+Chrome pomija. Rysunki biorą je klasami `c-*` (`fill: url(#…)` w `snakes.css`); części
+składa się helperami „pędzla" (`slLeaf`, `slMaple`, `slAcorn`, `slFeather`, `slSnowflake`…).
+Skrzydło może być konturem (Noc Duchów) albo całym rysunkiem zaczynającym się od `<`
+(Klasyka, klasa `is-painted`, może wystawać poza pudełko). Uwaga na nazwy klas: `.c-stick`
+i `.c-leaf` należą do miotły i dyni — nowa klasa o tej samej nazwie przejmie ich kolor.
+
+**Nagrody sezonowe** (`award` w katalogu) nie są do kupienia; w zakładce „Golden Carrot"
+widzi je każdy w ich sezonie, a potem tylko właściciel. Reset gry ich nie kasuje (jak archiwum, z którego wynikają), wyczyszczenie
 gracza — tak.
 
 **Okienko „Promocja w sklepie z ubraniami"** (`slRenderShopPromo` w `snakes.js`) wyskakuje
@@ -337,8 +356,39 @@ adresu gracza leci do konsoli (`Snakes/biuro:` w `pm2 logs`) i na listę „osta
 w karcie (w pamięci, od restartu).
 
 W UI bonus nazywa się **„Rzut od Prezesa za przyjście do biura"** (decyzja właściciela).
-Przycisk przy kostce stoi zawsze, gdy lista adresów nie jest pusta: szary poza biurem
-i po odebraniu, aktywny w biurze.
+Przycisk przy kostce stoi ZAWSZE, obok „🟩 Wordle": aktywny w biurze, szary poza biurem,
+po odebraniu i przy pustej liście adresów (wtedy z opisem, że funkcja jest wyłączona).
+
+## Wordle → Extra Move (od 26.10.2026)
+
+Wordle wrócił po przerwie i działa jak dawniej (hasło dnia pon–pt od 8:00 do północy, sezon =
+miesiąc, zestawy w `sets/<RRRR-MM>.json`). Nowe jest tylko to, że **odgadnięte hasło daje
+Extra Move w Snakes**, raz na hasło (gra `(player, word)` jest unikalna). Przegrana nie daje nic.
+
+- **Przerwa**, nie koniec: `gameHasEnded()` = między `GAME_END_AT` a `GAME_RESUME_AT` (env
+  `WORDLE_GAME_END_AT` / `WORDLE_RESUME_AT`, puste = brak). W przerwie faza `'ended'`,
+  `resumes_at` w stanie, front pisze „Wordle wraca …", a sezon stoi na miesiącu końca.
+- **Zestawy wczytują się SAME przy starcie** (`autoloadSets`, poza przerwą): każdy plik z
+  `sets/`, którego przyszłe dni są w bazie PUSTE, po kolei od najwcześniejszego — jeden restart
+  obsadza bieżący miesiąc (od dziś) i kolejne, na które są pliki. „Puste", a nie
+  „niewczytane", żeby restart nie nadpisał haseł poprawionych w panelu ani nie przetasował
+  wczytanego zestawu. `frozenThroughIndex` zamraża dzień bieżący tylko wtedy, gdy ma hasło
+  (ktoś może być w trakcie); pusty dzień wolno obsadzić, także przyciskiem w panelu.
+- **Hasła nie są nigdzie wypisywane** poza `sets/*.json` (właściciel też gra): nie w commitach,
+  opisach PR ani odpowiedziach. Sprawdzaj zestawy skryptem, który pokazuje same statystyki.
+- **Lokalny test:** świeża baza i zwykły start — zestawy wczytają się same od dziś.
+- **Nagroda**: `lib/wordle.js` woła `deps.onWin` WEWNĄTRZ transakcji zgadywania → hoistowana
+  `slWordleReward` w `server.js` (fabryka Wordle stoi przed Snakes, TDZ) → `office.grantExtraMove`
+  (ta sama funkcja co Rzut od Prezesa; nie otwiera transakcji). Slot na dziś, gdy jest miejsce
+  pod sufitem i okno rzutów jeszcze trwa; inaczej sztuka do ekwipunku — Wordle gra się do
+  północy, a slot po 16:00 przepadłby. Wynik (`'roll'`/`'item'`) siedzi w `games.snakes_bonus`.
+- **W Snakes widać to przy kostce**: `wordle` w stanie (`wordle.todayStatus`: `paused` / `off` /
+  `todo` / `playing` / `won`+`bonus` / `lost`, bez hasła) rysuje przycisk „🟩 Wordle"
+  (`slRenderWordleBonus`, prowadzi do `/wordle`), a po wygranej raz dziennie wyskakuje okienko
+  „Wordle odgadnięte!" (localStorage z datą serwera; nigdy na okienku Rzutu od Prezesa,
+  promocja garderoby czeka na oba). Nic się tam nie „odbiera" — rzut jest już przyznany.
+- Wpis w dzienniku Snakes: typ `wordle_bonus` (🟩), bez hasła. Bez punktów i coins Snakes,
+  więc ścieżek cofania nie dotyczy (jak Rzut od Prezesa).
 
 ## Dwie waluty — to jest fundament, nie szczegół
 

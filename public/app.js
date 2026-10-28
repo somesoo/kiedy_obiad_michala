@@ -155,11 +155,15 @@ function renderGame() {
 
   if (!g.has_word) {
     if (g.is_ended) {
+      // Przerwa z datą powrotu (resumes_at) albo koniec na stałe, jak dawniej.
+      const back = g.resumes_at ? fmtResume(g.resumes_at) : null;
       area.innerHTML = `
         <div class="empty-state season-ended-state">
           <div class="season-over-emoji">🏆</div>
-          <h3>Gra zakończona!</h3>
-          <p class="text-muted">Dziękujemy za udział — wpisywanie haseł jest już zamknięte na stałe. Oto ranking końcowy:</p>
+          <h3>${back ? 'Wordle wraca!' : 'Gra zakończona!'}</h3>
+          <p class="text-muted">${back
+            ? `Nowe hasła od <strong>${esc(back)}</strong>. Za każde odgadnięte hasło dostaniesz <strong>Extra Move w wężach</strong>. Ranking poprzedniego sezonu:`
+            : 'Dziękujemy za udział — wpisywanie haseł jest już zamknięte na stałe. Oto ranking końcowy:'}</p>
           <button class="btn-primary" id="btn-play-snakes" style="margin:16px auto 0;display:block">🐍 Zagraj w węże</button>
           <div class="sidebar-card leaderboard-card leaderboard-card-center" style="text-align:left;width:100%;max-width:480px;margin:16px auto 0">
             <div class="sidebar-card-header">
@@ -257,6 +261,21 @@ function renderKeyboard(g) {
   return `<div class="keyboard" id="keyboard">${rowsHtml}</div>`;
 }
 
+// „2 listopada o 08:00" — data powrotu Wordle po przerwie.
+function fmtResume(iso) {
+  const d = new Date(iso);
+  const opt = { timeZone: 'Europe/Warsaw' };
+  return `${d.toLocaleDateString('pl-PL', { ...opt, day: 'numeric', month: 'long' })} o ${d.toLocaleTimeString('pl-PL', { ...opt, hour: '2-digit', minute: '2-digit' })}`;
+}
+
+// Nagroda w wężach za odgadnięte hasło (serwer: slWordleReward). 'roll' = ruch na dziś,
+// 'item' = Extra Move w ekwipunku (gdy dzisiejsze sloty zajęte albo okno rzutów zamknięte).
+function snakesBonusText(kind) {
+  if (kind === 'roll') return '🎲 +1 ruch w wężach na dziś';
+  if (kind === 'item') return '🎲 Extra Move w wężach — czeka w ekwipunku';
+  return '';
+}
+
 function renderReview(g) {
   const won = g.status === 'won';
   const answerLine = won
@@ -274,6 +293,7 @@ function renderReview(g) {
       ${answerLine}
       ${pointsLine}
       ${speedLine}
+      ${won && g.snakes_bonus ? `<div class="review-snakes"><a href="/snakes">${snakesBonusText(g.snakes_bonus)} →</a></div>` : ''}
       <div class="review-stats">
         <div class="stat"><span class="stat-num">${g.stats.current_streak}</span><span class="stat-lbl">🔥 streak</span></div>
         <div class="stat"><span class="stat-num">${g.stats.best_streak}</span><span class="stat-lbl">rekord serii</span></div>
@@ -361,7 +381,8 @@ async function submitGuess() {
       const speedTxt = updated.speed_bonus > 0
         ? ` (⚡ ${updated.win_place}. dzisiaj, w tym +${updated.speed_bonus} za szybkość)`
         : '';
-      showToast(`🎉 Brawo! +${updated.points_today} pkt${speedTxt}`);
+      const snakesTxt = updated.snakes_bonus ? ` · ${snakesBonusText(updated.snakes_bonus)}` : '';
+      showToast(`🎉 Brawo! +${updated.points_today} pkt${speedTxt}${snakesTxt}`);
       loadLeaderboard();
       loadDaily();
     } else if (!wasFinished && updated.status === 'lost') {
@@ -483,7 +504,7 @@ function renderDaily(data) {
   if (!data.has_word) {
     countEl.textContent = '';
     const msg = data.is_ended
-      ? 'Gra zakończona — zobacz ranking końcowy na środku. 🏆'
+      ? (data.resumes_at ? `Przerwa — nowe hasła od ${fmtResume(data.resumes_at)}. 🏆` : 'Gra zakończona — zobacz ranking końcowy na środku. 🏆')
       : data.is_weekend
       ? 'Weekend — ranking wróci w poniedziałek. 💤'
       : 'Dziś nie ma hasła.';
@@ -582,7 +603,7 @@ function updateCountdown() {
   const textEl = document.getElementById('countdown-text');
 
   if (g && g.is_ended) {
-    textEl.textContent = `🏆 Gra zakończona — dziękujemy za udział!`;
+    textEl.textContent = g.resumes_at ? `🏆 Przerwa — Wordle wraca ${fmtResume(g.resumes_at)}` : `🏆 Gra zakończona — dziękujemy za udział!`;
     if (barEl) barEl.style.width = '100%';
     return;
   }

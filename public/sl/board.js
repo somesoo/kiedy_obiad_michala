@@ -496,9 +496,14 @@ function slPawnHtml(p, opts = {}) {
   // Każdy macha w innym rytmie (opóźnienie z player_id), żeby stado nie trzepotało jak jeden.
   const delay = `animation-delay:-${(Number(p.player_id) % 7) * 0.37}s`;
   const wingPath = wingKind ? SL_COSTUME_ART.wings[wingKind] : null;
+  // Skrzydło to albo sam kontur (Noc Duchów: kolor z CSS), albo malowany rysunek (Klasyka:
+  // zaczyna się od „<"). Rysunek odbija się w całości grupą i może wystawać poza pudełko.
+  const painted = !!wingPath && wingPath[0] === '<';
+  const wingSvg = (side, tf) => `<svg class="sl-pawn-wing is-${side} w-${wingKind}${painted ? ' is-painted' : ''}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}">`
+    + (painted ? `<g${tf ? ` transform="${tf}"` : ''}>${wingPath}</g>` : `<path${tf ? ` transform="${tf}"` : ''} d="${wingPath}"/>`) + '</svg>';
   const wings = wingPath ? `
-        <svg class="sl-pawn-wing is-left w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path d="${wingPath}"/></svg>
-        <svg class="sl-pawn-wing is-right w-${wingKind}" viewBox="0 0 40 24" aria-hidden="true" style="${delay}"><path transform="matrix(-1 0 0 1 40 0)" d="${wingPath}"/></svg>` : '';
+        ${wingSvg('left', '')}
+        ${wingSvg('right', 'matrix(-1 0 0 1 40 0)')}` : '';
   const overlayArt = costume.overlay && !ghost ? (SL_COSTUME_ART.overlay[costume.overlay] || '') : '';
   // Obrys kształtu leży w tej samej warstwie co rysunek nakładki. Warstwa ma inset −8%,
   // więc pionek (0..1) zajmuje w jej viewBoxie 2,76..37,24 — stąd translate + scale.
@@ -564,13 +569,15 @@ function renderCell(idx, sp, players, posStyle, board, ev = null, twin = null) {
   // Pionek = okrągłe zdjęcie profilowe; serwer zwraca w `players` WYŁĄCZNIE graczy,
   // którzy je wgrali (bez zdjęcia = nie widać na planszy), więc avatar_url zawsze jest.
   // Nick pojawia się po najechaniu myszką (natywny tooltip z title).
-  // Małe pole (układ 'free') mieści najwyżej dwa pionki. Po zmianie sezonu WSZYSCY stoją
-  // na starcie, więc bez limitu kilkanaście awatarów wylałoby się słupkiem na sąsiednie
-  // pola. Przy tłoku widać jeden awatar (mój, jeśli tu stoję) i licznik „+N" z nickami
-  // reszty w podpowiedzi — razem mieszczą się w szerokości pola.
+  // Pole mieści najwyżej dwa pionki (z kostiumami, które wystają poza pole). Po zmianie
+  // sezonu WSZYSCY stoją na starcie, więc bez limitu kilkanaście awatarów wylałoby się
+  // słupkiem na sąsiednie pola. Przy tłoku widać jeden awatar (mój, jeśli tu stoję)
+  // i licznik „+N" z nickami reszty w podpowiedzi — razem mieszczą się w szerokości pola.
+  // Dawniej limit był tylko w układzie 'free', bo pole w siatce przycinało nadmiar
+  // (overflow: hidden) — ale przycinało też skrzydła i czapki.
   let shown = players || [];
   let overflow = '';
-  if (free && shown.length > 2) {
+  if (shown.length > 2) {
     // Gracz wskazany z rankingu (slSpotPlayer) idzie przed mój pionek — ma go być widać.
     const rank = p => (p.player_id === slSpotPlayer ? 2 : 0) + (p.is_me ? 1 : 0);
     const ordered = [...shown].sort((a, b) => rank(b) - rank(a));
