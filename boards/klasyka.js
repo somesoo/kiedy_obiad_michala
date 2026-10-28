@@ -30,8 +30,10 @@ for (let i = 0; i < COLS * ROWS; i++) {
 
 module.exports = {
   name: 'Klasyka · sezon 3',
-  // W przygotowaniu — po przełączeniu produkcji na ten sezon zmień na false.
-  testing: true,
+  // GOTOWY (28.10.2026, decyzja właściciela) — produkcja przełącza się na niego na koniec
+  // października. Od teraz zmiana liczby pól albo numeracji to ruszanie żywej gry: potrzebna
+  // migracja (serwer krzyczy w logu, gdy liczba pól aktywnego sezonu bez `testing` się zmieni).
+  testing: false,
   theme: null,
   effects: [],
   grid: { cols: COLS, rows: ROWS },

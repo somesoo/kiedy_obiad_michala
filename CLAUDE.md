@@ -106,9 +106,10 @@ a aktywny siedzi w `sl_meta.active_board`.
 
 **Stan wdrożenia (30.09.2026):** produkcja gra na **Nocy Duchów** (`halloween`); pierwszy
 sezon „Snakes Game" (`default`, klasyczna 7×7) jest zamknięty. Na listopad czeka **sezon 3
-„Klasyka"** (`boards/klasyka.js`, `testing: true`): ten sam układ co `default` (przepisany,
-nie przez `require`), bez `special_boss` i bez `events` — wraca zwykła rotacja bossów
-z eskalacją po wygranej i ulgą po przegranej. Po przełączeniu produkcji: `testing: false`. Flaga `testing` w
+„Klasyka"** (`boards/klasyka.js`, już `testing: false` — gotowy, właściciel przełącza go sam
+na koniec października): ten sam układ co `default` (przepisany, nie przez `require`), bez
+`special_boss` i bez `events` — wraca zwykła rotacja bossów z eskalacją po wygranej i ulgą
+po przegranej. Flaga `testing` w
 `boards/halloween.js` stoi na `false`, więc każda zmiana liczby pól albo numerów to
 ruszanie żywej gry (pozycje, cukierki na polach, historia ruchów) — potrzebna migracja.
 Nowy sezon w przygotowaniu dostaje `testing: true`, dopóki nikt na nim naprawdę nie gra. Serwer przy starcie krzyczy
