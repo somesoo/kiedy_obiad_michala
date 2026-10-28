@@ -221,7 +221,11 @@ Dawniej blokował go DOWOLNY cykl z kluczem edycji — każde przełączenie sez
 „spalało" Dynię i Noc Duchów dostawała losowe bossy, także po jej pokonaniu (wrzesień 2026).
 
 HP = `hp_per_workday` × dni robocze do `attack_at` (co najmniej 1 dzień), liczone od
-NASTĘPNEGO dnia roboczego; termin zawsze `attack_at`. Daty w pliku są bez roku, a klucz edycji
+NASTĘPNEGO dnia roboczego; termin startowy to `attack_at`. **Termin przesunięty w panelu
+(`/admin/coop/config` → `boss_deadline_at`) wygrywa z plikiem**, dopóki trwa walka tej edycji
+(`slSpecialAttackMs`): z niego liczy się licznik „atak za…", stan `'over'` i rozliczenie.
+Dawniej licznik i `'over'` brały datę z pliku — licznik stał, a termin przesunięty później
+chował trwającą walkę (październik 2026). Daty w pliku są bez roku, a klucz edycji
 (`sl_coop.special` = `'halloween-2026'`) odróżnia lata. Dynia ma **800 HP za dzień** (decyzja
 właściciela), czyli 16 000 przy włączeniu 2.10. Świadomie trudna: rzuty dają ~7 900 HP, resztę
 muszą dołożyć wpłaty. Przy dawnych 1100 była arytmetycznie nie do ubicia.
