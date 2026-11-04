@@ -9,6 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
+  <!-- Warstwa językowa PL/EN (patrz public/i18n.js). Hasła zostają po polsku. -->
+  <script src="/i18n.js"></script>
+  <script src="/i18n/en-common.js"></script>
+  <script src="/i18n/en-wordle.js"></script>
 </head>
 <body>
 
@@ -24,7 +28,7 @@
         <!-- Przejście do węży zawsze, także bez odgadniętego hasła (jak „🟩 Wordle" w Snakes). -->
         <a class="btn-ghost" id="btn-snakes" href="/snakes" title="Snakes Game — odgadnięte hasło daje tam dodatkowy rzut">🐍 Węże</a>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
-        <span class="user-nick" id="user-nick-display"></span>
+        <span class="user-nick" id="user-nick-display" data-i18n-skip></span>
         <span class="user-balance" id="user-points-display"></span>
       </div>
     </div>
@@ -39,7 +43,7 @@
   <div class="overlay" id="login-overlay">
     <div class="login-card">
       <h2>Dołącz do gry</h2>
-      <p class="login-sub">Podaj swój nick — zaloguje Cię automatycznie, jeśli już grasz. Codziennie nowe biurowe hasło do odgadnięcia.</p>
+      <p class="login-sub" data-content="wordle.login"></p>
       <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
       <button class="btn-primary" id="btn-login">Wchodzę w to</button>
       <div class="login-error" id="login-error"></div>
@@ -51,20 +55,9 @@
     <div class="how-inner">
       <button class="how-close" id="how-close">✕</button>
       <h3>Jak grać w Office Wordle?</h3>
-      <p class="how-intro">Codziennie jedno <strong>hasło</strong> do odgadnięcia w jak najmniejszej liczbie prób — jak w klasycznym Wordle. Hasła <strong>mogą, ale nie muszą być z branży IT</strong>: czasem trafi się coś z naszego świata (bezpieczeństwo, SOC, SIEM, AI, nasze produkty), a czasem najzwyklejsze polskie słowo z zupełnie innej bajki. Nie zakładaj z góry, że dzisiejsze hasło jest „techniczne".</p>
-      <ol>
-        <li><strong>Zgadywanie.</strong> Wpisz całe słowo o długości dzisiejszego hasła i zatwierdź <strong>Enterem</strong> (klawiaturą fizyczną albo ekranową). Liczba pól w rzędzie = długość hasła, a masz <strong>długość + 1</strong> prób (np. hasło 5-literowe → 6 prób, 9-literowe → 10 prób). Plansza dopasowuje się sama.</li>
-        <li><strong>Tylko prawdziwe słowa.</strong> Musisz wpisywać istniejące słowa — same samogłoski czy losowe ciągi liter zostaną odrzucone i <strong>nie zużyją próby</strong>. Chodzi o zgadywanie, nie o matematyczne przeczesywanie liter.</li>
-        <li><strong>Podpowiedzi kolorami.</strong> Po każdej próbie każda litera dostaje kolor: <span class="how-chip green">zielony</span> — trafiona litera na właściwym miejscu, <span class="how-chip yellow">żółty</span> — litera jest w haśle, ale na innej pozycji, <span class="how-chip gray">szary</span> — litery w ogóle nie ma. Te same kolory podświetlają się na klawiaturze, żebyś wiedział, czego już próbowałeś.</li>
-        <li><strong>Punktacja.</strong> Im szybciej zgadniesz, tym więcej punktów (najwięcej za trafienie w 1. próbie, najmniej za ostatnią). Do tego <strong>bonus za długość</strong> hasła — dłuższe słowa są trudniejsze, więc więcej za nie dostajesz — oraz <strong>bonus za serię</strong>: każdy kolejny dzień z wygraną z rzędu (🔥 streak) dokłada punkty. Nieodgadnięte hasło = 0 pkt i seria wraca do zera.</li>
-        <li><strong>Bonus za szybkość ⚡.</strong> Pierwsze <strong>5 osób</strong>, które danego dnia odgadną hasło, dostaje dodatkowe punkty: <strong>1. miejsce +5</strong>, 2. +4, 3. +3, 4. +2, 5. +1. Liczy się <strong>moment trafienia</strong>, a nie liczba prób — więc opłaca się zagrać z rana. W panelu po grze i w rankingu dnia zobaczysz, które to było odgadnięcie.</li>
-        <li><strong>Raz dziennie.</strong> Każde hasło grasz tylko jeden raz. Postęp zapisuje się na bieżąco — możesz odświeżyć stronę albo wrócić później i dokończyć próby. Po zakończeniu gry zobaczysz swój wynik, serię i sumę punktów.</li>
-        <li><strong>Gramy w dni robocze.</strong> Nowe hasło pojawia się w każdy dzień roboczy o <strong>8:00</strong> (czasu polskiego) i możesz je odgadywać <strong>do północy</strong> tego dnia. Między północą a 8:00 wisi jeszcze wczorajsze hasło, ale bez możliwości wpisywania. W weekend robimy przerwę — seria (🔥) przechodzi z piątku na poniedziałek bez zerowania.</li>
-        <li><strong>Sezon = miesiąc.</strong> Rywalizacja trwa w obrębie jednego miesiąca. 1. dnia nowego miesiąca <strong>leaderboard, punkty i seria zerują się</strong> — każdy zaczyna od nowa. Wyniki poprzednich miesięcy zostają dostępne jako historia w tabeli liderów. Lipiec to okres testowy, konkurs rusza od sierpnia.</li>
-        <li><strong>Rywalizacja.</strong> <strong>Ranking dnia</strong> pokazuje, kto dziś trafił najlepiej (liczy się najmniejsza liczba prób). <strong>Tabela liderów</strong> sumuje punkty — z widokiem All-Time, tygodniowym i miesięcznym.</li>
-        <li><strong>Extra Move w wężach 🎲.</strong> Każde odgadnięte hasło dnia daje dodatkowy ruch w <a href="/snakes">Snakes Game</a>. Wygrasz w godzinach rzutów i masz jeszcze miejsce na dodatkowy ruch — dostajesz <strong>+1 ruch na dziś</strong>. Wygrasz później (np. wieczorem) albo masz już dwa dołożone ruchy — Extra Move ląduje w ekwipunku i użyjesz go, kiedy chcesz. Nieodgadnięte hasło nie daje nic.</li>
-        <li><strong>Pochwal się wynikiem.</strong> Po grze kliknij „Udostępnij wynik" — do schowka trafi siatka emoji 🟩🟨⬛ (bez zdradzania liter), gotowa do wklejenia na Slacku czy Teams.</li>
-      </ol>
+      <!-- Teksty z data-content przychodzą z lib/content.js (edytowalne w panelu, PL i EN). -->
+      <div class="how-intro" data-content="wordle.how_intro"></div>
+      <div class="how-rules" data-content="wordle.rules"></div>
     </div>
   </div>
 
@@ -77,16 +70,7 @@
         <div class="sidebar-card-header">
           <h3>JAK TO DZIAŁA?</h3>
         </div>
-        <ol class="info-list">
-          <li><span>Odgadnij <strong>hasło dnia</strong> w jak najmniejszej liczbie prób. Hasła <strong>mogą, ale nie muszą być z IT</strong> (SOC, SIEM, AI…) — równie dobrze może paść zwykłe polskie słowo.</span></li>
-          <li><span>Wpisz całe <strong>prawdziwe słowo</strong> i zatwierdź <strong>Enterem</strong>. Prób masz <strong>długość hasła + 1</strong> (nie-słowa są odrzucane bez straty próby).</span></li>
-          <li><span><strong>Zielony</strong> = litera na miejscu, <strong>żółty</strong> = jest w haśle, ale gdzie indziej, <strong>szary</strong> = nie ma jej wcale.</span></li>
-          <li><span>Punkty rosną, im szybciej zgadniesz. Bonus za <strong>długie hasła</strong> i za <strong>serię dni 🔥</strong>. Przegrana zeruje serię.</span></li>
-          <li><span><strong>⚡ Kto pierwszy, ten lepszy:</strong> pierwsze 5 osób z odgadniętym hasłem dnia dostaje bonus <strong>+5 / +4 / +3 / +2 / +1 pkt</strong>.</span></li>
-          <li><span><strong>🎲 Extra Move w wężach:</strong> odgadnięte hasło daje dodatkowy ruch w <a href="/snakes">Snakes Game</a> — na dziś, a po zamknięciu rzutów do ekwipunku.</span></li>
-          <li><span>Grasz <strong>raz dziennie</strong>, postęp zapisuje się sam. Nowe hasło o <strong>północy</strong>.</span></li>
-          <li><span>Ścigaj się w <strong>rankingu dnia</strong> i <strong>tabeli liderów</strong>. Podziel się wynikiem na Slacku 🟩🟨⬛.</span></li>
-        </ol>
+        <div data-content="wordle.info"></div>
         <button class="btn-ghost how-open-desktop" id="btn-how-desktop" style="margin-top:14px;width:100%">Pełne zasady →</button>
       </div>
 

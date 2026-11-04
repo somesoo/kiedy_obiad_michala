@@ -71,7 +71,9 @@ const SNAKES_SCRIPTS = [
   'sl/art-effects.js', 'sl/art-decor.js', 'sl/art-costumes.js',
   'sl/board.js', 'sl/activity.js', 'sl/boss.js', 'sl/ranking.js', 'snakes.js'
 ];
-const VERSIONED_ASSETS = ['style.css', 'snakes.css', ...SNAKES_SCRIPTS, 'app.js'];
+// Warstwa językowa (public/i18n.js + słowniki) ładuje się na obu stronach graczy.
+const I18N_SCRIPTS = ['i18n.js', 'i18n/en-common.js', 'i18n/en-snakes.js', 'i18n/en-wordle.js'];
+const VERSIONED_ASSETS = ['style.css', 'snakes.css', ...I18N_SCRIPTS, ...SNAKES_SCRIPTS, 'app.js', 'content-admin.js'];
 const ASSET_VERSION = (() => {
   const hash = crypto.createHash('sha1');
   for (const name of VERSIONED_ASSETS) {
@@ -814,7 +816,8 @@ const {
 const {
   slSetBoard, slCurrentBoard, slTileOf, slBoardSize, slBoardPayload, slBoardMap, d6,
   slStepMove, slResolveTileEffect, slApplyKnockback, SL_POINTS_PER_PIP, SL_POINTS_PER_TILE,
-  slLapPoints
+  slLapPoints, SL_KNOCKBACK_COIN_STEAL, SL_KNOCKBACK_POINTS, SL_KNOCKBACK_TILES_BACK_MIN,
+  SL_KNOCKBACK_TILES_BACK_MAX
 } = require('./lib/board')({
   db, slBonusesOff, slLogPoints, slLogActivity, slMetaGet, SL_FIRST_SEASON_NAME
 });
@@ -1414,7 +1417,8 @@ function slBuildState(playerId) {
 const {
   SL_POWERUP_TYPES, slShopPayload, slHasShield, SL_CURSE_PRICE_VARIANT, slCurseAdjustRoll,
   SL_CURSE_COIN_STEAL, SL_CURSE_COIN_STEAL_MIN, SL_CURSE_LABELS, SL_CURSE_DESCRIPTIONS, SL_POWERUP_COSTS,
-  SL_POWERUP_LABELS
+  SL_POWERUP_LABELS, SL_EXTRA_MOVE_TOP_PRICES, SL_EXTRA_MOVE_MID_UNTIL, SL_EXTRA_MOVE_LOW_PRICE,
+  SL_EXTRA_MOVE_MAX_OWNED, SL_CURSE_MAX_PENDING_PER_TARGET, SL_CURSE_PRICE_MARKUP
 } = require('./lib/shop')({
   db, app, authPlayer, transaction, slEnsureState, slInventory, slAddPowerup, slLogActivity,
   slBuildState, slEmit, todayWaw, isWeekendStr, slPlayHours, slOfficeOpenAt,
@@ -1866,6 +1870,52 @@ require('./routes/snakes-admin')({
   slInstallBoard, SNAKES_URL, slPostDiscord, slBoardPayload, todayWaw, slDailyRollsFor,
   slTileOf, crowning, slEnsureState, SL_DAILY_ROLLS, slSetEventsConfig, SL_MAX_EXTRA_ROLLS,
   slSeasonMoveFloor, slInventory, SL_POWERUP_TYPES
+});
+
+// ── TEKSTY I ZASADY Z PANELU ── (lib/content.js) regulamin, opisy, pasek i stopka obu gier,
+// po polsku i po angielsku. Liczby w tekstach to zmienne liczone przy KAŻDYM żądaniu — okno
+// gry zmienia się w panelu bez restartu, a regulamin ma mówić prawdę (dawniej godziny były
+// zaszyte w snakes.html w trzech miejscach i kłamały po każdej zmianie).
+require('./lib/content')({
+  app, db, checkAdmin,
+  snakesVars: lang => {
+    const en = lang === 'en';
+    const h = slPlayHours();
+    const hour = n => `${n}:00`;
+    const [p1, p2, p3] = SL_EXTRA_MOVE_TOP_PRICES;
+    const mid = SL_POWERUP_COSTS.double_move, until = SL_EXTRA_MOVE_MID_UNTIL, low = SL_EXTRA_MOVE_LOW_PRICE;
+    return {
+      godziny: `${hour(h.start)}–${hour(h.end)}`, start: hour(h.start), koniec: hour(h.end),
+      dni: h.weekends ? (en ? 'every day' : 'codziennie') : (en ? 'Mon–Fri' : 'pon–pt'),
+      dni_dlugo: h.weekends
+        ? (en ? 'on any day, weekends included,' : 'w dowolny dzień, także w weekend,')
+        : (en ? 'Monday to Friday' : 'od poniedziałku do piątku'),
+      ruchy: SL_DAILY_ROLLS, extra_ruchy: SL_MAX_EXTRA_ROLLS, max_ruchy: SL_DAILY_ROLLS + SL_MAX_EXTRA_ROLLS,
+      extra_move_zapas: SL_EXTRA_MOVE_MAX_OWNED,
+      ceny_extra_move: en
+        ? `1st place pays ${p1} coins, 2nd — ${p2}, 3rd — ${p3}, places 4–${until} — ${mid}, and ${until + 1}th onwards — ${low}`
+        : `1. miejsce płaci ${p1} coins, 2. — ${p2}, 3. — ${p3}, miejsca 4.–${until}. — ${mid}, a ${until + 1}. i dalej — ${low}`,
+      zbicie_pola: `${SL_KNOCKBACK_TILES_BACK_MIN}–${SL_KNOCKBACK_TILES_BACK_MAX}`,
+      zbicie_pkt: SL_KNOCKBACK_POINTS, zbicie_coins: SL_KNOCKBACK_COIN_STEAL,
+      kieszonkowiec: SL_CURSE_COIN_STEAL, kieszonkowiec_min: SL_CURSE_COIN_STEAL_MIN,
+      klatwy_cel: SL_CURSE_MAX_PENDING_PER_TARGET,
+      drozyzna: Math.round((SL_CURSE_PRICE_MARKUP - 1) * 100)
+    };
+  },
+  wordleVars: lang => {
+    const en = lang === 'en';
+    const n = wordle.SPEED_BONUS_PLACES;
+    const bonuses = Array.from({ length: n }, (_, i) => n - i);
+    const ord = i => (en ? `${i}${['st', 'nd', 'rd'][i - 1] || 'th'}` : `${i}.`);
+    return {
+      start: `${wordle.NEW_WORD_HOUR}:00`,
+      szybkosc_osoby: n,
+      szybkosc_bonusy: bonuses.map(b => `+${b}`).join(' / '),
+      szybkosc_lista: bonuses.map((b, i) => (i === 0
+        ? (en ? `**1st place +${b}**` : `**1. miejsce +${b}**`)
+        : `${ord(i + 1)} +${b}`)).join(', ')
+    };
+  }
 });
 
 // Strona gry i panel admina trybu Snakes są rejestrowane WYŻEJ, przed express.static —

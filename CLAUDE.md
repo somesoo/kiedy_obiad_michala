@@ -26,6 +26,7 @@ modułów. Reszta siedzi w fabrykach:
 | `lib/backups.js` | kopie bazy o 7:30 (3 wstecz), przywracanie przez restart | `backupsLib` (przed `new DatabaseSync`) |
 | `lib/shop.js` | power-upy, klątwy, cennik z rankingu, tarcza + trasy sklepu | `require('./lib/shop')` |
 | `lib/office.js` | bonus za biuro: adres klienta, adresy biura, odbiór, karta w panelu | `const office = require` |
+| `lib/content.js` | teksty z panelu (regulamin, opisy, pasek, stopka) obu gier, PL i EN, zmienne `{…}` | `require('./lib/content')` |
 | `routes/snakes-admin.js` | reszta panelu admina Snakes | `require('./routes/snakes-admin')` |
 | `lib/seasons.js`, `boards/*.js` | format i walidacja planszy, pliki sezonów | `require('./lib/seasons')` |
 
@@ -44,7 +45,9 @@ fabryki to `const` — przed linią podpięcia rzuca `ReferenceError`. Stąd zas
 - **zmiennego stanu nie przekazuje się wartością**: aktywny sezon ma tylko jeden właściciel
   (`lib/board.js`) i czyta się go przez `slCurrentBoard()`, a zmienia przez `slSetBoard()`.
 
-Front Snakes to kilka zwykłych `<script>` (kolejność w `snakes.html`): biblioteki rysunków
+Obie strony graczy ładują w `<head>` warstwę językową: `public/i18n.js` + słowniki
+`public/i18n/en-*.js` (patrz „Teksty z panelu i wersja angielska"). Lista jest w `I18N_SCRIPTS`
+w `server.js`. Front Snakes to kilka zwykłych `<script>` (kolejność w `snakes.html`): biblioteki rysunków
 `public/sl/art-effects.js` (`SL_EFFECTS`), `art-decor.js` (`SL_DECOR`), `art-costumes.js`
 (`SL_COSTUME_ART`), potem `sl/board.js` (rysowanie planszy i pionka), `sl/activity.js`,
 `sl/boss.js`, `sl/ranking.js`, a na końcu `public/snakes.js` (rdzeń: stan, API, logowanie,
@@ -258,8 +261,9 @@ ponad raz dziennie i połowa jego zarobku przechodziła na innych graczy. Dlateg
   `/shop/buy` cenę, którą pokazał (`expected_cost`); gdy ranking zmienił się w międzyczasie,
   serwer wstrzymuje zakup (409 `price_changed`, nic nie pobiera) i dosyła świeży cennik.
   W ekwipunku najwyżej 2 sztuki — inaczej dało się kupić tanio z dołu tabeli na zapas.
-  Drożyzna mnoży cenę per gracz, nie stałą z `SL_POWERUP_COSTS`. Cennik jest też wpisany na
-  sztywno w regulaminie `snakes.html` — zmieniając stałe, popraw i tekst.
+  Drożyzna mnoży cenę per gracz, nie stałą z `SL_POWERUP_COSTS`. Regulamin bierze cennik ze
+  zmiennej `{ceny_extra_move}` (lib/content.js) — liczy się ze stałych `lib/shop.js`, więc
+  zmiana stałych zmienia też tekst. Nowa stała w tekście = nowa zmienna w `snakesVars`.
 
 ## Mechaniki sezonowe — kocioł, drzwi, cukierki
 
@@ -393,6 +397,46 @@ Extra Move w Snakes**, raz na hasło (gra `(player, word)` jest unikalna). Przeg
   promocja garderoby czeka na oba). Nic się tam nie „odbiera" — rzut jest już przyznany.
 - Wpis w dzienniku Snakes: typ `wordle_bonus` (🟩), bez hasła. Bez punktów i coins Snakes,
   więc ścieżek cofania nie dotyczy (jak Rzut od Prezesa).
+
+## Teksty z panelu i wersja angielska (od 4.11.2026)
+
+**Teksty z panelu** (`lib/content.js`, karta „📝 Teksty i zasady" w obu panelach admina,
+`public/content-admin.js`): regulamin, wstęp, opis logowania, pasek pod nagłówkiem i stopka
+Snakes oraz zasady, boczna karta i opis logowania Wordle. Domyślna treść obu wersji
+językowych siedzi w `SECTIONS` w `lib/content.js` — HTML ma tylko puste miejsce
+`data-content="<klucz>"`, wypełniane przez `I18N.loadContent(gra)` (`GET /api/content/:gra`).
+Nadpisanie z panelu leży w tabeli `content_texts` (klucz + język); pusty tekst = domyślny.
+- Format to **bezpieczny mini-markdown**: najpierw wszystko jest escapowane, potem znaczniki
+  z zamkniętej listy (`**`, `*`, `[tekst](/adres)`, listy z wcięciami). Admin nie wstawi HTML-a.
+- **Liczby idą ze zmiennych** `{godziny}`, `{ruchy}`, `{ceny_extra_move}`… liczonych przy
+  każdym żądaniu (`snakesVars`/`wordleVars` w `server.js`). Dzięki temu regulamin nie kłamie
+  po zmianie okna gry w panelu — dawniej godziny były zaszyte w `snakes.html` w trzech miejscach.
+- `[[sezon]]` i `[[boss]]` w regulaminie Snakes to punkty składane przez front ze stawek
+  w payloadzie (`slRenderSeasonRules`, `slRenderBossRules`) — renderer daje im te same id co
+  dawniej (`#rules-season`, `#rules-boss-text`). Po wczytaniu tekstów front dostaje zdarzenie
+  `i18n:content` i przerysowuje stan, żeby te punkty się wypełniły.
+
+**Wersja angielska** (przełącznik 🇬🇧/🇵🇱 w nagłówku obu stron, wybór w `localStorage.ui_lang`,
+przełączenie przeładowuje stronę). Hasła i klawiatura Wordle zostają po polsku
+(`data-i18n-skip`). Panele admina i Discord są tylko po polsku.
+- **Kluczem jest polski tekst**, dokładnie taki, jaki ląduje w DOM-ie. W trybie EN
+  `MutationObserver` z `public/i18n.js` tłumaczy każdy tekst (i `title`/`placeholder`) w chwili
+  wstawienia — niezależnie od tego, czy przyszedł z `snakes.js`, `app.js`, czy z serwera.
+  Dzięki temu **dziennik aktywności zostaje w bazie po polsku** (cofanie dnia dalej parsuje
+  „Wypchnięty") i tłumaczy się dopiero przy wyświetlaniu, wzorcami w `en-snakes.js`.
+- Słowniki: `en-common.js` (wspólne, błędy logowania), `en-snakes.js` (Snakes + teksty
+  z serwera: błędy, dziennik, nazwy kostiumów, klątw, bossów, sezonów), `en-wordle.js`.
+  `{nazwa}` w kluczu = miejsce na liczbę/nick; wstawka sama też jest tłumaczona (nazwa
+  kostiumu, dzień tygodnia). Klucz z tagami tłumaczy cały element „mieszany" (tekst
+  z `<strong>` w środku). Wiodące emoji, liczby i kropki silnik obcina sam — klucz zaczynaj
+  od litery. Dokładne trafienie wygrywa ze wzorcem, a z wzorców ten z najdłuższym stałym tekstem.
+- Długie akapity składane z liczb mają wersję angielską w kodzie: `I18N.pick(pl, en)`
+  (regulamin bossa, mechaniki sezonu, a także `'pl-PL'`/`'en-GB'` przy datach).
+- **Brak tłumaczenia niczego nie psuje** — zostaje polski tekst. W konsoli (tryb EN)
+  `i18nMissing()` wypisuje polskie teksty, które nie znalazły klucza.
+- **Zmieniając tekst widoczny dla gracza** (w JS frontu albo w komunikacie/wpisie serwera),
+  popraw też klucz w słowniku — inaczej w wersji EN wyskoczy po polsku. Szablon wpisu
+  dziennika i wzorzec w `en-snakes.js` muszą się zgadzać słowo w słowo.
 
 ## Dwie waluty — to jest fundament, nie szczegół
 
@@ -623,7 +667,11 @@ rm -rf db   # na koniec
 - Boss bywa domyślnie wyłączony — włącz przez `POST /api/snakes/admin/coop/toggle`.
 - Admin: GET/DELETE biorą `?password=`, POST bierze `{password}` w ciele.
 - Zawsze `node --check` na każdym zmienionym pliku: `server.js`, `lib/*.js`, `routes/*.js`,
-  `public/snakes.js`, `public/sl/*.js`.
+  `public/snakes.js`, `public/sl/*.js`, `public/i18n.js`, `public/i18n/*.js`.
+- Wersja angielska: w przeglądarce `localStorage.ui_lang = 'en'` (albo przycisk 🇬🇧),
+  przeklikaj ekran i wywołaj w konsoli `i18nMissing()` — lista polskich tekstów bez klucza.
+  Słowniki da się też sprawdzić w node: wczytaj `public/i18n.js` i `public/i18n/en-*.js` na
+  atrapie `window`/`document` (z `localStorage.getItem = () => 'en'`) i wołaj `I18N.t(tekst)`.
   Skrypt panelu admina siedzi inline w `snakes-admin.html` — trzeba go wyciąć, żeby
   sprawdzić składnię.
 - **Rzuty działają tylko w oknie gry** (domyślnie pon–pt, 8:00–16:00). Okno zmienia się
@@ -643,7 +691,10 @@ rm -rf db   # na koniec
 
 ## Konwencje
 
-- **Cały tekst dla użytkownika po polsku**, łącznie z komunikatami błędów i Discordem.
+- **Cały tekst dla użytkownika po polsku**, łącznie z komunikatami błędów i Discordem —
+  a każdy nowy tekst widoczny dla gracza dostaje też klucz w `public/i18n/en-*.js`
+  (patrz „Teksty z panelu i wersja angielska"). Regulamin i opisy zmienia się w panelu albo
+  w `SECTIONS` w `lib/content.js`, nie w HTML-u.
 - **Komentarze tłumaczą DLACZEGO**, nie co robi kod — i to jest tu cenne. Przy przenoszeniu
   kodu zabieraj je ze sobą.
 - Front: `esc()` na wszystkim, co wchodzi do HTML; klasa `is-me` oznacza „to ja"
@@ -676,8 +727,9 @@ rm -rf db   # na koniec
 - **~540 z 1397 linii `public/style.css` to martwy kod** po bukmacherce, ładowany na
   wszystkich stronach. Do tego `.lb-row`, `.lb-rank`, `.lb-nick` i `:root` są zdefiniowane
   po dwa razy — pierwszy zestaw jest w całości nadpisywany, więc zmiany w nim nie działają.
-- **Regulamin w `snakes.html` ma zaszyte na sztywno godziny gry (8:00–16:00)** w trzech
-  miejscach. Zmiana `SNAKES_PLAY_*_HOUR` albo okna w panelu admina sprawia, że zasady
-  kłamią (przycisk rzutu i odliczanie biorą godziny z payloadu, więc mówią prawdę). Punkt o bossie jest
-  już wolny od tego problemu — składa go `slRenderBossRules()` ze stawek przysłanych
-  w payloadzie, więc jest dobrym wzorcem na resztę.
+- **Tekst nadpisany w panelu, który wpisze liczbę zamiast zmiennej** (np. „8:00–16:00"
+  zamiast `{godziny}`), znów zacznie kłamać po zmianie ustawień — panel pokazuje listę
+  zmiennych, ale nie pilnuje, czy ich użyto. Wersje PL i EN nadpisuje się osobno: poprawka
+  tylko polskiej zostawia angielską przy starym (domyślnym) tekście.
+- **Okienko promocji garderoby (`#promo-overlay`) i baner bossa** mają treść w HTML/JS,
+  nie w panelu — oba są dziś wyłączone stałymi (`PROMO_ACTIVE`, `BOSS_NOTICE_ACTIVE`).

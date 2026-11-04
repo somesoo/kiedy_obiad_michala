@@ -208,6 +208,12 @@
 
         <!-- PRAWA: ustawienia gry -->
         <div class="adm-col">
+        <!-- Teksty z panelu: public/content-admin.js + lib/content.js -->
+        <div class="adm-card" id="content-card">
+          <h3>📝 TEKSTY I ZASADY (PL / EN)</h3>
+          <div id="content-admin"></div>
+        </div>
+
         <div class="adm-card" id="hours-card">
           <h3>🕗 GODZINY GRY <span class="hours-badge" id="hours-badge">–</span></h3>
           <div class="adm-note">
@@ -215,7 +221,8 @@
             wyłączny: <code>8–16</code> znaczy „od 8:00 do 15:59". <strong>0–24 z weekendami</strong>
             zdejmuje blokadę całkiem — do testów. Limit ruchów dalej liczy się na dzień
             kalendarzowy, więc szersze okno nie daje nikomu dodatkowych rzutów.
-            Regulamin na stronie gry ma godziny wpisane na sztywno i ich nie zmienia.
+            Regulamin i opisy na stronie gry biorą godziny ze zmiennych (karta „Teksty i zasady"),
+            więc zmieniają się razem z tym ustawieniem.
           </div>
           <div class="adm-stat" id="hours-info">–</div>
           <div class="adm-actions hours-row">
@@ -453,6 +460,7 @@
 
   <div class="toast" id="toast" style="display:none"><span id="toast-text"></span></div>
 
+  <script src="/content-admin.js"></script>
   <script>
     let pass = '';
     let cfg = null;
@@ -512,6 +520,13 @@
       await loadOffice();
       await loadHistory();
       await loadBackups();
+      if (!window.__contentAdmin) {
+        window.__contentAdmin = ContentAdmin.mount(document.getElementById('content-admin'), {
+          game: 'snakes', password: () => pass, toast: showToast
+        });
+      } else {
+        window.__contentAdmin.reload();
+      }
     }
 
     // ── KOPIE ZAPASOWE ── (lib/backups.js)

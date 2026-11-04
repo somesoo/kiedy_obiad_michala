@@ -169,6 +169,12 @@
       </div>
     </div>
 
+    <!-- TEKSTY I ZASADY (public/content-admin.js + lib/content.js) -->
+    <div class="admin-card" id="section-content" style="display:none">
+      <h3 style="font-size:13px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">TEKSTY I ZASADY (PL / EN)</h3>
+      <div id="content-admin"></div>
+    </div>
+
     <!-- GRACZE -->
     <div class="admin-card" id="section-players" style="display:none">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -180,6 +186,7 @@
     </div>
   </div>
 
+  <script src="/content-admin.js"></script>
   <script>
     let adminPassword = '';
     let wordsData = [];
@@ -201,6 +208,8 @@
         document.getElementById('section-sets').style.display = 'flex';
         document.getElementById('section-words').style.display = 'flex';
         document.getElementById('section-players').style.display = 'flex';
+        document.getElementById('section-content').style.display = 'flex';
+        ContentAdmin.mount(document.getElementById('content-admin'), { game: 'wordle', password: () => adminPassword });
         loadSets();
       } catch (e) {
         errEl.textContent = e.message;

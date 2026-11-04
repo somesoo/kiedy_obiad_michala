@@ -53,7 +53,7 @@ function renderSpecialBossTeaser(c) {
     const chip = document.getElementById('boss-chip');
     chip.parentNode.insertBefore(el, chip);
   }
-  const when = new Date(sp.attack_at).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', weekday: 'short', day: 'numeric', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const when = new Date(sp.attack_at).toLocaleString(I18N.pick('pl-PL', 'en-GB'), { timeZone: 'Europe/Warsaw', weekday: 'short', day: 'numeric', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   el.dataset.until = sp.attack_at;
   el.title = sp.active
     ? `${sp.name} to teraz boss. Jeśli przeżyje do ${when}, zaatakuje wszystkich.`
@@ -340,6 +340,28 @@ function slRenderBossRules(c) {
   const b = c.boss;
   const pct = n => String(Math.round(n * 100)).replace('.', ',');
   const perCoin = String(b.points_per_coin).replace('.', ',');
+  // Wersja angielska osobno (I18N.pick): słownik do akapitu z dziewięcioma liczbami byłby
+  // kruchym klonem tego szablonu.
+  if (I18N.lang === 'en') {
+    el.innerHTML =
+      `The boss fights <strong>all the time</strong> — one continuous phase: you chip away at its HP. You can see it on ` +
+      `<strong>two bars</strong> under the board: how much damage you have dealt and how much time is left ` +
+      `until the deadline. Damage comes from two sources: <strong>every dice roll of yours hurts it for free</strong> ` +
+      `(pips × ${b.dice_damage_mult}, no extra action needed — normal play already fights), ` +
+      `and on top of that you can <strong>contribute coins: 1 coin = 1 damage</strong>, any amount from your coins. ` +
+      `<strong>Rewards go ONLY to those who contributed</strong> — rolls are free, so they risk nothing. ` +
+      `<strong>Beat it in time</strong> and every contributor gets: <strong>${String(b.points_per_coin)} pts</strong> for every ` +
+      `coin contributed, <strong>${pct(b.refund_rate)}% of the contribution back</strong> in coins, ` +
+      `<strong>+${b.fighter_points} pts</strong> flat for taking part (from <strong>${b.fighter_min_coins} coins</strong> up) ` +
+      `and the contribution podium: <strong>+${b.podium_points.join(' / +')} pts</strong> for the top three. ` +
+      `On top of that there are <strong>milestones</strong>: when the boss's HP drops below 75%, 50% and 25%, everyone who has ` +
+      `contributed at least one coin by then gets <strong>+${b.milestone_points} pts</strong> on the spot — so the earlier you chip in, ` +
+      `the more milestones you catch. <strong>Miss the deadline</strong> and contributed coins are lost, ` +
+      `and the boss takes <strong>${c.timeout_penalty} coins</strong> from EVERY player, with no discount for contributing ` +
+      `and regardless of how many coins you have (you can go below zero; you get out of debt by playing normally, but the shop and contributions are blocked until then). ` +
+      `Either way the next boss appears straight away — stronger after a win, weaker after a loss.`;
+    return;
+  }
   el.innerHTML =
     `Boss walczy <strong>cały czas</strong> — jedna, ciągła faza: bijecie mu HP. Widać to na ` +
     `<strong>dwóch paskach</strong> pod planszą: ile obrażeń już zadaliście i ile czasu zostało ` +

@@ -228,7 +228,7 @@ function renderShopHut(board) {
       <rect class="wr-foot" x="15" y="73" width="7" height="4" rx="1"/>
       <rect class="wr-foot" x="58" y="73" width="7" height="4" rx="1"/>
       <rect class="wr-sign" x="10" y="62" width="60" height="11" rx="3"/>
-      <text class="wr-sign-text" x="40" y="70.2" text-anchor="middle">GARDEROBA</text>
+      <text class="wr-sign-text" x="40" y="70.2" text-anchor="middle">${I18N.pick('GARDEROBA', 'WARDROBE')}</text>
     </svg>
   </button>`;
 }
@@ -380,7 +380,7 @@ function renderConnectors(board) {
 }
 
 function slForkTitle(t) {
-  return `Rozwidlona drabina: rzuć jeszcze raz — ${t.faces.join(' lub ')} → pole ${t.target}, inaczej → pole ${t.alt_target}`;
+  return `Rozwidlona drabina: rzuć jeszcze raz — ${t.faces.join(I18N.pick(' lub ', ' or '))} → pole ${t.target}, inaczej → pole ${t.alt_target}`;
 }
 
 // Węzeł rozwidlonej drabiny w % sceny (albo null, gdy plik sezonu go nie podaje).
@@ -552,7 +552,7 @@ function renderCell(idx, sp, players, posStyle, board, ev = null, twin = null) {
     if (free) flag = '<span class="sl-flag sl-flag-start">START</span>'; else idxLabel = '0 · START';
   } else if (idx === size - 1) {
     cls += ' sl-cell-finish';
-    if (free) flag = '<span class="sl-flag sl-flag-finish">🏁 META</span>'; else idxLabel = `${idx} 🏁`;
+    if (free) flag = `<span class="sl-flag sl-flag-finish">🏁 ${I18N.pick('META', 'FINISH')}</span>`; else idxLabel = `${idx} 🏁`;
   }
   let mark = '';
   if (ev) {

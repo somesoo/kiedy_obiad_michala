@@ -40,6 +40,8 @@ async function api(method, path, body) {
 
 // ── INIT ──
 async function init() {
+  // Zasady i opisy z panelu admina (lib/content.js), w języku strony.
+  I18N.loadContent('wordle');
   loadAuth();
   if (state.token) {
     try {
@@ -238,7 +240,8 @@ function renderBoard(g) {
     const shakeCls = (isCurrentRow && state.shake) ? ' shake' : '';
     rows.push(`<div class="tile-row${shakeCls}">${tiles}</div>`);
   }
-  return `<div class="board" style="--cols:${g.word_length}">${rows.join('')}</div>`;
+  // data-i18n-skip: litery i hasła zostają po polsku także w angielskiej wersji strony.
+  return `<div class="board" data-i18n-skip style="--cols:${g.word_length}">${rows.join('')}</div>`;
 }
 
 const KEYBOARD_ROWS = [
@@ -258,14 +261,15 @@ function renderKeyboard(g) {
     }).join('');
     return `<div class="key-row">${keys}</div>`;
   }).join('');
-  return `<div class="keyboard" id="keyboard">${rowsHtml}</div>`;
+  return `<div class="keyboard" id="keyboard" data-i18n-skip>${rowsHtml}</div>`;
 }
 
 // „2 listopada o 08:00" — data powrotu Wordle po przerwie.
 function fmtResume(iso) {
   const d = new Date(iso);
   const opt = { timeZone: 'Europe/Warsaw' };
-  return `${d.toLocaleDateString('pl-PL', { ...opt, day: 'numeric', month: 'long' })} o ${d.toLocaleTimeString('pl-PL', { ...opt, hour: '2-digit', minute: '2-digit' })}`;
+  const loc = I18N.pick('pl-PL', 'en-GB');
+  return `${d.toLocaleDateString(loc, { ...opt, day: 'numeric', month: 'long' })} ${I18N.pick('o', 'at')} ${d.toLocaleTimeString(loc, { ...opt, hour: '2-digit', minute: '2-digit' })}`;
 }
 
 // Nagroda w wężach za odgadnięte hasło (serwer: slWordleReward). 'roll' = ruch na dziś,

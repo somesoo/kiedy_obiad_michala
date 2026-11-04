@@ -24,6 +24,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="snakes.css" />
+  <!-- Warstwa językowa PL/EN — w <head>, przed treścią: tłumaczy tekst w chwili, gdy trafia
+       na stronę (patrz nagłówek i18n.js). Nowy słownik dopisz też do VERSIONED_ASSETS. -->
+  <script src="i18n.js"></script>
+  <script src="i18n/en-common.js"></script>
+  <script src="i18n/en-snakes.js"></script>
 </head>
 <body class="snakes-page">
 
@@ -38,7 +43,7 @@
         <button class="btn-ghost btn-how-mobile" id="btn-how" title="Jak to działa?">Zasady</button>
         <a class="btn-ghost" id="btn-wordle" href="/wordle" title="Office Wordle — odgadnij hasło dnia, a dostaniesz Extra Move">🟩 Wordle</a>
         <button class="btn-ghost" id="btn-logout" style="display:none">wyloguj</button>
-        <span class="user-nick" id="user-nick-display"></span>
+        <span class="user-nick" id="user-nick-display" data-i18n-skip></span>
         <span class="user-balance" id="user-balance-display"></span>
       </div>
     </div>
@@ -46,14 +51,15 @@
       <div class="countdown-bar" id="countdown-bar"></div>
       <div class="countdown-text" id="countdown-text">ładowanie...</div>
     </div>
-    <div class="season-ribbon" id="season-ribbon">🐍 Jedna wspólna plansza · trzy ruchy dziennie w godzinach 8:00–16:00 (pon–pt) · graj bez końca i zbieraj punkty</div>
+    <!-- Teksty z data-content przychodzą z lib/content.js (edytowalne w panelu, PL i EN). -->
+    <div class="season-ribbon" id="season-ribbon" data-content="snakes.ribbon"></div>
   </header>
 
   <!-- REJESTRACJA / LOGOWANIE -->
   <div class="overlay" id="login-overlay">
     <div class="login-card">
       <h2>Dołącz do gry</h2>
-      <p class="login-sub">Podaj swój nick — to samo konto co w Office Wordle. Codziennie (od poniedziałku do piątku) trzy rzuty kostką na wspólnej planszy węży i drabin, do wykorzystania w godzinach 8:00–16:00, kiedy chcesz.</p>
+      <p class="login-sub" data-content="snakes.login"></p>
       <input type="text" id="login-nick" placeholder="np. Kacper_dev" maxlength="20" autocomplete="off" />
       <button class="btn-primary" id="btn-login">Wchodzę w to</button>
       <div class="login-error" id="login-error"></div>
@@ -110,38 +116,8 @@
     <div class="how-inner">
       <button class="how-close" id="how-close">✕</button>
       <h3>Jak grać w Office Snakes &amp; Ladders?</h3>
-      <p class="how-intro">Jedna <strong>wspólna plansza</strong> dla całego biura, zapętlona w nieskończoność — nie ma „mety", po ostatnim polu wracasz na start i lecisz kolejne okrążenie. Widzisz pionki wszystkich i ścigacie się o punkty. Gra toczy się w <strong>sezonach</strong> i co sezon plansza zmienia kształt.</p>
-      <ol>
-        <li><strong>Zdjęcie profilowe — wymagane.</strong> Zanim zagrasz, wgraj zdjęcie (swoje albo dowolne inne) — to Twój pionek na planszy, okrągły awatar widoczny dla wszystkich. Najedź na czyjeś zdjęcie myszką, żeby zobaczyć nick. Bez zdjęcia nie da się rzucić kostką.</li>
-        <li><strong>Trzy ruchy dziennie, w godzinach 8:00–16:00.</strong> To gra biurowa: rzucać można wyłącznie od poniedziałku do piątku <strong>między 8:00 a 16:00</strong> (czasu Warszawy). W tym oknie masz <strong>trzy rzuty kostką</strong> i <strong>sam decydujesz, kiedy je zużyjesz</strong> — trzy pod rząd rano albo po jednym przez cały dzień, bez żadnego odstępu między nimi. Po 16:00 przycisk jest zamknięty, nawet jeśli zostały Ci ruchy — niewykorzystane rzuty przepadają wraz z końcem dnia. W sobotę i niedzielę gra stoi — jak w Wordle, w weekend nie rzucamy.</li>
-        <li><strong>Drabiny i węże.</strong> Wejdziesz na drabinę 🪜 — wskakujesz wyżej. Wdepniesz na węża 🐍 — zjeżdżasz w dół. Pola bonusowe ⭐ dają dodatkowe punkty bez ruchu. Na planszy <strong>każdy wąż i każda drabina ma narysowaną linię</strong> od pola startowego do docelowego: drabiny to proste, zielone linie w górę, węże to czerwone, wijące się krzywe w dół — od razu widać, dokąd prowadzą.</li>
-        <li><strong>Wypychanie.</strong> Wylądujesz na polu zajętym przez kogoś innego — wypychasz go <strong>o losowe 3–6 pól do tyłu</strong> — dostajesz za to <strong>+10 pkt</strong> do rankingu i zabierasz mu do 10 coins (tyle, ile ma — jeśli ma mniej, zabierasz resztę; punkty dostajesz zawsze). Wypchnięty gracz normalnie odpala węże, drabiny i bonusy na polu, na które wylądował — czasem to i tak dobry deal. Cofnięcie zatrzymuje się na polu 0 bieżącego okrążenia — wypchnięcie nie zabiera okrążenia. <strong>Pole 0 (start)</strong> jest bezpieczne — stojącego tam gracza nie da się wypchnąć.</li>
-        <li><strong>Punkty i coins.</strong> Za <strong>wartość rzutu</strong>, <strong>pola bonusowe</strong> oraz <strong>postęp po planszy</strong> (przebyty dystans i ukończone okrążenia — każde okrążenie to gruby bonus) dostajesz jednocześnie jedno i drugie: <strong>tyle samo punktów co coins</strong>. <strong>Punkty</strong> przez cały sezon się tylko kumulują i budują <strong>leaderboard</strong> — nie da się ich wydać. <strong>Coins</strong> to portfel: płacisz nimi w sklepie i wpłacasz je bossowi, więc twoje coins spadają, a punkty nigdy.</li>
-        <li><strong>Power-upy (za coins, nie losowo).</strong> W sklepie kupujesz:
-          <ul>
-            <li>❄️ <strong>Freeze</strong> — zatrzymuje wybranego gracza w jego następnej turze. <strong>Cel nie widzi, że jest zamrożony</strong> — przekona się dopiero, gdy kliknie „Rzuć". W dzienniku pojawia się tylko tyle, że ktoś użył Freeze; na kogo padło, wie wyłącznie rzucający.</li>
-            <li>💀 <strong>Curse</strong> — klątwa z 8 losowych wariantów, wybrana już w momencie rzucenia. <strong>Cel nie dostaje żadnego sygnału, że jest przeklęty</strong> — przekona się dopiero, gdy klątwa odpali: na jego następnym ruchu, a Drożyzna przy pierwszej próbie zakupu (ten zakup zostaje wstrzymany, więc nikt nie płaci ceny, której wcześniej nie widział). W dzienniku widać tylko tyle, że ktoś rzucił klątwę; na kogo — wie wyłącznie rzucający, a <strong>jaka — nie wie nikt, także rzucający</strong>, dopóki nie odpali. Klątwy się nie sumują w jednym ruchu: każdy ruch zdejmuje jedną, po kolei. Na jednym graczu mogą czekać <strong>najwyżej 2 klątwy naraz</strong>, w tym najwyżej jedna od Ciebie. Kolejną rzucisz, gdy któraś odpali:
-              <ul>
-                <li>↩️ <strong>Odwrotny Ruch</strong> — kość cofa zamiast pchać do przodu.</li>
-                <li>➗ <strong>Rozdwojona Kostka</strong> — rzut liczy się w połowie, w dół.</li>
-                <li>💰 <strong>Kieszonkowiec</strong> — traci 50 coins na rzecz rzucającego klątwę. Kto ma mniej, oddaje cały portfel, ale zawsze co najmniej 25 coins — nawet jeśli zejdzie przez to na minus.</li>
-                <li>📉 <strong>Chciwość</strong> — połowa punktów z tego ruchu przepada.</li>
-                <li>🔀 <strong>Odwrócone Zasady</strong> — na ten ruch drabiny i węże działa się od drugiego końca: staniesz na szczycie drabiny — zjeżdżasz nią na dół, staniesz na ogonie węża — wjeżdżasz do jego głowy. Wejście od zwykłej strony nic wtedy nie robi.</li>
-                <li>🌀 <strong>Chaos</strong> — po wylądowaniu losowy doskok o 1–3 pola.</li>
-                <li>🚫 <strong>Bez Bonusu</strong> — pole bonusowe na ten ruch nie działa.</li>
-                <li>🧾 <strong>Drożyzna</strong> — jedyna klątwa, która czeka na zakup, nie na ruch. Do czasu odpalenia <strong>nic nie widać</strong>: ceny w sklepie są normalne. Gdy spróbujesz coś kupić, <strong>zakup zostaje wstrzymany</strong> (nic nie tracisz), klątwa się ujawnia, a ceny idą w górę o 50%. Dopiero kolejne kliknięcie kupuje — już po cenie, którą masz przed oczami. <strong>Po zakupie ceny wracają do normy.</strong></li>
-              </ul>
-            </li>
-            <li>⏩ <strong>Extra Move</strong> — dokłada jeden ruch ponad dzienny limit, do wykonania od razu po użyciu (ważny tylko tego dnia). Dziennie można dołożyć <strong>najwyżej dwa</strong> takie ruchy, więc absolutny sufit to <strong>5 rzutów na dzień</strong>. W ekwipunku zmieszczą się najwyżej <strong>dwie</strong> sztuki. <strong>Cena zależy od Twojego bieżącego miejsca w rankingu</strong>, żeby łatwiej było gonić czołówkę: 1. miejsce płaci 60 coins, 2. — 55, 3. — 50, miejsca 4.–7. — 40, a 8. i dalej — 30. Awansujesz — następna sztuka od razu kosztuje więcej.</li>
-            <li>🛡️ <strong>Shield</strong> — obrona jednorazowa: blokuje najbliższy Freeze lub Curse wymierzony w Ciebie, po czym znika. Widzisz tylko swoją tarczę — czy inni gracze ją mają, dowiesz się dopiero, gdy Twój atak się od niej odbije.</li>
-          </ul>
-          Przy Freeze i Curse wybierasz <strong>cel</strong> — innego gracza. Jeśli cel ma tarczę, atak przepada.</li>
-        <li><strong>🟩 Wordle = darmowy Extra Move.</strong> Od poniedziałku do piątku na <a href="/wordle">/wordle</a> czeka hasło dnia. <strong>Odgadniesz je — dostajesz Extra Move</strong>, raz dziennie. Jeśli wygrasz w godzinach gry i masz jeszcze miejsce na dodatkowy ruch, to <strong>+1 ruch na dziś</strong>; jeśli nie (po zamknięciu rzutów albo przy dwóch dołożonych już ruchach), sztuka ląduje w ekwipunku na później — tak samo jak Rzut od Prezesa.</li>
-        <li id="rules-season" hidden><strong>🎃 Mechaniki sezonu.</strong> <span class="rules-season-text"></span></li>
-        <li id="rules-boss"><strong>👹 Walka z bossem.</strong> <span id="rules-boss-text">Boss walczy cały czas — bijecie mu HP.</span></li>
-        <li><strong>Rywalizacja w sezonach.</strong> Nie ma zwycięskiego pola — liczy się, kto do końca sezonu uzbiera najwięcej punktów (przy remisie wygrywa więcej okrążeń, a potem dalsze pole).</li>
-        <li><strong>🏆 Koniec sezonu i medale.</strong> Gdy sezon się kończy, najlepsza trójka staje na <strong>podium</strong> i dostaje medal 🥇🥈🥉, który zostaje przy nicku na zawsze. Nowy sezon <strong>wszyscy zaczynają od zera</strong>: zerują się punkty, coins, okrążenia i ekwipunek, więc każdy ma równe szanse. Kostiumy zostają i można je dalej nosić, ale kostiumów z poprzedniego sezonu nie da się już kupić. Wyniki starych sezonów zobaczysz w rankingu, w zakładkach nad listą.</li>
-      </ol>
+      <div class="how-intro" data-content="snakes.how_intro"></div>
+      <div class="how-rules" data-content="snakes.rules"></div>
     </div>
   </div>
 
@@ -254,7 +230,7 @@
 
   <!-- FOOTER -->
   <footer class="site-footer">
-    <span class="bank-info">🐍 Nieskończona pętla · trzy ruchy dziennie, 8:00–16:00 (pon–pt) · punkty się kumulują</span>
+    <span class="bank-info" data-content="snakes.footer"></span>
     <span class="footer-copy text-muted">made with ❤️ i poranną kawą</span>
   </footer>
 

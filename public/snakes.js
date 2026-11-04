@@ -99,6 +99,9 @@ async function api(method, path, body) {
 
 // ── INIT ──
 async function init() {
+  // Regulamin, opisy, pasek i stopka z panelu admina (lib/content.js), w języku strony.
+  // Nie czekamy na nie — logowanie i plansza nie zależą od regulaminu.
+  I18N.loadContent('snakes');
   loadAuth();
   if (state.token) {
     try {
@@ -445,6 +448,10 @@ function renderAll() {
   slMaybeCrown(g);
 }
 
+// Regulamin przyszedł z serwera już po narysowaniu stanu — punkty o bossie i o mechanikach
+// sezonu (składane ze stawek w payloadzie) trzeba wtedy wpisać jeszcze raz.
+document.addEventListener('i18n:content', () => { if (state.game) renderAll(); });
+
 // ── BONUS ZA PRZYJŚCIE DO BIURA ── (lib/office.js)
 // Okienko wyskakuje raz; „Później" chowa je do końca dnia (na tym urządzeniu), ale przycisk
 // przy „Rzuć kostką" zostaje, dopóki bonus czeka. localStorage tylko na wygodę — bez niego
@@ -613,28 +620,42 @@ function slRenderSeasonRules(g) {
   if (!li) return;
   const ev = g.season_events;
   const parts = [];
+  // Wersja angielska obok polskiej (I18N.pick) — akapity składane z liczb, jak regulamin bossa.
+  const L = I18N.pick;
   if (ev && ev.cauldron) {
     const c = ev.cauldron;
-    parts.push(`<strong>🧪 Kocioł.</strong> Staniesz na polu z kotłem (${c.drop.join(', ')}) — wrzucasz do niego `
+    parts.push(L(`<strong>🧪 Kocioł.</strong> Staniesz na polu z kotłem (${c.drop.join(', ')}) — wrzucasz do niego `
       + `<strong>${c.amount} coins</strong> (także gdy przez to zejdziesz na minus). Staniesz na chochli 🥄 (pole ${c.ladle}) — `
-      + `<strong>zgarniasz wszystko, co jest w kotle</strong> (teraz ${c.pot} coins). Kocioł tylko przelewa coins między graczami, punktów nie daje.`);
+      + `<strong>zgarniasz wszystko, co jest w kotle</strong> (teraz ${c.pot} coins). Kocioł tylko przelewa coins między graczami, punktów nie daje.`,
+    `<strong>🧪 Cauldron.</strong> Land on a cauldron tile (${c.drop.join(', ')}) and you throw `
+      + `<strong>${c.amount} coins</strong> into it (even if that takes you below zero). Land on the ladle 🥄 (tile ${c.ladle}) and `
+      + `<strong>you scoop up everything in the cauldron</strong> (now ${c.pot} coins). The cauldron only moves coins between players, it gives no points.`));
   }
   if (ev && ev.trick_or_treat) {
     const t = ev.trick_or_treat, st = t.stakes;
-    parts.push(`<strong>🚪 Cukierek albo psikus.</strong> Drzwi na polach ${t.tiles.join(', ')}: pół na pół `
+    parts.push(L(`<strong>🚪 Cukierek albo psikus.</strong> Drzwi na polach ${t.tiles.join(', ')}: pół na pół `
       + `cukierek (<strong>+${st.treat} pkt</strong> albo 🍬 i <strong>+${st.candy} pkt</strong>) lub psikus `
-      + `(zgniłe jajo <strong>−${st.trick} coins</strong> albo duch cofa Cię o 3 pola).`);
+      + `(zgniłe jajo <strong>−${st.trick} coins</strong> albo duch cofa Cię o 3 pola).`,
+    `<strong>🚪 Trick or treat.</strong> Doors on tiles ${t.tiles.join(', ')}: fifty-fifty `
+      + `a treat (<strong>+${st.treat} pts</strong> or 🍬 and <strong>+${st.candy} pts</strong>) or a trick `
+      + `(a rotten egg <strong>−${st.trick} coins</strong> or a ghost scares you 3 tiles back).`));
   }
   if (ev && ev.candy) {
     const c = ev.candy;
-    parts.push(`<strong>🍬 Polowanie na cukierki.</strong> Codziennie na planszy pojawiają się nowe cukierki. `
+    parts.push(L(`<strong>🍬 Polowanie na cukierki.</strong> Codziennie na planszy pojawiają się nowe cukierki. `
       + `Staniesz na polu z cukierkiem — zbierasz go i dostajesz <strong>+${c.points} pkt</strong>. `
       + (c.prize
         ? `Kto na koniec sezonu ma <strong>najwięcej cukierków</strong>, dostaje nagrodę: <strong>${esc(c.prize.icon)} ${esc(c.prize.name)}</strong> (przy remisie — każdy z czołówki).`
-        : 'Liczbę zebranych cukierków widać w rankingu.'));
+        : 'Liczbę zebranych cukierków widać w rankingu.'),
+    `<strong>🍬 Candy hunt.</strong> New candies appear on the board every day. `
+      + `Land on a tile with a candy and you collect it and get <strong>+${c.points} pts</strong>. `
+      + (c.prize
+        ? `Whoever has <strong>the most candies</strong> at the end of the season gets a prize: <strong>${esc(c.prize.icon)} ${esc(I18N.t(c.prize.name))}</strong> (in a tie — everyone at the top).`
+        : 'The number of candies collected is shown in the ranking.')));
   }
   // Zdarzenie odpala tylko rzucający — wypchnięty przez kogoś nic nie płaci i nic nie zbiera.
-  if (parts.length) parts.push('Wszystko to działa tylko na polu, na którym <strong>sam wylądujesz</strong> po rzucie — wypchnięcie przez kogoś niczego nie odpala.');
+  if (parts.length) parts.push(L('Wszystko to działa tylko na polu, na którym <strong>sam wylądujesz</strong> po rzucie — wypchnięcie przez kogoś niczego nie odpala.',
+    'All of this works only on the tile <strong>you land on yourself</strong> after a roll — being knocked back by someone triggers nothing.'));
   li.hidden = !parts.length;
   li.querySelector('.rules-season-text').innerHTML = parts.join(' ');
 }
@@ -1036,7 +1057,7 @@ function slForkDiceModal(fork, board) {
     el.innerHTML = `
       <div class="fork-card" role="dialog" aria-modal="true" aria-labelledby="fork-title">
         <div class="fork-title" id="fork-title">🪜 Rozwidlona drabina!</div>
-        <div class="fork-rule">Wyrzuć <strong>${faces.join(' albo ')}</strong> → idziesz górą na pole <strong>${win}</strong><br>
+        <div class="fork-rule">Wyrzuć <strong>${faces.join(I18N.pick(' albo ', ' or '))}</strong> → idziesz górą na pole <strong>${win}</strong><br>
           cokolwiek innego → krótsza odnoga na pole <strong>${lose}</strong></div>
         <div class="fork-die" aria-live="polite">${slDieFace(1 + Math.floor(Math.random() * 6))}</div>
         <div class="fork-verdict"></div>

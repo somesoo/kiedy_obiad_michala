@@ -1,0 +1,115 @@
+// Słownik PL → EN dla Wordle (wordle.html, app.js, lib/wordle.js). Zasady same w sobie
+// przychodzą z lib/content.js. Hasła i litery zostają po polsku (data-i18n-skip na siatce
+// i klawiaturze). Format kluczy: patrz nagłówek en-common.js.
+I18N.add({
+  // ── wordle.html ──
+  'Office Wordle': 'Office Wordle',
+  'biurowa gra w hasło dnia': 'the office word-of-the-day game',
+  'Węże': 'Snakes',
+  'Snakes Game — odgadnięte hasło daje tam dodatkowy rzut': 'Snakes Game — a guessed word gives you an extra roll there',
+  'Jak grać w Office Wordle?': 'How to play Office Wordle?',
+  'JAK TO DZIAŁA?': 'HOW DOES IT WORK?',
+  'Pełne zasady →': 'Full rules →',
+  'SEZON': 'SEASON',
+  'Pozostało haseł:': 'Words left:',
+  'HASŁO DNIA': 'WORD OF THE DAY',
+  'zagraj w biurowe wordle': 'play the office wordle',
+  'RANKING DNIA': 'DAILY RANKING',
+  'LEADERBOARD': 'LEADERBOARD',
+  'Wybierz sezon (miesiąc)': 'Choose a season (month)',
+  '<span class="mono gold" id="footer-season">{s}</span> · leaderboard zeruje się 1. dnia miesiąca': '<span class="mono gold" id="footer-season">{s}</span> · the leaderboard resets on the 1st of the month',
+  '🗓️ Sezon = miesiąc · <span class="mono gold" id="footer-season">{s}</span> · leaderboard zeruje się 1. dnia miesiąca': '🗓️ Season = month · <span class="mono gold" id="footer-season">{s}</span> · the leaderboard resets on the 1st of the month',
+  'Sezon = miesiąc ·': 'Season = month ·',
+  '· leaderboard zeruje się 1. dnia miesiąca': '· the leaderboard resets on the 1st of the month',
+
+  // ── sezon (miesiące) ──
+  'styczeń {y}': 'January {y}', 'luty {y}': 'February {y}', 'marzec {y}': 'March {y}',
+  'kwiecień {y}': 'April {y}', 'maj {y}': 'May {y}', 'czerwiec {y}': 'June {y}',
+  'lipiec {y}': 'July {y}', 'sierpień {y}': 'August {y}', 'wrzesień {y}': 'September {y}',
+  'październik {y}': 'October {y}', 'listopad {y}': 'November {y}', 'grudzień {y}': 'December {y}',
+  'Wszystkie sezony': 'All seasons',
+  '{s} (bieżący)': '{s} (current)',
+  '🗓️ Sezon: <strong>{s}</strong> — leaderboard i seria zerują się co miesiąc': '🗓️ Season: <strong>{s}</strong> — the leaderboard and streak reset every month',
+  '🗓️ Sezon: <strong>{s}</strong> — leaderboard i seria zerują się co miesiąc · <strong>okres testowy</strong> (konkurs od sierpnia)': '🗓️ Season: <strong>{s}</strong> — the leaderboard and streak reset every month · <strong>test period</strong> (the contest starts in August)',
+  'Rozegrano {a} z {b} haseł w puli': '{a} of {b} words in the pool played',
+
+  // ── plansza i stany ──
+  'Wordle wraca!': 'Wordle is back!',
+  'Gra zakończona!': 'Game over!',
+  'Nowe hasła od <strong>{d}</strong>. Za każde odgadnięte hasło dostaniesz <strong>Extra Move w wężach</strong>. Ranking poprzedniego sezonu:': 'New words from <strong>{d}</strong>. Every word you guess gives you an <strong>Extra Move in Snakes</strong>. Last season\'s ranking:',
+  'Dziękujemy za udział — wpisywanie haseł jest już zamknięte na stałe. Oto ranking końcowy:': 'Thanks for taking part — guessing is now closed for good. Here is the final ranking:',
+  'Zagraj w węże': 'Play Snakes',
+  'RANKING KOŃCOWY': 'FINAL RANKING',
+  'Weekend — odpoczywamy!': 'Weekend — time to rest!',
+  'Hasła gramy od poniedziałku do piątku. Nowe pojawi się w poniedziałek o {h}:00. Twoja seria 🔥 czeka nienaruszona.': 'We play words Monday to Friday. A new one appears on Monday at {h}:00. Your streak 🔥 is waiting untouched.',
+  'Pula haseł wyczerpana': 'Word pool used up',
+  'Wszystkie hasła zostały rozegrane. Poproś admina o dorzucenie kolejnych!': 'All the words have been played. Ask the admin to add more!',
+  'Dziś nie ma hasła. Zajrzyj innego dnia!': 'No word today. Come back another day!',
+  'Hasło ma <strong>{n}</strong> liter · <strong>{m}</strong> prób': 'The word has <strong>{n}</strong> letters · <strong>{m}</strong> tries',
+
+  // ── po grze ──
+  // „🎲 +1 " i „ →" na brzegach obcina silnik, stąd klucz bez nich.
+  'ruch w wężach na dziś': 'move in Snakes today',
+  'Extra Move w wężach — czeka w ekwipunku': 'Extra Move in Snakes — waiting in your inventory',
+  'Odgadnięte!': 'Guessed it!',
+  'Koniec prób. Hasło to: <span class="mono answer">{w}</span>': 'Out of tries. The word was: <span class="mono answer">{w}</span>',
+  '+{p} pkt dzisiaj': '+{p} pts today',
+  '0 pkt — seria wyzerowana': '0 pts — streak reset',
+  '⚡ {n}. osoba dzisiaj — bonus +{p} pkt': '⚡ person no. {n} today — bonus +{p} pts',
+  '{n}. osoba dzisiaj — bonus +{p} pkt': 'person no. {n} today — bonus +{p} pts',
+  '{n}. odgadnięcie dzisiaj — bonus za szybkość już rozdany': 'guess no. {n} today — the speed bonus is already gone',
+  'rekord serii': 'best streak',
+  'pkt w sezonie': 'pts this season',
+  'Udostępnij wynik': 'Share result',
+  'Nowe hasło za': 'New word in',
+  '⏳ Czas na to hasło minął o północy. Było to: <span class="mono answer">{w}</span>': '⏳ Time for this word ran out at midnight. It was: <span class="mono answer">{w}</span>',
+  'Nowe hasło pojawi się o {h}:00': 'A new word appears at {h}:00',
+
+  // ── toasty ──
+  'Brawo! +{p} pkt': 'Well done! +{p} pts',
+  'Brawo! +{p} pkt · {s}': 'Well done! +{p} pts · {s}',
+  'Brawo! +{p} pkt (⚡ {n}. dzisiaj, w tym +{b} za szybkość)': 'Well done! +{p} pts (⚡ no. {n} today, incl. +{b} for speed)',
+  'Brawo! +{p} pkt (⚡ {n}. dzisiaj, w tym +{b} za szybkość) · {s}': 'Well done! +{p} pts (⚡ no. {n} today, incl. +{b} for speed) · {s}',
+  'Koniec prób — hasło to {w}': 'Out of tries — the word was {w}',
+  'Wynik skopiowany — wklej na Slacku/Teams!': 'Result copied — paste it on Slack/Teams!',
+  'Nie udało się skopiować 😕': 'Could not copy 😕',
+
+  // ── rankingi ──
+  'Nikt jeszcze nie zagrał w tym sezonie': 'Nobody has played this season yet',
+  '{n} graczy': '{n} players',
+  'Seria (tylko bieżący sezon)': 'Streak (current season only)',
+  'Średnia liczba prób (wygrane)': 'Average number of tries (wins)',
+  'Rozegrane dni': 'Days played',
+  '⌀ {a} prób': '⌀ {a} tries',
+  'Przerwa — nowe hasła od {d}. 🏆': 'Break — new words from {d}. 🏆',
+  'Gra zakończona — zobacz ranking końcowy na środku. 🏆': 'Game over — see the final ranking in the middle. 🏆',
+  'Weekend — ranking wróci w poniedziałek. 💤': 'Weekend — the ranking returns on Monday. 💤',
+  'Dziś nie ma hasła.': 'No word today.',
+  '{n} ukończonych': '{n} finished',
+  '{n} ukończonych · {p} w trakcie': '{n} finished · {p} in progress',
+  '{n} ukończonych · ⚡ {s} {w} z bonusem': '{n} finished · ⚡ {s} bonus spots left',
+  '{n} ukończonych · {p} w trakcie · ⚡ {s} {w} z bonusem': '{n} finished · {p} in progress · ⚡ {s} bonus spots left',
+  'Nikt jeszcze nie skończył dziś gry — bądź pierwszy i zgarnij ⚡ +5 pkt!': 'Nobody has finished today\'s game yet — be the first and grab ⚡ +5 pts!',
+  '{n}. odgadnięcie dzisiaj': 'guess no. {n} today',
+  '{n} próba': '{n} try', '{n} próby': '{n} tries', '{n} prób': '{n} tries',
+  '✗ nie trafił': '✗ missed',
+
+  // ── odliczanie ──
+  'Przerwa — Wordle wraca {d}': 'Break — Wordle returns {d}',
+  'Gra zakończona — dziękujemy za udział!': 'Game over — thanks for taking part!',
+  'Weekend — nowe hasło za {t}': 'Weekend — new word in {t}',
+  'Wpisywanie zamknięte — nowe hasło za {t}': 'Guessing closed — new word in {t}',
+  'Wpisujesz do północy ({t}) · nowe hasło o {h}:00': 'Guessing until midnight ({t}) · new word at {h}:00',
+  'Nowe hasło za {t}': 'New word in {t}',
+
+  // ── błędy serwera (lib/wordle.js) ──
+  'Wordle ma przerwę — wracamy {d}.': 'Wordle is on a break — we are back {d}.',
+  'Gra zakończona — dziękujemy za udział! Zobacz ranking końcowy.': 'Game over — thanks for taking part! See the final ranking.',
+  'Weekend — hasła gramy od poniedziałku do piątku': 'Weekend — we play words Monday to Friday',
+  'Wpisywanie zamknięte o północy — nowe hasło o {h}:00': 'Guessing closed at midnight — new word at {h}:00',
+  'Brak hasła w puli na dziś': 'No word in the pool for today',
+  'Hasło ma {n} liter': 'The word has {n} letters',
+  'Dozwolone są tylko litery A–Z': 'Only the letters A–Z are allowed',
+  'Nie ma takiego słowa — wpisz istniejące słowo': 'No such word — type an existing (Polish) word',
+  'Dzisiejsza gra jest już zakończona': 'Today\'s game is already over'
+});

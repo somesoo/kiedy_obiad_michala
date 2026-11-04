@@ -1410,3 +1410,20 @@ a.btn-ghost { text-decoration: none; display: inline-flex; align-items: center; 
   white-space: nowrap;
 }
 .lb-row.is-me .daily-nick { color: var(--accent); }
+
+/* ── PRZEŁĄCZNIK JĘZYKA (public/i18n.js) ── na telefonie sama flaga */
+@media (max-width: 700px) {
+  .lang-toggle .lang-toggle-label { display: none; }
+}
+/* Nagłówek Wordle na wąskim telefonie — te same zasady co w snakes.css („NAGŁÓWEK NA
+   WĄSKIM TELEFONIE"), których Wordle nie dostawało, bo nie ładuje snakes.css. Po dojściu
+   przełącznika języka nagłówek rozpychał stronę w bok. */
+@media (max-width: 480px) {
+  body:not(.snakes-page) .header-inner { padding: 6px 12px; gap: 6px 8px; flex-wrap: wrap; height: auto; min-height: var(--header-h); }
+  body:not(.snakes-page) .logo-text { font-size: 17px; letter-spacing: 1px; line-height: 1.1; display: block; width: min-content; }
+  body:not(.snakes-page) .logo-sub { display: none; }
+  body:not(.snakes-page) .header-user { gap: 6px; min-width: 0; margin-left: auto; }
+  body:not(.snakes-page) .header-user .btn-ghost { padding: 4px 7px; font-size: 11px; white-space: nowrap; }
+  body:not(.snakes-page) .user-nick { display: none; }
+  body:not(.snakes-page) .user-balance { padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+}
