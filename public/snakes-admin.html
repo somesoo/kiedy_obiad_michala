@@ -208,12 +208,6 @@
 
         <!-- PRAWA: ustawienia gry -->
         <div class="adm-col">
-        <!-- Teksty z panelu: public/content-admin.js + lib/content.js -->
-        <div class="adm-card" id="content-card">
-          <h3>📝 TEKSTY I ZASADY (PL / EN)</h3>
-          <div id="content-admin"></div>
-        </div>
-
         <div class="adm-card" id="hours-card">
           <h3>🕗 GODZINY GRY <span class="hours-badge" id="hours-badge">–</span></h3>
           <div class="adm-note">
@@ -454,6 +448,13 @@
           </div>
         </div>
         </div>
+      </div>
+
+      <!-- Teksty z panelu (public/content-admin.js + lib/content.js) — na pełną szerokość,
+           bo każda sekcja ma dwa pola obok siebie: polskie i angielskie. -->
+      <div class="adm-card" id="content-card" style="margin-top:16px">
+        <h3>📝 TEKSTY I ZASADY (PL / EN)</h3>
+        <div id="content-admin"></div>
       </div>
     </div>
   </div>

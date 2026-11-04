@@ -406,6 +406,10 @@ Snakes oraz zasady, boczna karta i opis logowania Wordle. Domyślna treść obu 
 językowych siedzi w `SECTIONS` w `lib/content.js` — HTML ma tylko puste miejsce
 `data-content="<klucz>"`, wypełniane przez `I18N.loadContent(gra)` (`GET /api/content/:gra`).
 Nadpisanie z panelu leży w tabeli `content_texts` (klucz + język); pusty tekst = domyślny.
+W panelu każda sekcja ma **dwa pola obok siebie (PL i EN)** i jeden przycisk „Zapisz PL i EN";
+podgląd i „Przywróć domyślny" działają osobno na każdy język. Zapis przerysowuje tylko swoją
+sekcję, więc niezapisane zmiany w innych sekcjach zostają. W panelu Snakes karta stoi na pełną
+szerokość pod kolumnami — w wąskiej kolumnie dwa pola się nie mieszczą.
 - Format to **bezpieczny mini-markdown**: najpierw wszystko jest escapowane, potem znaczniki
   z zamkniętej listy (`**`, `*`, `[tekst](/adres)`, listy z wcięciami). Admin nie wstawi HTML-a.
 - **Liczby idą ze zmiennych** `{godziny}`, `{ruchy}`, `{ceny_extra_move}`… liczonych przy

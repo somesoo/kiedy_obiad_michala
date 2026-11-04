@@ -44,8 +44,10 @@ window.ContentAdmin = (function () {
       .content-admin .adm-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       .content-admin .content-section { border: 1px solid var(--muted); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
       .content-admin .content-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-      .content-admin .content-lang { padding: 4px 10px; font-size: 12px; }
-      .content-admin .content-lang.is-active { border-color: var(--accent); color: var(--accent); }
+      .content-admin .content-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+      @media (max-width: 900px) { .content-admin .content-cols { grid-template-columns: minmax(0, 1fr); } }
+      .content-admin .content-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+      .content-admin .content-col-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
       .content-admin .content-text { width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5;
         background: var(--surface-alt, #111); color: var(--text-primary); border: 1px solid var(--muted); border-radius: 8px; padding: 8px; resize: vertical; }
       .content-admin .content-preview { position: static; max-width: none; max-height: 420px; overflow: auto; padding: 12px;
@@ -63,7 +65,6 @@ window.ContentAdmin = (function () {
     el.classList.add('content-admin');
     const game = opts.game;
     const pass = () => opts.password();
-    const state = { lang: {} };
     // Panel Wordle nie ma toastów — wtedy komunikat ląduje w linijce nad sekcjami.
     const toast = opts.toast || (msg => {
       const f = el.querySelector('.content-flash');
@@ -94,33 +95,43 @@ window.ContentAdmin = (function () {
       data.sections.forEach(s => { el.querySelector(`[data-key="${s.key}"]`).__section = s; });
     }
 
-    function sectionHtml(s) {
-      const lang = state.lang[s.key] || 'pl';
+    // Każda sekcja to DWA pola obok siebie — polskie i angielskie — żeby przy poprawce jednej
+    // wersji od razu było widać drugą (osobne nadpisania łatwo rozjechać, patrz CLAUDE.md).
+    function langColHtml(s, lang) {
       const ov = s.overrides[lang];
       const text = ov ? ov.body : s.defaults[lang];
-      const badge = (l) => (s.overrides[l] ? ' ✏️' : '');
+      return `
+          <div class="content-col" data-lang="${lang}">
+            <div class="content-col-head">
+              <strong>${lang === 'pl' ? '🇵🇱 Polski' : '🇬🇧 English'}</strong>
+              <span class="adm-stat">${ov ? `własny tekst · ${esc(ov.updated_at)} UTC` : 'tekst domyślny'}</span>
+            </div>
+            <textarea class="content-text" data-lang="${lang}" rows="${Math.min(18, Math.max(3, text.split('\n').length + 1))}">${esc(text)}</textarea>
+            <div class="adm-actions">
+              <button class="btn-ghost content-preview-btn" data-lang="${lang}">👁 Podgląd</button>
+              <button class="btn-ghost content-reset" data-lang="${lang}"${ov ? '' : ' disabled'}>↩️ Przywróć domyślny</button>
+            </div>
+            <div class="content-preview how-inner" data-lang="${lang}" hidden></div>
+          </div>`;
+    }
+
+    function sectionHtml(s) {
       return `
         <div class="content-section" data-key="${esc(s.key)}">
           <div class="content-head">
             <strong>${esc(s.label)}</strong>
-            <span class="content-langs">
-              <button class="btn-ghost content-lang${lang === 'pl' ? ' is-active' : ''}" data-lang="pl">PL${badge('pl')}</button>
-              <button class="btn-ghost content-lang${lang === 'en' ? ' is-active' : ''}" data-lang="en">EN${badge('en')}</button>
-            </span>
+            <button class="btn-primary content-save">💾 Zapisz PL i EN</button>
           </div>
-          <div class="adm-stat">${ov ? `Własny tekst (zmieniony ${esc(ov.updated_at)} UTC)` : 'Tekst domyślny'}</div>
-          <textarea class="content-text" rows="${Math.min(18, Math.max(3, text.split('\n').length + 1))}">${esc(text)}</textarea>
-          <div class="adm-actions">
-            <button class="btn-primary content-save">Zapisz ${lang.toUpperCase()}</button>
-            <button class="btn-ghost content-preview-btn">👁 Podgląd</button>
-            <button class="btn-ghost content-reset"${ov ? '' : ' disabled'}>↩️ Przywróć domyślny</button>
-          </div>
-          <div class="content-preview how-inner" hidden></div>
+          <div class="content-cols">${langColHtml(s, 'pl')}${langColHtml(s, 'en')}</div>
         </div>`;
     }
 
-    function rerender(box) {
-      const s = box.__section;
+    // Po zapisie przerysowujemy TYLKO tę sekcję — pełne przeładowanie kasowałoby
+    // niezapisane zmiany w innych sekcjach.
+    async function refreshSection(box) {
+      const data = await call('GET', `/api/content-admin?game=${game}&password=${encodeURIComponent(pass())}`);
+      const s = data.sections.find(x => x.key === box.__section.key);
+      if (!s) return;
       const tmp = document.createElement('div');
       tmp.innerHTML = sectionHtml(s);
       const fresh = tmp.firstElementChild;
@@ -132,27 +143,33 @@ window.ContentAdmin = (function () {
       const box = e.target.closest('.content-section');
       if (!box) return;
       const s = box.__section;
-      const lang = state.lang[s.key] || 'pl';
-      const textarea = box.querySelector('.content-text');
-      if (e.target.closest('.content-lang')) {
-        state.lang[s.key] = e.target.closest('.content-lang').dataset.lang;
-        rerender(box);
-        return;
-      }
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const lang = btn.dataset.lang;
+      const area = l => box.querySelector(`.content-text[data-lang="${l}"]`);
       try {
-        if (e.target.closest('.content-preview-btn')) {
-          const res = await call('POST', '/api/content-admin/preview', { password: pass(), key: s.key, lang, body: textarea.value });
-          const pv = box.querySelector('.content-preview');
+        if (btn.classList.contains('content-preview-btn')) {
+          const res = await call('POST', '/api/content-admin/preview', { password: pass(), key: s.key, lang, body: area(lang).value });
+          const pv = box.querySelector(`.content-preview[data-lang="${lang}"]`);
           pv.innerHTML = res.html;
           pv.hidden = false;
           return;
         }
-        if (e.target.closest('.content-save') || e.target.closest('.content-reset')) {
-          const reset = !!e.target.closest('.content-reset');
-          if (reset && !confirm(`Przywrócić domyślny tekst (${lang.toUpperCase()}) sekcji „${s.label}"?`)) return;
-          await call('POST', '/api/content-admin', { password: pass(), key: s.key, lang, body: reset ? '' : textarea.value });
-          await load();
-          toast(reset ? `↩️ ${s.label}: przywrócono tekst domyślny` : `💾 ${s.label}: zapisano — gracze zobaczą zmianę po odświeżeniu strony`);
+        if (btn.classList.contains('content-reset')) {
+          if (!confirm(`Przywrócić domyślny tekst (${lang.toUpperCase()}) sekcji „${s.label}"?`)) return;
+          await call('POST', '/api/content-admin', { password: pass(), key: s.key, lang, body: '' });
+          await refreshSection(box);
+          toast(`↩️ ${s.label} (${lang.toUpperCase()}): przywrócono tekst domyślny`);
+          return;
+        }
+        if (btn.classList.contains('content-save')) {
+          // Obie wersje naraz. Tekst równy domyślnemu serwer zapisuje jako „brak nadpisania",
+          // więc zapis nieruszonej wersji niczego nie psuje.
+          for (const l of ['pl', 'en']) {
+            await call('POST', '/api/content-admin', { password: pass(), key: s.key, lang: l, body: area(l).value });
+          }
+          await refreshSection(box);
+          toast(`💾 ${s.label}: zapisano PL i EN — gracze zobaczą zmianę po odświeżeniu strony`);
         }
       } catch (err) {
         toast('❌ ' + err.message);
